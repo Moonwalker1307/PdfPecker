@@ -646,6 +646,41 @@ public class SvgEffectTests
         Assert.True(straight.Split(' ').Length >= 4, straight);
     }
 
+    [Theory]
+    // A vowel sign drawn before its consonant, a vowel split around it, Thai sara am decomposed, and Arabic letters
+    // that share a dotless body: their clusters copy as their text through /ActualText, on a path as on a line.
+    [InlineData("NotoSansDevanagari-Subset.woff2", "ltr", "क्षत्रिय हिन्दी किताब")]
+    [InlineData("NotoSansTamil-Subset.woff2", "ltr", "கொ கோ கௌ தமிழ்நாடு")]
+    [InlineData("NotoSansThai-Subset.woff2", "ltr", "น้ำ ภาษาไทย")]
+    [InlineData("NotoSansArabic-Subset.ttf", "rtl", "بيت ثابت نبيل تين")]
+    public void Complex_script_text_on_a_path_extracts_as_written(string font, string dir, string text)
+    {
+        var data = Convert.ToBase64String(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", font)));
+        string Html(string path) => "<title>T</title><style>@font-face{font-family:F;src:url(data:font/x;base64," + data + ")}</style>"
+            + "<body style='margin:0'><svg width='600' height='200' font-family='F' font-size='20' direction='" + dir + "'>"
+            + "<path id='p' d='" + path + "' fill='none'/><text><textPath href='#p' startOffset='" + (dir == "rtl" ? "98%" : "0")
+            + "'>" + text + "</textPath></text></svg></body>";
+        var straight = HtmlToPdf.Convert(Html("M10 100 L590 100"), NoMargins);
+        Assert.Equal(text, PdfText.Extract(straight).Trim());
+        // On a curve, a cluster in a span is placed as one: its glyphs share a rotation, so that readers join them into
+        // the span's text.
+        var curved = AllContent(HtmlToPdf.Convert(Html("M10 150 Q300 60 590 150"), NoMargins));
+        var spans = Regex.Matches(curved, @"/ActualText <FEFF[0-9A-F]+>>> BDC (.*?)EMC", RegexOptions.Singleline);
+        Assert.NotEmpty(spans);
+        foreach (Match span in spans)
+        {
+            var turns = Regex.Matches(span.Groups[1].Value, @"(\S+ \S+ \S+ \S+) \S+ \S+ Tm").Select(m => m.Groups[1].Value).Distinct().ToList();
+            Assert.Single(turns);
+        }
+        var tagged = HtmlToPdf.Convert(Html("M10 100 L590 100"),
+            new PdfOptions { Conformance = PdfConformance.PdfA2u, Accessibility = PdfAccessibility.PdfUA1, Compress = false });
+        AssertStructurallyValid(tagged);
+        Assert.Equal(text, PdfText.Extract(tagged).Trim());
+        var content = AllContent(tagged);
+        Assert.Contains("/ActualText", content);
+        Assert.Equal(Regex.Count(content, @"\bBDC\b") + Regex.Count(content, @"\bBMC\b"), Regex.Count(content, @"\bEMC\b"));
+    }
+
     // ---- table cells and borders ----
 
     [Fact]

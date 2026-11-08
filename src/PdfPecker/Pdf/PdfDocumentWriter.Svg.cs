@@ -136,7 +136,9 @@ internal sealed partial class PdfDocumentWriter
     /// Writes an SVG text run along a path, each glyph with its own text matrix, so the text stays selectable. As the SVG
     /// specification says, a glyph's midpoint is put on the path at its distance along it and the glyph turned with the
     /// path's direction there; a glyph whose midpoint is off either end of the path is not drawn. Shaped text keeps its
-    /// shaping: the run is shaped as a whole and its glyphs placed one by one.
+    /// shaping: the run is shaped as a whole and its glyphs placed one by one. A cluster of a complex script whose glyphs
+    /// would copy as other characters is shown in a span with its text as /ActualText, as straight text is (see
+    /// <see cref="FindClusterSpans"/>), and placed on the path as one.
     /// </summary>
     private void WriteSvgPathText(ByteBuffer b, SvgShape shape, int mode)
     {
@@ -149,10 +151,14 @@ internal sealed partial class PdfDocumentWriter
         if (font is EmbeddedFont ef)
         {
             var subset = Subset(ef.Program, SvgTextColor(shape));
+            string text = shape.Text!;
             int page = 0;
-            bool positioned = ef.Shape(shape.Text!, 0, shape.Text!.Length, _glyphs, shape.Rtl);
+            bool positioned = ef.Shape(text, 0, text.Length, _glyphs, shape.Rtl);
             if (shape.Rtl) _glyphs.Reverse();
-            bool skipNotdef = NoNotdef;
+            // Each glyph's place along the path comes from the glyphs before it in drawing order, so it is found before a
+            // cluster span can show the cluster's glyphs in another order.
+            var places = _pathPlaces;
+            places.Clear();
             int prev = -1;
             for (int i = 0; i < _glyphs.Count; i++)
             {
@@ -170,22 +176,69 @@ internal sealed partial class PdfDocumentWriter
                     prev = g.Gid;
                     advance = ef.Program.Advance1000(g.Gid);
                 }
-                int cid = subset.Cid(_glyphs, i, shape.Text!);
-                if (!(cid == 0 && skipNotdef) && PlaceOnPath(b, shape, pen, advance * size / 1000f, dx * size / 1000f, dy * size / 1000f))
-                {
-                    if (subset.Color != null && cid >> 8 != page)
-                    {
-                        // A colour font's glyphs are spread over Type 3 fonts of 256 glyphs each.
-                        page = cid >> 8;
-                        WriteFontName(b, subset, page);
-                        b.Sp().Num(size).Ascii(" Tf ");
-                    }
-                    b.Byte((byte)'<');
-                    if (subset.Color != null) b.Byte(HexDigits[(cid >> 4) & 15]).Byte(HexDigits[cid & 15]);
-                    else Hex4(b, cid);
-                    b.Ascii("> Tj\n");
-                }
+                places.Add((pen, advance * size / 1000f, dx * size / 1000f, dy * size / 1000f));
                 pen += advance * size / 1000f + shape.CharSpacing;
+            }
+            if (positioned) FindClusterSpans(subset, text, shape.Rtl);
+            else
+            {
+                _cids.Clear();
+                _drawnAt.Clear();
+                _spanEnds.Clear();
+                for (int i = 0; i < _glyphs.Count; i++)
+                {
+                    _cids.Add(subset.Cid(_glyphs, i, text));
+                    _drawnAt.Add(i);
+                    _spanEnds.Add(-1);
+                }
+            }
+            bool skipNotdef = NoNotdef;
+            for (int i = 0, n = _glyphs.Count; i < n;)
+            {
+                if (_spanEnds[i] < 0)
+                {
+                    var (at, advance, dx, dy) = places[_drawnAt[i]];
+                    int cid = _cids[i];
+                    if (!(cid == 0 && skipNotdef) && PlaceOnPath(b, shape, at + advance / 2, dx - advance / 2, dy))
+                    {
+                        var actual = subset.ActualText(_glyphs, i, text, cid);
+                        if (actual != null) WriteActualTextSpan(b, actual);
+                        WritePathGlyph(b, subset, cid, size, ref page);
+                        if (actual != null) b.Ascii("EMC\n");
+                    }
+                    i++;
+                    continue;
+                }
+                // A cluster in a span is placed as one, its midpoint on the path and its glyphs along the tangent there,
+                // as Chrome places each cluster: readers join the glyphs of a span into its text only when they share a
+                // baseline, and its glyphs can be shown in another order than they are drawn. Right to left, the span of
+                // its extra glyphs follows (see ShowExtraGlyphsApart).
+                int last = _spanEnds[i];
+                if (last + 1 < n && _spanTexts[last + 1] is { Length: 0 }) last = _spanEnds[last + 1];
+                int lo = int.MaxValue, hi = -1;
+                for (int k = i; k <= last; k++)
+                {
+                    lo = Math.Min(lo, _drawnAt[k]);
+                    hi = Math.Max(hi, _drawnAt[k]);
+                }
+                float from = places[lo].Pen, mid = from + (places[hi].Pen + places[hi].Advance - from) / 2;
+                if (path.At(mid, out _, out _, out _, out _))
+                {
+                    int spanEnd = -1;
+                    for (int k = i; k <= last; k++)
+                    {
+                        if (_spanEnds[k] >= 0)
+                        {
+                            spanEnd = _spanEnds[k];
+                            WriteActualTextSpan(b, _spanTexts[k]!);
+                        }
+                        var (at, _, dx, dy) = places[_drawnAt[k]];
+                        PlaceOnPath(b, shape, mid, at - mid + dx, dy);
+                        WritePathGlyph(b, subset, _cids[k], size, ref page);
+                        if (k == spanEnd) b.Ascii("EMC\n");
+                    }
+                }
+                i = last + 1;
             }
         }
         else
@@ -195,7 +248,7 @@ internal sealed partial class PdfDocumentWriter
             {
                 if (i > 0) pen += font.KernUnits(text[i - 1], text[i]) * size / 1000f;
                 float advance = font.MeasureUnits(text, i, 1) * size / 1000f;
-                if (PlaceOnPath(b, shape, pen, advance, 0, 0))
+                if (PlaceOnPath(b, shape, pen + advance / 2, -advance / 2, 0))
                 {
                     WriteTextBytes(b, text.Substring(i, 1));
                     b.Ascii(" Tj\n");
@@ -206,20 +259,40 @@ internal sealed partial class PdfDocumentWriter
         b.Ascii("ET\n");
     }
 
+    // The distance along the path, advance and offsets of each glyph of the text run being written along a path.
+    private readonly List<(float Pen, float Advance, float Dx, float Dy)> _pathPlaces = new();
+
     /// <summary>
-    /// Sets the text matrix of a glyph on an SVG text path: its midpoint at <paramref name="pen"/> plus half its advance
-    /// along the path, turned with the path, shifted off it by the shape's shift and moved by the glyph's own offset.
-    /// False, writing nothing, when the midpoint is off the path.
+    /// Sets the text matrix of a glyph on an SVG text path: the path's point at <paramref name="mid"/> along it, turned
+    /// with the path, then moved <paramref name="along"/> its direction there (to where the glyph starts, from the
+    /// midpoint of the glyph or of its cluster), off it by the shape's shift and up by <paramref name="dy"/>. False,
+    /// writing nothing, when the midpoint is off the path.
     /// </summary>
-    private static bool PlaceOnPath(ByteBuffer b, SvgShape shape, float pen, float advance, float dx, float dy)
+    private static bool PlaceOnPath(ByteBuffer b, SvgShape shape, float mid, float along, float dy)
     {
-        if (!shape.TextPath!.At(pen + advance / 2, out float x, out float y, out float cos, out float sin)) return false;
+        if (!shape.TextPath!.At(mid, out float x, out float y, out float cos, out float sin)) return false;
         // Along the tangent (cos, sin) and the normal (-sin, cos), which points down from text drawn left to right.
-        float along = dx - advance / 2, off = shape.PathShift - dy;
+        float off = shape.PathShift - dy;
         float ox = x + along * cos - off * sin, oy = y + along * sin + off * cos;
         var m = new Matrix(cos, sin, sin, -cos, ox, oy).Then(shape.TextMatrix);
         b.Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F).Ascii(" Tm ");
         return true;
+    }
+
+    /// <summary>Shows one glyph of an SVG text run along a path, after its text matrix.</summary>
+    private void WritePathGlyph(ByteBuffer b, GlyphSubset subset, int cid, float size, ref int page)
+    {
+        if (subset.Color != null && cid >> 8 != page)
+        {
+            // A colour font's glyphs are spread over Type 3 fonts of 256 glyphs each.
+            page = cid >> 8;
+            WriteFontName(b, subset, page);
+            b.Sp().Num(size).Ascii(" Tf ");
+        }
+        b.Byte((byte)'<');
+        if (subset.Color != null) b.Byte(HexDigits[(cid >> 4) & 15]).Byte(HexDigits[cid & 15]);
+        else Hex4(b, cid);
+        b.Ascii("> Tj\n");
     }
 
     /// <summary>The text runs drawn by filtered content, written as invisible text over the filter's image.</summary>

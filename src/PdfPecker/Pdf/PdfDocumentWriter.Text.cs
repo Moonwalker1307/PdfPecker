@@ -430,16 +430,16 @@ internal sealed partial class PdfDocumentWriter
         b.Ascii(">] TJ\n");
     }
 
-    // For each glyph being shown: its CID, and when a cluster span starts at it, the index of the cluster's last glyph
-    // (else -1) and the cluster's text.
-    private readonly List<int> _cids = new(), _spanEnds = new();
+    // For each glyph being shown: its CID, its index in drawing order before a cluster's glyphs were shown in another
+    // order, and when a cluster span starts at it, the index of the cluster's last glyph (else -1) and the cluster's text.
+    private readonly List<int> _cids = new(), _drawnAt = new(), _spanEnds = new();
     private readonly List<string?> _spanTexts = new();
     private readonly System.Text.StringBuilder _mappedText = new();
 
     /// <summary>
     /// Finds the clusters of complex-script text in <see cref="_glyphs"/> (in drawing order) that a reader would extract
-    /// as other characters than the cluster's own, and fills <see cref="_cids"/>, <see cref="_spanEnds"/> and
-    /// <see cref="_spanTexts"/>.
+    /// as other characters than the cluster's own, and fills <see cref="_cids"/>, <see cref="_drawnAt"/>,
+    /// <see cref="_spanEnds"/> and <see cref="_spanTexts"/>.
     /// </summary>
     /// <remarks>
     /// A ToUnicode CMap maps each glyph to fixed characters, and a reader puts them together in the order the glyphs are
@@ -456,12 +456,14 @@ internal sealed partial class PdfDocumentWriter
     {
         int n = _glyphs.Count, lo = int.MaxValue, hi = 0;
         _cids.Clear();
+        _drawnAt.Clear();
         _spanEnds.Clear();
         _spanTexts.Clear();
         for (int k = 0; k < n; k++)
         {
             var g = _glyphs[k];
             _cids.Add(subset.Cid(_glyphs, k, text));
+            _drawnAt.Add(k);
             _spanEnds.Add(-1);
             _spanTexts.Add(null);
             lo = Math.Min(lo, g.Start);
@@ -515,7 +517,7 @@ internal sealed partial class PdfDocumentWriter
         static int CharsEnd(ShapedGlyph g) => g.Start + Math.Max(g.Length, 1);
     }
 
-    private readonly List<(ShapedGlyph Glyph, int Cid)> _clusterGlyphs = new();
+    private readonly List<(ShapedGlyph Glyph, int Cid, int DrawnAt)> _clusterGlyphs = new();
 
     /// <summary>
     /// Shows the glyphs of a right-to-left cluster that stand for characters before its extra glyphs, each where it was
@@ -538,18 +540,19 @@ internal sealed partial class PdfDocumentWriter
         for (int k = first; k <= last; k++)
         {
             var g = _glyphs[k];
-            cluster.Add((new ShapedGlyph(g.Gid, g.Start, g.Length, 0, pen + g.Dx, g.Dy), _cids[k]));
+            cluster.Add((new ShapedGlyph(g.Gid, g.Start, g.Length, 0, pen + g.Dx, g.Dy), _cids[k], _drawnAt[k]));
             pen += g.Advance;
             if (g.Length > 0) bases++;
         }
         if (bases == 0 || bases == cluster.Count) return;
         int at = first;
         for (int pass = 0; pass < 2; pass++)
-            foreach (var (g, cid) in cluster)
+            foreach (var (g, cid, drawnAt) in cluster)
             {
                 if (g.Length == 0 != (pass == 1)) continue;
                 // The last glyph shown moves on by the whole cluster.
                 _glyphs[at] = at == last ? new ShapedGlyph(g.Gid, g.Start, g.Length, pen, g.Dx, g.Dy) : g;
+                _drawnAt[at] = drawnAt;
                 _cids[at++] = cid;
             }
         _spanEnds[first] = first + bases - 1;
@@ -601,7 +604,14 @@ internal sealed partial class PdfDocumentWriter
     /// </summary>
     private static void BeginActualText(ByteBuffer b, string actual, bool array)
     {
-        b.Ascii(array ? ">] TJ /Span <</ActualText " : "> Tj /Span <</ActualText ");
+        WriteActualTextSpan(b.Ascii(array ? ">] TJ " : "> Tj "), actual);
+        b.Ascii(array ? "[<" : "<");
+    }
+
+    /// <summary>Starts a marked-content span whose /ActualText is <paramref name="actual"/>, ended by EMC.</summary>
+    private static void WriteActualTextSpan(ByteBuffer b, string actual)
+    {
+        b.Ascii("/Span <</ActualText ");
         // Content streams are encrypted as a whole, so the string is written as it is, in UTF-16 with its mark.
         var raw = new byte[2 + actual.Length * 2];
         raw[0] = 0xFE;
@@ -612,7 +622,7 @@ internal sealed partial class PdfDocumentWriter
             raw[3 + i * 2] = (byte)actual[i];
         }
         PdfSyntax.Hex(b, raw, upper: true);
-        b.Ascii(">> BDC ").Ascii(array ? "[<" : "<");
+        b.Ascii(">> BDC ");
     }
 
     /// <summary>Ends the span <see cref="BeginActualText"/> started and goes on showing text.</summary>
