@@ -565,7 +565,7 @@ internal sealed partial class PageRenderer
         {
             // Text and images are extracted whether or not a clip hides them; fills are taken as backgrounds only where
             // the clip lets them paint, and a picture in flowing HTML shows as much as the clip leaves.
-            if (_text?.Fills != null || _images is { Clips: true }) _gs.ClipBoxes = AddClipBoxes(_gs.ClipBoxes);
+            if (_text?.Fills != null || _images is { Clips: true }) _gs.ClipBoxes = AddClipBoxes(_gs.ClipBoxes, evenOdd);
             return;
         }
         var ctm = _gs.Ctm;
