@@ -311,7 +311,13 @@ internal sealed partial class StyleResolver
             "inherit" => inherited,
             _ => Overflow.Visible,
         };
-        if (prop != "overflow-y") s.OverflowX = Parse(parts[0], parent.OverflowX);
+        if (prop != "overflow-y")
+        {
+            s.OverflowX = Parse(parts[0], parent.OverflowX);
+            // Set only when it changes, so that most styles keep sharing the initial group of rare properties.
+            bool auto = parts[0] is "auto" or "overlay" || parts[0] == "inherit" && parent.OverflowAuto;
+            if (auto != s.OverflowAuto) s.OverflowAuto = auto;
+        }
         if (prop != "overflow-x") s.OverflowY = Parse(parts[prop == "overflow" && parts.Length > 1 ? 1 : 0], parent.OverflowY);
     }
 

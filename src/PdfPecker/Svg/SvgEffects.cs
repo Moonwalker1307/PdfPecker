@@ -337,7 +337,7 @@ internal sealed partial class SvgImage
         }
         finally { _markersDrawing.Remove(marker); }
         if (Shapes.Count == start) return;
-        if (marker.GetAttribute("overflow")?.Trim().ToLowerInvariant() is "visible" or "auto") return;
+        if (!ClipsToViewport(marker, marker.Style)) return;
         // The marker's viewport clips its content.
         var (verbs, points) = RectOutline(0, 0, mw, mh, viewport);
         Shapes.Insert(start, new SvgShape { Kind = SvgShape.KindClip, Verbs = verbs, Points = points });
