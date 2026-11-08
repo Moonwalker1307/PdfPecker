@@ -138,14 +138,16 @@ internal sealed class SeedContext
 
     /// <summary>
     /// Uncompressed content with the structures whose sizes the reader takes from the file: DeviceN colorants, function
-    /// outputs and ranges, ToUnicode ranges in both forms and an inline image's dimensions, for mutations to grow.
+    /// outputs and ranges, ToUnicode ranges in both forms (full-length ones too, which the map's total budget bounds when
+    /// mutations repeat them) and an inline image's dimensions, for mutations to grow.
     /// </summary>
     private static byte[] ColourSpacePdf()
     {
         const string content = "/CS0 cs 0.2 0.4 scn 10 10 50 50 re f /CS1 cs 0.5 scn 60 10 50 50 re f q 0 70 200 60 re W n /Sh0 sh Q\n"
             + "q 40 0 0 20 120 10 cm BI /W 4 /H 2 /BPC 8 /CS /G ID 0123ABCD EI Q BT /F1 12 Tf 10 150 Td <0102> Tj ET";
         const string cmap = "begincmap 1 begincodespacerange <00> <FF> endcodespacerange\n"
-            + "1 beginbfrange <01> <01> <0048> endbfrange 1 beginbfrange <02> <03> [<0069> <006A>] endbfrange endcmap";
+            + "1 beginbfrange <01> <01> <0048> endbfrange 1 beginbfrange <02> <03> [<0069> <006A>] endbfrange\n"
+            + "1 beginbfchar <04> <0021> endbfchar 2 beginbfrange <00010000> <0001FFFF> <0041> <00020000> <0002FFFF> <00410042> endbfrange endcmap";
         const string tint = "{ 0 0 4 2 roll }";
         var objects = new[]
         {
