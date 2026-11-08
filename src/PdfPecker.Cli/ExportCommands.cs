@@ -38,6 +38,14 @@ internal static class ExportCommands
 
         if (format == PdfImageFormat.Tiff)
         {
+            if (a.Get("pages") is { } tiffPages)
+            {
+                // The TIFF holds every page it is given, so the chosen pages are taken out first; the copy is not
+                // encrypted.
+                pdf = PdfPages.Extract(pdf, PdfPageRange.Parse(tiffPages), new PdfPagesOptions { Password = password }, ct);
+                options.Password = null;
+            }
+
             var tiff = PdfToImage.ConvertToTiff(pdf, options, ct);
             var tiffName = Path.Combine(dir, prefix + extension);
             io.WriteOutput(tiffName, tiff);

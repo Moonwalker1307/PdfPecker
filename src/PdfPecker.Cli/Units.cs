@@ -57,7 +57,17 @@ internal static class Units
 
         if (Named.TryGetValue(s, out var mm)) return PageSize.FromMillimeters(mm.Item1, mm.Item2);
 
+        // The x between the numbers is the one a number follows: in 800pxx600px the first x belongs to px.
         int x = s.IndexOf('x');
+        for (int i = x; i >= 0 && i < s.Length - 1; i = s.IndexOf('x', i + 1))
+        {
+            if (char.IsDigit(s[i + 1]) || s[i + 1] == '.')
+            {
+                x = i;
+                break;
+            }
+        }
+
         if (x > 0)
         {
             var w = s.Substring(0, x);

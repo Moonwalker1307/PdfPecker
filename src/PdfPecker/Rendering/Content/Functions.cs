@@ -9,6 +9,12 @@ internal abstract class PdfFunction
     // Stitching functions and arrays of functions contain further functions, and a document can nest them without end.
     private const int MaxNestingDepth = 8;
 
+    /// <summary>
+    /// The most outputs a function may have. Functions feed colour spaces, which have at most this many components, so
+    /// callers can keep the output buffer on the stack; a function that claims more is invalid.
+    /// </summary>
+    public const int MaxOutputs = ColorSpace.MaxComponents;
+
     /// <summary>Pairs of minimum and maximum, one pair per input.</summary>
     protected double[] Domain = { 0, 1 };
 
@@ -58,6 +64,7 @@ internal abstract class PdfFunction
 
     private static CombinedFunction? CreateCombined(PdfFile file, PdfArray array, int depth)
     {
+        if (array.Count > MaxOutputs) return null;
         var parts = new List<PdfFunction>();
         foreach (var item in array.Items)
         {
@@ -81,7 +88,7 @@ internal abstract class PdfFunction
         if (function == null) return null;
         if (file.GetNumbers(dict, "Domain") is { Length: >= 2 } domain) function.Domain = domain;
         function.Range = file.GetNumbers(dict, "Range") is { Length: >= 2 } range ? range : null;
-        return function;
+        return function.Outputs <= MaxOutputs ? function : null;
     }
 
     /// <summary>An array of functions with one output each, evaluated on the same input as one function.</summary>
@@ -142,7 +149,7 @@ internal sealed class SampledFunction : PdfFunction
         if (sizes == null || range == null || domain == null || bitsPerSample is not (1 or 2 or 4 or 8 or 12 or 16 or 24 or 32))
             return null;
         int inputs = domain.Length / 2, outputs = range.Length / 2;
-        if (inputs < 1 || inputs > MaxInputs || outputs < 1 || sizes.Length < inputs) return null;
+        if (inputs < 1 || inputs > MaxInputs || outputs < 1 || outputs > MaxOutputs || sizes.Length < inputs) return null;
 
         var function = new SampledFunction { _outputs = outputs, _sizes = new int[inputs] };
         long sampleCount = outputs;

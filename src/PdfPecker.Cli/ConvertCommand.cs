@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net;
 
 namespace PdfPecker.Cli;
 
@@ -68,6 +69,7 @@ internal static class ConvertCommand
                 throw new UsageException($"The output '{output}' is also an input; choose another output file.");
         }
 
+        if (inputs.Count > 1) ConvertOptions.CheckSeveralInputs(a);
         if (watch && inputs.Any(i => i == "-")) throw new UsageException("watch needs files; it cannot watch standard input.");
         if (watch && output == "-") throw new UsageException("watch needs an output file to rewrite, not standard output.");
         return new Job { Inputs = inputs, Output = output, Args = a, WkDefaults = wkDefaults };
@@ -95,18 +97,17 @@ internal static class ConvertCommand
             || ext.Equals(".mdown", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Converts every input and writes the output once; returns the number of pages.</summary>
+    /// <summary>An input read once, so that standard input can be converted a second time when the page numbers need it.</summary>
+    private sealed record Source(string Raw, string Path, string Text, string? BaseDirectory);
+
+    /// <summary>Converts every input and writes the output once.</summary>
     private static void Render(CliIo io, Job job, CancellationToken ct)
     {
         var watch = Stopwatch.StartNew();
-        var pdfs = new List<byte[]>();
-        foreach (var raw in job.Inputs)
-        {
-            ct.ThrowIfCancellationRequested();
-            pdfs.Add(RenderOne(io, job, raw, ct));
-        }
-
-        var pdf = pdfs.Count == 1 ? pdfs[0] : PdfMerger.Merge(pdfs, null, ct);
+        var now = DateTimeOffset.Now;
+        var pdf = job.Inputs.Count == 1
+            ? RenderOne(job, Load(io, job.Inputs[0]), null, BandPages.Alone, now, alone: true, ct)
+            : RenderSeveral(io, job, now, ct);
         io.WriteOutput(job.Output, pdf);
         if (job.Output != "-")
         {
@@ -115,38 +116,103 @@ internal static class ConvertCommand
         }
     }
 
-    private static byte[] RenderOne(CliIo io, Job job, string raw, CancellationToken ct)
+    /// <summary>
+    /// Converts each input on its own and merges them. What belongs to the whole file (PDF/A, encryption, linearization,
+    /// the dates and the file ID) is applied to the merged result, since merging writes a new, plain PDF; and the
+    /// wkhtmltopdf page numbers [page] and [topage] count the whole output, which takes a second conversion of the inputs
+    /// once their page counts are known.
+    /// </summary>
+    private static byte[] RenderSeveral(CliIo io, Job job, DateTimeOffset now, CancellationToken ct)
     {
         var a = job.Args;
-        string path = StripFileUrl(raw);
-        string text;
-        string? baseDir;
+        var whole = ConvertOptions.Build(a, job.WkDefaults);
+        var sources = new List<Source>();
+        foreach (var raw in job.Inputs) sources.Add(Load(io, raw));
+        var documentTitle = whole.Title ?? FindTitle(sources[0].Text);
+
+        var pdfs = new byte[sources.Count][];
+        var counts = new int[sources.Count];
+        bool pageToken = ConvertOptions.BandsUse(a, "[page]");
+        bool totalToken = ConvertOptions.BandsUse(a, "[topage]");
+        for (int i = 0; i < sources.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            pdfs[i] = RenderOne(job, sources[i], documentTitle, BandPages.Alone, now, alone: false, ct);
+            if (pageToken || totalToken) counts[i] = PdfPages.Count(pdfs[i]);
+        }
+
+        if (pageToken || totalToken)
+        {
+            int total = counts.Sum();
+            int offset = 0;
+            for (int i = 0; i < sources.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                // The headers and footers sit in the page margins, so they do not change where the pages break.
+                if (totalToken || offset > 0)
+                    pdfs[i] = RenderOne(job, sources[i], documentTitle, new BandPages(offset, counts[i], totalToken ? total : null), now, alone: false, ct);
+                offset += counts[i];
+            }
+        }
+
+        var merged = PdfMerger.Merge(pdfs, new PdfMergeOptions
+        {
+            Title = whole.Title,
+            Author = whole.Author,
+            Subject = whole.Subject,
+            Keywords = whole.Keywords,
+            CreationDate = whole.CreationDate,
+        }, ct);
+
+        if (whole.Conformance != PdfConformance.None)
+        {
+            var result = PdfToPdfA.Convert(merged, new PdfAConversionOptions { Conformance = whole.Conformance }, ct);
+            foreach (var problem in result.Problems) io.Warn("PDF/A: " + problem);
+            merged = result.Pdf;
+        }
+
+        if (whole.Linearize) return PdfLinearizer.Linearize(merged, whole.Security, null, ct);
+        return whole.Security != null ? PdfProtector.Encrypt(merged, whole.Security, null, ct) : merged;
+    }
+
+    private static Source Load(CliIo io, string raw)
+    {
         if (raw == "-")
         {
             // Text piped in has no folder of its own. The current folder is wherever the tool runs, often a server's
             // working directory, so a document from standard input reads local files only from a --base-dir it is given.
-            text = io.ReadAllInputText();
-            baseDir = null;
-        }
-        else
-        {
-            text = File.ReadAllText(path);
-            baseDir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? Directory.GetCurrentDirectory();
+            return new Source(raw, "", io.ReadAllInputText(), null);
         }
 
+        string path = StripFileUrl(raw);
+        return new Source(raw, path, File.ReadAllText(path), Path.GetDirectoryName(Path.GetFullPath(path)) ?? Directory.GetCurrentDirectory());
+    }
+
+    /// <summary>
+    /// Converts one input. <paramref name="alone"/> is false for one of several inputs, which leaves out what
+    /// <see cref="RenderSeveral"/> applies to the merged file.
+    /// </summary>
+    private static byte[] RenderOne(Job job, Source source, string? documentTitle, BandPages pages, DateTimeOffset now, bool alone, CancellationToken ct)
+    {
+        var a = job.Args;
         var options = ConvertOptions.Build(a, job.WkDefaults);
-        options.BaseDirectory ??= baseDir;
+        options.BaseDirectory ??= source.BaseDirectory;
+        if (!alone)
+        {
+            options.Security = null;
+            options.Linearize = false;
+        }
 
         var sheet = new System.Text.StringBuilder();
         if (a.Get("user-style-sheet") is { } cssPath) sheet.Append(File.ReadAllText(cssPath)).Append('\n');
-        var title = options.Title ?? FindTitle(text);
-        var bands = ConvertOptions.HeaderFooterStyleSheet(a, title, raw == "-" ? "" : Path.GetFileName(path), DateTimeOffset.Now);
+        var title = options.Title ?? FindTitle(source.Text);
+        var bands = ConvertOptions.HeaderFooterStyleSheet(a, title, documentTitle ?? title, source.Raw == "-" ? "" : Path.GetFileName(source.Path), now, pages);
         if (bands != null) sheet.Append(bands);
         if (sheet.Length > 0) options.UserStyleSheet = sheet.ToString();
 
-        return IsMarkdown(a, raw)
-            ? MarkdownToPdf.Convert(text, options, new MarkdownOptions { Title = options.Title }, ct)
-            : HtmlToPdf.Convert(text, options, ct);
+        return IsMarkdown(a, source.Raw)
+            ? MarkdownToPdf.Convert(source.Text, options, new MarkdownOptions { Title = options.Title }, ct)
+            : HtmlToPdf.Convert(source.Text, options, ct);
     }
 
     /// <summary>The text of the document's title element, for the [title] token; null when there is none.</summary>
@@ -157,7 +223,8 @@ internal static class ConvertCommand
         int start = html.IndexOf('>', open);
         if (start < 0) return null;
         int end = html.IndexOf("</title", start, StringComparison.OrdinalIgnoreCase);
-        return end < 0 ? null : html.Substring(start + 1, end - start - 1).Trim();
+        // The title is text with character references (Q&amp;A), as a browser shows it.
+        return end < 0 ? null : WebUtility.HtmlDecode(html.Substring(start + 1, end - start - 1)).Trim();
     }
 
     private static string FormatSize(long bytes)

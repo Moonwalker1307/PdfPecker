@@ -128,6 +128,47 @@ internal sealed class SeedContext
         var pixels = new byte[32 * 32 * 3];
         for (int i = 0; i < pixels.Length; i++) pixels[i] = (byte)(i * 7 + i / 96 * 13);
         yield return ("generated:flate-predictor.pdf", ImagePdf("/FlateDecode", PdfPecker.Images.PdfImage.DeflatePredicted(pixels, 32, 32, 3, out var parms), 32, 32, "/DeviceRGB", 8, "/DecodeParms " + parms));
+        yield return ("generated:colour-spaces.pdf", ColourSpacePdf());
+    }
+
+    /// <summary>
+    /// Uncompressed content with the structures whose sizes the reader takes from the file: DeviceN colorants, function
+    /// outputs and ranges, ToUnicode ranges in both forms and an inline image's dimensions, for mutations to grow.
+    /// </summary>
+    private static byte[] ColourSpacePdf()
+    {
+        const string content = "/CS0 cs 0.2 0.4 scn 10 10 50 50 re f /CS1 cs 0.5 scn 60 10 50 50 re f q 0 70 200 60 re W n /Sh0 sh Q\n"
+            + "q 40 0 0 20 120 10 cm BI /W 4 /H 2 /BPC 8 /CS /G ID 0123ABCD EI Q BT /F1 12 Tf 10 150 Td <0102> Tj ET";
+        const string cmap = "begincmap 1 begincodespacerange <00> <FF> endcodespacerange\n"
+            + "1 beginbfrange <01> <01> <0048> endbfrange 1 beginbfrange <02> <03> [<0069> <006A>] endbfrange endcmap";
+        const string tint = "{ 0 0 4 2 roll }";
+        var objects = new[]
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /ColorSpace << /CS0 5 0 R /CS1 6 0 R >> "
+                + "/Shading << /Sh0 8 0 R >> /Font << /F1 9 0 R >> >> >>",
+            $"<< /Length {content.Length} >>\nstream\n{content}\nendstream",
+            "[/DeviceN [/Cyan /Spot] /DeviceCMYK 7 0 R]",
+            "[/Separation /Spot /DeviceRGB << /FunctionType 2 /Domain [0 1] /C0 [1 1 1] /C1 [1 0 0] /N 1 >>]",
+            $"<< /FunctionType 4 /Domain [0 1 0 1] /Range [0 1 0 1 0 1 0 1] /Length {tint.Length} >>\nstream\n{tint}\nendstream",
+            "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 200 0] /Function << /FunctionType 3 /Domain [0 1] /Bounds [0.5] /Encode [0 1 0 1] "
+                + "/Functions [<< /FunctionType 2 /Domain [0 1] /C0 [0 0 1] /C1 [0 1 0] /N 1 >> << /FunctionType 2 /Domain [0 1] /C0 [0 1 0] /C1 [1 0 0] /N 2 >>] >> >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 10 0 R >>",
+            $"<< /Length {cmap.Length} >>\nstream\n{cmap}\nendstream",
+        };
+        var sb = new StringBuilder("%PDF-1.7\n");
+        var offsets = new List<int>();
+        for (int i = 0; i < objects.Length; i++)
+        {
+            offsets.Add(sb.Length);
+            sb.Append(i + 1).Append(" 0 obj\n").Append(objects[i]).Append("\nendobj\n");
+        }
+        int xref = sb.Length;
+        sb.Append("xref\n0 ").Append(objects.Length + 1).Append("\n0000000000 65535 f \n");
+        foreach (int o in offsets) sb.Append(o.ToString("D10", System.Globalization.CultureInfo.InvariantCulture)).Append(" 00000 n \n");
+        sb.Append("trailer\n<< /Size ").Append(objects.Length + 1).Append(" /Root 1 0 R >>\nstartxref\n").Append(xref).Append("\n%%EOF\n");
+        return Encoding.ASCII.GetBytes(sb.ToString());
     }
 
     /// <summary>Width and height from the header of a binary PBM (P4) file.</summary>

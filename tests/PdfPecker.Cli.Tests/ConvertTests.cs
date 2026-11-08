@@ -101,6 +101,74 @@ public sealed class ConvertTests : IDisposable
     }
 
     [Fact]
+    public void SeveralInputsGetTheWholeFileOptionsAfterTheyAreJoined()
+    {
+        var a = _cli.Html("a.html", "<p>First file</p>");
+        var b = _cli.Html("b.html", "<p>Second file</p>");
+
+        _cli.Ok(a, b, _cli.Path_("owner.pdf"), "--owner-password", "own");
+        Assert.True(PdfProtector.IsEncrypted(File.ReadAllBytes(_cli.Path_("owner.pdf"))));
+
+        _cli.Ok(a, b, _cli.Path_("user.pdf"), "--user-password", "usr");
+        var user = File.ReadAllBytes(_cli.Path_("user.pdf"));
+        Assert.True(PdfProtector.IsEncrypted(user));
+        Assert.Throws<PdfPasswordException>(() => PdfPages.Count(user));
+        Assert.Equal(2, PdfPages.Count(user, "usr"));
+
+        _cli.Ok(a, b, _cli.Path_("pdfa.pdf"), "--pdfa", "3b");
+        var pdfa = Encoding.Latin1.GetString(File.ReadAllBytes(_cli.Path_("pdfa.pdf")));
+        Assert.Contains("/OutputIntents", pdfa);
+        Assert.Contains("pdfaid", pdfa);
+
+        _cli.Ok(a, b, _cli.Path_("fast.pdf"), "--linearize", "--user-password", "usr");
+        var fast = File.ReadAllBytes(_cli.Path_("fast.pdf"));
+        Assert.Contains("/Linearized", Encoding.Latin1.GetString(fast, 0, 1024));
+        Assert.True(PdfProtector.IsEncrypted(fast));
+
+        // A fixed date makes the joined file reproducible, with that date and a file ID that is not random.
+        _cli.Ok(a, b, _cli.Path_("d1.pdf"), "--creation-date", "2026-01-01T00:00:00Z");
+        _cli.Ok(a, b, _cli.Path_("d2.pdf"), "--creation-date", "2026-01-01T00:00:00Z");
+        var d1 = File.ReadAllBytes(_cli.Path_("d1.pdf"));
+        Assert.Equal(d1, File.ReadAllBytes(_cli.Path_("d2.pdf")));
+        Assert.Contains("D:20260101000000", Encoding.Latin1.GetString(d1));
+    }
+
+    [Fact]
+    public void SeveralInputsRefuseWhatTheJoinedFileCannotHave()
+    {
+        var a = _cli.Html("a.html", "<p>First file</p>");
+        var b = _cli.Html("b.html", "<p>Second file</p>");
+        var pdfa4 = _cli.Run(a, b, _cli.Path_("x.pdf"), "--pdfa", "4");
+        Assert.Equal(2, pdfa4.Exit);
+        Assert.Contains("single input", pdfa4.Err);
+        Assert.Equal(2, _cli.Run(a, b, _cli.Path_("x.pdf"), "--accessibility", "ua2").Exit);
+        Assert.False(File.Exists(_cli.Path_("x.pdf")));
+        // A single input still has every level.
+        _cli.Ok(a, _cli.Path_("one.pdf"), "--pdfa", "4");
+    }
+
+    [Fact]
+    public void PageTokensCountTheWholeOutputWithSeveralInputs()
+    {
+        var a = _cli.Html("a.html", "<p>One</p><div style=\"break-before:page\">Two</div>", "Q&amp;A &lt;draft&gt;");
+        var b = _cli.Html("b.html", "<p>One</p><div style=\"break-before:page\">Two</div><div style=\"break-before:page\">Three</div>", "Second");
+        _cli.Ok(a, b, _cli.Path_("all.pdf"), "--footer-center", "[page]/[topage] ([sitepage] of [sitepages])", "--header-left", "[title] in [doctitle]");
+        var text = CliRunner.Text(_cli.Path_("all.pdf"));
+        Assert.Contains("1/5 (1 of 2)", text);
+        Assert.Contains("2/5 (2 of 2)", text);
+        Assert.Contains("3/5 (1 of 3)", text);
+        Assert.Contains("5/5 (3 of 3)", text);
+        Assert.Contains("Q&A <draft> in Q&A <draft>", text);
+        Assert.Contains("Second in Q&A <draft>", text);
+
+        // Only [page] needs no total: the first input keeps its own conversion, the second counts on from it.
+        _cli.Ok(a, b, _cli.Path_("pages.pdf"), "--footer-right", "p. [page]");
+        var pages = CliRunner.Text(_cli.Path_("pages.pdf"));
+        Assert.Contains("p. 2", pages);
+        Assert.Contains("p. 5", pages);
+    }
+
+    [Fact]
     public void AnOutputThatIsNotAPdfNameIsRefusedSoASourceIsNotOverwritten()
     {
         var a = _cli.Html("a.html", "<p>A</p>");
@@ -162,6 +230,8 @@ public sealed class ConvertTests : IDisposable
     [InlineData("B5", 498.9, 708.7)]
     [InlineData("100x150mm", 283.46, 425.2)]
     [InlineData("4inx6in", 288, 432)]
+    [InlineData("800pxx600px", 600, 450)]
+    [InlineData("800x600px", 600, 450)]
     public void PageSizes(string name, double width, double height)
     {
         var size = Units.ParsePageSize(name);

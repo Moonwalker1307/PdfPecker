@@ -278,24 +278,27 @@ internal sealed class CMap
             var high = lexer.StringValue!;
             uint l = Code(low), h = Code(high);
             if (h < l || h - l > MaxBfRangeLength) h = l;
+            // The loops count codes from the start of the range rather than comparing the code with h, because a range
+            // that ends at FFFFFFFF would wrap to 0 and never end.
+            uint count = h - l + 1;
             var destination = lexer.Next();
             if (IsString(destination))
             {
                 var text = (byte[])lexer.StringValue!.Clone();
-                for (uint code = l; code <= h; code++)
+                for (uint i = 0; i < count; i++)
                 {
-                    _unicode[code] = Utf16(text);
+                    _unicode[l + i] = Utf16(text);
                     Increment(text);
                 }
             }
             else if (destination == TokenKind.ArrayStart)
             {
-                uint code = l;
+                uint i = 0;
                 while (true)
                 {
                     var item = lexer.Next();
                     if (item is TokenKind.ArrayEnd or TokenKind.Eof) break;
-                    if (IsString(item) && code <= h) _unicode[code++] = Utf16(lexer.StringValue!);
+                    if (IsString(item) && i < count) _unicode[l + i++] = Utf16(lexer.StringValue!);
                 }
             }
             else break;
