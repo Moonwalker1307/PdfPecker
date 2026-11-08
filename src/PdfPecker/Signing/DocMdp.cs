@@ -29,24 +29,57 @@ internal static class DocMdp
     public static PdfDict? Certification(PdfFile file) => file.GetDict(file.GetDict(file.Catalog, "Perms"), "DocMDP");
 
     /// <summary>
-    /// Whether the signature whose value is <paramref name="contents"/> certified the revision that ends at
-    /// <paramref name="revisionEnd"/>: that revision's catalog names it in /Perms. An update may write the catalog again
-    /// without /Perms, so a certification is recognised by the revision it signed, not by the newest catalog.
+    /// The earlier revision of <paramref name="file"/> that ends at <paramref name="revisionEnd"/>, opened on its own; null
+    /// when it is the whole file or cannot be read.
     /// </summary>
-    public static bool CertifiedRevision(PdfFile file, long revisionEnd, byte[] contents, string? password)
+    public static PdfFile? Revision(PdfFile file, long revisionEnd, string? password)
     {
-        if (revisionEnd <= 0 || revisionEnd >= file.Data.Length) return false;
+        if (revisionEnd <= 0 || revisionEnd >= file.Data.Length) return null;
         try
         {
-            var revision = PdfFile.Open(file.Data.AsSpan(0, (int)revisionEnd).ToArray(), password);
-            return revision.Resolve(Certification(revision)?["Contents"]) is PdfString c && c.Bytes.AsSpan().SequenceEqual(contents);
+            return PdfFile.Open(file.Data.AsSpan(0, (int)revisionEnd).ToArray(), password);
         }
         catch (Exception ex) when (ex is PdfFormatException or PdfPasswordException or InvalidDataException or ArgumentException
             or InvalidOperationException or OverflowException or NotSupportedException)
         {
-            return false;
+            return null;
         }
     }
+
+    /// <summary>
+    /// The dictionary of signature <paramref name="found"/> as <paramref name="revision"/>, the revision it signed, has
+    /// it: the object its field's /V names, or the /V of the same field there, with the same byte range. Null when that
+    /// revision has no such dictionary, which an update that left the signed objects alone never causes. Later updates
+    /// can write the dictionary again, so what it declares (its certification level, reason, location and time) is read
+    /// from the revision it signed.
+    /// </summary>
+    public static PdfDict? SignedDictionary(PdfFile revision, FoundSignature found)
+    {
+        try
+        {
+            var candidate = found.Value is PdfRef value ? revision.Resolve(value) as PdfDict
+                : found.Field is PdfRef field ? revision.GetDict(revision.Resolve(field) as PdfDict, "V")
+                : null;
+            if (candidate == null || revision.GetArray(candidate, "ByteRange") is not { Count: 4 } range) return null;
+            for (int i = 0; i < 4; i++)
+                if (revision.Resolve(range[i]) is not PdfNumber n || n.Value != found.ByteRange[i]) return null;
+            return candidate;
+        }
+        catch (Exception ex) when (ex is PdfFormatException or InvalidDataException or ArgumentException or InvalidOperationException
+            or OverflowException or NotSupportedException)
+        {
+            SwallowedErrors.Record(ex);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether the signature whose value is <paramref name="contents"/> certified <paramref name="revision"/>, the
+    /// revision it signed: that revision's catalog names it in /Perms. An update may write the catalog again without
+    /// /Perms, so a certification is recognised by the revision it signed, not by the newest catalog.
+    /// </summary>
+    public static bool CertifiedRevision(PdfFile revision, byte[] contents)
+        => revision.Resolve(Certification(revision)?["Contents"]) is PdfString c && c.Bytes.AsSpan().SequenceEqual(contents);
 
     /// <summary>
     /// Throws when a signature with <paramref name="level"/> cannot be added to <paramref name="file"/>: a certification

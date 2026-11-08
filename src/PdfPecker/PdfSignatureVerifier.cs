@@ -72,10 +72,10 @@ public sealed class PdfSignatureVerification
     /// <summary>The time from the signature's timestamp token (or of a document timestamp), when there is one.</summary>
     public DateTimeOffset? TimestampTime { get; internal set; }
 
-    /// <summary>The /Reason in the signature dictionary.</summary>
+    /// <summary>The /Reason in the signature dictionary, as the revision the signature covers has it.</summary>
     public string? Reason { get; internal set; }
 
-    /// <summary>The /Location in the signature dictionary.</summary>
+    /// <summary>The /Location in the signature dictionary, as the revision the signature covers has it.</summary>
     public string? Location { get; internal set; }
 
     /// <summary>The digest algorithm, e.g. SHA256.</summary>
@@ -142,7 +142,8 @@ public sealed class PdfSignatureVerification
     /// <summary>
     /// For a certification signature, the changes appended after it that its level does not allow, in plain words; they
     /// are listed in <see cref="Problems"/> too and make the signature not <see cref="Valid"/>. Empty when every change
-    /// is allowed, and always for an approval signature.
+    /// is allowed. For any signature, a signature dictionary that a later update wrote again or replaced is listed too,
+    /// as no update may change what was signed; otherwise this is always empty for an approval signature.
     /// </summary>
     /// <remarks>
     /// The check compares each object the later updates wrote with its certified version: validation data, document
@@ -284,6 +285,11 @@ public static class PdfSignatureVerifier
     {
         var data = file.Data;
         var problems = new List<string>();
+        // Updates after signing can write the signature dictionary again, so what it declares is read from the revision
+        // the signature covers, and a dictionary that differs from it there is reported.
+        var revision = f.ByteRangeValid ? DocMdp.Revision(file, f.ByteRange[2] + f.ByteRange[3], password) : null;
+        var signed = revision != null ? DocMdp.SignedDictionary(revision, f) : null;
+        var (signedFile, sig) = signed != null ? (revision!, signed) : (file, f.Dict);
         var v = new PdfSignatureVerification
         {
             FieldName = f.FieldName,
@@ -291,11 +297,14 @@ public static class PdfSignatureVerifier
             IsDocumentTimestamp = f.IsDocumentTimestamp,
             ByteRange = f.ByteRange,
             ByteRangeValid = f.ByteRangeValid,
-            Reason = (file.Resolve(f.Dict["Reason"]) as PdfString)?.Text,
-            Location = (file.Resolve(f.Dict["Location"]) as PdfString)?.Text,
-            SignerName = (file.Resolve(f.Dict["Name"]) as PdfString)?.Text,
-            SigningTime = ParsePdfDate((file.Resolve(f.Dict["M"]) as PdfString)?.Text),
+            Reason = (signedFile.Resolve(sig["Reason"]) as PdfString)?.Text,
+            Location = (signedFile.Resolve(sig["Location"]) as PdfString)?.Text,
+            SignerName = (signedFile.Resolve(sig["Name"]) as PdfString)?.Text,
+            SigningTime = ParsePdfDate((signedFile.Resolve(sig["M"]) as PdfString)?.Text),
         };
+        var disallowed = new List<string>();
+        if (revision != null && (signed == null || !DocMdpChanges.Same(signed, f.Dict, 0)))
+            disallowed.Add("The signature dictionary was replaced or written again after signing, so what it now says is not what was signed.");
         if (f.ByteRange.Length == 4)
         {
             long end = f.ByteRange[2] + f.ByteRange[3];
@@ -303,18 +312,20 @@ public static class PdfSignatureVerifier
             v.CoversWholeDocument = end <= data.Length && OnlyWhiteSpaceAfter(data, end);
         }
         if (!f.ByteRangeValid) problems.Add("The byte range is malformed or does not leave out exactly the signature's /Contents.");
-        if (!f.IsDocumentTimestamp && DocMdp.Level(file, f.Dict) is var level and > 0
+        if (!f.IsDocumentTimestamp && DocMdp.Level(signedFile, sig) is var level and > 0
             && (ReferenceEquals(DocMdp.Certification(file), f.Dict)
                 // A later update may have dropped or replaced /Perms; the signed revision still says what was certified.
-                || f.ByteRangeValid && f.Contents != null && DocMdp.CertifiedRevision(file, f.ByteRange[2] + f.ByteRange[3], f.Contents, password)))
+                || revision != null && f.Contents != null && DocMdp.CertifiedRevision(revision, f.Contents)))
         {
             v.CertificationLevel = (PdfCertificationLevel)level;
             // Only a well-formed byte range marks where the certified revision ends.
             if (f.ByteRangeValid && !v.CoversWholeDocument)
-            {
-                v.DisallowedChanges = DocMdpChanges.Find(file, f.ByteRange[2] + f.ByteRange[3], level, password);
-                problems.AddRange(v.DisallowedChanges);
-            }
+                disallowed.AddRange(DocMdpChanges.Find(file, revision, level));
+        }
+        if (disallowed.Count > 0)
+        {
+            v.DisallowedChanges = disallowed;
+            problems.AddRange(disallowed);
         }
         if (f.Contents == null)
         {
