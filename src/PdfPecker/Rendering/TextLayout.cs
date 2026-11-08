@@ -311,7 +311,12 @@ internal static class TextLayout
     {
         if (Ascending<T>(items)) return;
         int n = items.Length;
-        if (buffer == null || buffer.Length < 2 * n) buffer = GC.AllocateUninitializedArray<Item>(Math.Max(2 * n, 64));
+        // The buffer at least doubles when it grows. SeparateBaselines sorts a line that grows a little at a time, and a
+        // buffer only as long as each step needs would be allocated again on every step, which a damaged page with
+        // thousands of baselines in one line turns into gigabytes of garbage. Doubling keeps it under four times the
+        // longest line.
+        if (buffer == null || buffer.Length < 2 * n)
+            buffer = GC.AllocateUninitializedArray<Item>(Math.Max(Math.Max(2 * n, 64), 2 * (buffer?.Length ?? 0)));
         // The merge works on a copy, so that the items are still in their first order if the sort is needed.
         var copy = buffer.AsSpan(0, n);
         items.CopyTo(copy);
