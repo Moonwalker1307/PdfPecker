@@ -14,7 +14,7 @@ internal static class QrEncoder
 
     // Error correction codewords per block and number of blocks, indexed by level (L, M, Q, H) and version (1 to 40).
     // Index 0 of each row is unused.
-    private static readonly sbyte[][] EccPerBlock =
+    internal static readonly sbyte[][] EccPerBlock =
     {
         new sbyte[] { -1, 7, 10, 15, 20, 26, 18, 20, 24, 30, 18, 20, 24, 26, 30, 22, 24, 28, 30, 28, 28, 28, 28, 30, 30, 26, 28, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30 },
         new sbyte[] { -1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26, 26, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28 },
@@ -22,7 +22,7 @@ internal static class QrEncoder
         new sbyte[] { -1, 17, 28, 22, 16, 22, 28, 26, 26, 24, 28, 24, 28, 22, 24, 24, 30, 28, 28, 26, 28, 30, 24, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30 },
     };
 
-    private static readonly byte[][] BlockCount =
+    internal static readonly byte[][] BlockCount =
     {
         new byte[] { 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 4, 6, 6, 6, 6, 7, 8, 8, 9, 9, 10, 12, 12, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 24, 25 },
         new byte[] { 0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21, 23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49 },
@@ -163,7 +163,7 @@ internal static class QrEncoder
     }
 
     /// <summary>Data and error correction modules of a version: everything but the function patterns.</summary>
-    private static int RawDataModules(int version)
+    internal static int RawDataModules(int version)
     {
         var result = (16 * version + 128) * version + 64;
         if (version >= 2)
@@ -282,7 +282,7 @@ internal static class QrEncoder
         }
     }
 
-    private sealed class Symbol
+    internal sealed class Symbol
     {
         public readonly bool[,] Modules;
         private readonly bool[,] _function;
@@ -425,6 +425,38 @@ internal static class QrEncoder
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// The reader's side of <see cref="DrawCodewords"/>: the codewords in the modules, in the same zigzag order,
+        /// once the mask is undone. A last partial byte (the remainder bits) is dropped.
+        /// </summary>
+        public byte[] ReadCodewords()
+        {
+            var result = new byte[RawDataModules(_version) / 8];
+            var i = 0;
+            var total = result.Length * 8;
+            for (var right = _size - 1; right >= 1; right -= 2)
+            {
+                if (right == 6)
+                    right = 5;
+                var upward = ((right + 1) & 2) == 0;
+                for (var vert = 0; vert < _size; vert++)
+                {
+                    var y = upward ? _size - 1 - vert : vert;
+                    for (var j = 0; j < 2; j++)
+                    {
+                        var x = right - j;
+                        if (!_function[y, x] && i < total)
+                        {
+                            if (Modules[y, x])
+                                result[i >> 3] |= (byte)(0x80 >> (i & 7));
+                            i++;
+                        }
+                    }
+                }
+            }
+            return result;
         }
 
         /// <summary>XORs mask <paramref name="mask"/> onto the data modules; applying it twice undoes it.</summary>

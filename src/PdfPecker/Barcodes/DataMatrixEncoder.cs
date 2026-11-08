@@ -11,7 +11,7 @@ internal static class DataMatrixEncoder
 {
     // Size, data region size, data codewords, error correction codewords and Reed-Solomon blocks of the 24 square
     // symbols, from table 7 of the standard.
-    private static readonly (int Size, int Region, int Data, int Ecc, int Blocks)[] Symbols =
+    internal static readonly (int Size, int Region, int Data, int Ecc, int Blocks)[] Symbols =
     {
         (10, 8, 3, 5, 1), (12, 10, 5, 7, 1), (14, 12, 8, 10, 1), (16, 14, 12, 12, 1), (18, 16, 18, 14, 1),
         (20, 18, 22, 18, 1), (22, 20, 30, 20, 1), (24, 22, 36, 24, 1), (26, 24, 44, 28, 1), (32, 14, 62, 36, 1),
@@ -296,13 +296,17 @@ internal static class DataMatrixEncoder
         return modules;
     }
 
-    private sealed class Placement
+    internal sealed class Placement
     {
         private readonly byte[] _codewords;
         private readonly int _rows;
         private readonly int _cols;
         // 0 not placed yet, 1 light, 2 dark.
         private readonly byte[] _bits;
+
+        // For the reader: which bit of which codeword each module holds (codeword * 8 + bit, bit 0 the most
+        // significant), or -1 for the fixed corner pattern.
+        private readonly int[]? _map;
 
         public Placement(byte[] codewords, int rows, int cols)
         {
@@ -311,6 +315,17 @@ internal static class DataMatrixEncoder
             _cols = cols;
             _bits = new byte[rows * cols];
         }
+
+        /// <summary>The reader's placement: it records where each codeword bit goes instead of drawing data.</summary>
+        public Placement(int codewordCount, int rows, int cols)
+            : this(new byte[codewordCount], rows, cols)
+        {
+            _map = new int[rows * cols];
+            Array.Fill(_map, -1);
+        }
+
+        /// <summary>Where each module's bit belongs, row by row, after <see cref="Run"/>; see the field's comment.</summary>
+        public int[] Map => _map ?? throw new InvalidOperationException("Only a reader's placement records a map.");
 
         public bool Get(int row, int col) => _bits[row * _cols + col] == 2;
 
@@ -377,8 +392,13 @@ internal static class DataMatrixEncoder
                 col += _cols;
                 row += 4 - (_cols + 4) % 8;
             }
+            // Only the rectangular extensions of ISO/IEC 21471, which the reader knows, wrap past the last row.
+            if (row >= _rows)
+                row -= _rows;
             var dark = (_codewords[pos] & (1 << (8 - bit))) != 0;
             _bits[row * _cols + col] = dark ? (byte)2 : (byte)1;
+            if (_map != null)
+                _map[row * _cols + col] = pos * 8 + bit - 1;
         }
 
         private void Utah(int row, int col, int pos)
