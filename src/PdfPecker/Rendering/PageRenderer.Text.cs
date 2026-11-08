@@ -47,7 +47,11 @@ internal sealed partial class PageRenderer
         var gs = _gs;
         int mode = gs.TextRender;
         bool fill = mode is 0 or 2 or 4 or 6, stroke = mode is 1 or 2 or 5 or 6, clip = mode >= 4 && !Collecting;
-        if (clip) _textClip ??= new PathData();
+        // Type 3 glyphs add nothing to a text clip, as in MuPDF and Poppler: their procedures paint rather than give an
+        // outline. Text in a clipping mode that shows only such glyphs therefore leaves the clip as it was, instead of
+        // making it empty and hiding everything drawn after it.
+        bool type3 = font.Kind == FontKind.Type3;
+        if (clip && !type3) _textClip ??= new PathData();
         double fs = gs.FontSize, th = gs.HScale;
         bool canFill = fill && _hidden == 0 && SetupPaint(false);
         bool vertical = font.Vertical;
@@ -70,9 +74,10 @@ internal sealed partial class PageRenderer
             {
                 if (_hidden == 0) CollectGlyph(font, code, w0, w1, vertical);
             }
-            else if (font.Kind == FontKind.Type3)
+            else if (type3)
             {
-                if (_hidden == 0) DrawType3Glyph(font, code, trm, res);
+                // Invisible text (3, the usual mode of a scanned page's recognised text) and clip-only text (7) paint nothing.
+                if (_hidden == 0 && (fill || stroke)) DrawType3Glyph(font, code, trm, res);
             }
             else if (font.Source != null && (fill || stroke || clip))
             {
