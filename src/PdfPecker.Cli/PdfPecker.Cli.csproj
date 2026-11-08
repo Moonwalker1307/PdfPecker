@@ -49,6 +49,18 @@
     <PublishAot Condition="'$(RuntimeIdentifier)' != 'any'">true</PublishAot>
   </PropertyGroup>
 
+  <!-- SDK 10.0.1xx writes the settings file that names the platform packages to tools/net10.0/any, later 10.0 SDKs to
+       tools/any/any. NuGet prefers the net9.0 folder to an "any" one for a .NET 10 SDK, which would then install the
+       framework-dependent net9.0 tool, so the file always goes to the net10.0 folder, where every .NET 10 SDK reads it. -->
+  <Target Name="_PdfPeckerToolSettingsInNet10Folder" AfterTargets="PackTool"
+          Condition="'$(TargetFramework)' == 'net10.0' and '$(RuntimeIdentifier)' == ''">
+    <ItemGroup>
+      <TfmSpecificPackageFile Condition="'%(TfmSpecificPackageFile.PackagePath)' == 'tools/any/any/'">
+        <PackagePath>tools/net10.0/any/</PackagePath>
+      </TfmSpecificPackageFile>
+    </ItemGroup>
+  </Target>
+
   <!-- CI builds use repository-relative source paths in the PDB, so builds are reproducible from the same commit. -->
   <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
