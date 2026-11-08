@@ -41,7 +41,8 @@ internal static class Help
             pdfpecker {command} <input.html|input.md>... [output.pdf] [options]
 
             {(command == "watch" ? "Converts once, then again each time the input, its folder or the style sheet changes. A failed\nconversion is shown and watching goes on. Press Ctrl+C to stop.\n" : "")}
-            With several inputs the last argument is the output and must end in .pdf; the inputs are joined.
+            With several inputs the last argument is the output and must end in .pdf; the inputs are joined, [page] and
+            [topage] count the whole output, and --pdfa 4|4f and --accessibility ua2 need a single input.
             Without an output the PDF is written next to the input. Markdown is recognised by the extension.
 
             Page:        -s, --page-size A4|Letter|B5|100x150mm   --page-width, --page-height   -O, --orientation Landscape|Portrait

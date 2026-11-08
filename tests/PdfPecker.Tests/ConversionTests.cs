@@ -122,6 +122,18 @@ public class ConversionTests
     }
 
     [Fact]
+    public void Query_strings_in_links_and_image_urls_keep_names_that_look_like_references()
+    {
+        // &next, &section and &region start with the references &ne, &sect and &reg, which an attribute leaves alone.
+        var fetched = new List<string>();
+        var options = new PdfOptions { ResourceResolver = u => { lock (fetched) fetched.Add(u); return null; }, Compress = false };
+        var pdf = HtmlToPdf.Convert("<a href='https://example.com/s?q=x&next=2&section=4&region=eu&amp;a=1'>link</a>"
+                                    + "<img src='https://example.com/chart.png?w=1&level=3&copy=2'>", options);
+        Assert.Contains("/URI (https://example.com/s?q=x&next=2&section=4&region=eu&a=1)", Latin1(pdf));
+        Assert.Contains("https://example.com/chart.png?w=1&level=3&copy=2", fetched);
+    }
+
+    [Fact]
     public void Link_uris_encode_characters_outside_the_bmp_as_utf8()
     {
         var pdf = ConvertUncompressed("<a href=\"https://example.com/\uD83D\uDE00\">smile</a>");

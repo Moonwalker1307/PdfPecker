@@ -9,6 +9,12 @@ internal abstract class ColorSpace
     // Color spaces refer to other color spaces (bases, alternates, named resources), and a document can loop them.
     private const int MaxNestingDepth = 10;
 
+    /// <summary>
+    /// The most colorants a DeviceN space may have (ISO 32000-2, Annex C). Every colour space then has at most this
+    /// many components, which keeps the per-colour buffers on the stack small whatever the file claims.
+    /// </summary>
+    public const int MaxComponents = 32;
+
     public abstract int Components { get; }
     public abstract string Name { get; }
 
@@ -146,11 +152,15 @@ internal abstract class ColorSpace
         return new SeparationSpace(1, colorant == "None", colorant == "All", alternate, tintTransform);
     }
 
-    /// <summary>[/DeviceN names alternate tintTransform ...]; it paints nothing when every colorant is None.</summary>
+    /// <summary>
+    /// [/DeviceN names alternate tintTransform ...]; it paints nothing when every colorant is None. A space with more
+    /// colorants than the limit is invalid.
+    /// </summary>
     private static SeparationSpace? ParseDeviceN(PdfFile file, PdfArray array, PdfDict? resources, int depth)
     {
         if (array.Count < 4) return null;
         var colorants = file.Resolve(array[1]) as PdfArray;
+        if (colorants?.Count > MaxComponents) return null;
         int components = Math.Max(1, colorants?.Count ?? 1);
         var alternate = Parse(file, array[2], resources, depth + 1) ?? Gray;
         var tintTransform = PdfFunction.Create(file, array[3]);

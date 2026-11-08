@@ -40,14 +40,17 @@ internal static class PageCommands
         return 0;
     }
 
-    /// <summary>"file.pdf:1-3,5" names pages of a file; a colon that is part of a path (C:\x.pdf) is left alone.</summary>
+    /// <summary>
+    /// "file.pdf:1-3,5" or "file.pdf:2-last" names pages of a file, in any form <see cref="PdfPageRange"/> reads; a colon
+    /// that is part of a path (C:\x.pdf) is left alone.
+    /// </summary>
     internal static (string Path, string? Pages) SplitPages(string arg)
     {
         int colon = arg.LastIndexOf(':');
         if (colon > 1 && colon < arg.Length - 1)
         {
             var pages = arg.Substring(colon + 1);
-            if (pages.All(c => char.IsDigit(c) || c is ',' or '-')) return (arg.Substring(0, colon), pages);
+            if (PdfPageRange.TryParse(pages, out _)) return (arg.Substring(0, colon), pages);
         }
 
         return (arg, null);

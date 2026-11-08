@@ -86,8 +86,8 @@ internal sealed partial class PdfFile
     public int MaxObjectNumber => _xref.Count == 0 ? 0 : _xref.Keys.Max();
 
     /// <summary>
-    /// Whether the cross-reference table names <paramref name="num"/> as free: deleted, or never used. Looking such an
-    /// object up would rebuild the table from the object headers, as for a damaged file.
+    /// Whether the cross-reference table names <paramref name="num"/> as free: deleted, or never used. Such an object
+    /// reads as null.
     /// </summary>
     public bool IsFree(int num)
     {
@@ -242,7 +242,9 @@ internal sealed partial class PdfFile
             try
             {
                 var o = TryLoadObject(num);
-                if (o == null && !_reconstructed && _xref.ContainsKey(num))
+                // A free entry is a deleted object, and a reference to it is null (ISO 32000-2, 7.3.10); rebuilding the
+                // table would bring back the deleted body and older bodies of objects that later updates replaced.
+                if (o == null && !_reconstructed && _xref.TryGetValue(num, out var entry) && entry.Kind != XrefEntryKind.Free)
                 {
                     // The table points somewhere wrong: rebuild it once and retry.
                     _loading.Remove(num);

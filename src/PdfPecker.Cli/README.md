@@ -54,6 +54,8 @@ pdfpecker -s A4 -O Landscape -T 15mm --footer-center "Page [page] of [topage]" i
 The page size and orientation, margins, `--title`, `--zoom`, `--disable-smart-shrinking`, `--user-style-sheet`,
 `--no-outline`, `--no-pdf-compression`, `--enable-local-file-access`, `-q` and the `--header-left/-center/-right` and
 `--footer-left/-center/-right` texts (with `[page]`, `[topage]`, `[date]`, `[time]` and `[title]`) work as they do there.
+With several inputs, `[page]` and `[topage]` count the whole output and `[sitepage]` and `[sitepages]` each input's own,
+as in wkhtmltopdf; PDF/A (2b, 2u, 3b or 3u), the passwords, `--linearize` and `--creation-date` apply to the joined file.
 Options that exist only because wkhtmltopdf runs a browser (`--javascript-delay`, `--cookie`, `--header-html`,
 `--grayscale`, ...) are accepted and ignored with a warning, so a script keeps running. Web addresses are refused: save the
 page to a file first.

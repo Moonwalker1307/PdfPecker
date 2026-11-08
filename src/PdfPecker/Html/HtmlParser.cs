@@ -419,14 +419,14 @@ internal sealed class HtmlParser
                     char q = s[p++];
                     int end = s.IndexOf(q, p);
                     if (end < 0) end = s.Length;
-                    value = HtmlEntities.Decode(s.Substring(p, end - p));
+                    value = HtmlEntities.DecodeAttribute(s.Substring(p, end - p));
                     p = Math.Min(end + 1, s.Length);
                 }
                 else
                 {
                     int vs = p;
                     while (p < s.Length && s[p] > ' ' && s[p] != '>') p++;
-                    value = HtmlEntities.Decode(s.Substring(vs, p - vs));
+                    value = HtmlEntities.DecodeAttribute(s.Substring(vs, p - vs));
                 }
             }
             if (attrName.Length > 0 && el.GetAttribute(attrName) == null)

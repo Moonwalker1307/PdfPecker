@@ -92,14 +92,14 @@ public class RendererFontTests
               "0 -110 -90 -90 -110 0 rrcurveto -110 0 -90 90 0 110 rrcurveto closepath endchar"),
     };
 
-    private static byte[] Type1Page(string text, string fontEntries, string cleartextEncoding = BuiltinEncoding, string prefix = "")
+    private static byte[] Type1Page(string text, string fontEntries, string cleartextEncoding = BuiltinEncoding, string prefix = "", string suffix = "")
     {
         var pdf = new FixturePdf();
         var program = Type1Program(cleartextEncoding, TestGlyphs, new[] { "500 hlineto return" });
         int file = pdf.AddStream($"/Length1 {Encoding.Latin1.GetString(program).IndexOf("eexec\n", StringComparison.Ordinal) + 6} /Length2 {program.Length}", program);
         int desc = pdf.Add($"<< /Type /FontDescriptor /FontName /TestType1 /Flags 32 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 1000 /Descent 0 /CapHeight 1000 /StemV 80 /FontFile {file} 0 R >>");
         int font = pdf.Add($"<< /Type /Font /Subtype /Type1 /BaseFont /TestType1 /FirstChar 65 /LastChar 67 /Widths [600 600 600] /FontDescriptor {desc} 0 R {fontEntries} >>");
-        return pdf.Build(72, 40, $"{prefix} BT /F1 40 Tf 0 0 Td {text} Tj ET", $"/Font << /F1 {font} 0 R >>");
+        return pdf.Build(72, 40, $"{prefix} BT /F1 40 Tf 0 0 Td {text} Tj ET {suffix}", $"/Font << /F1 {font} 0 R >>");
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public class RendererFontTests
 
     // ---------------------------------------------------------------- Type 3
 
-    private static RenderedImage Type3(string text, int width = 80)
+    private static RenderedImage Type3(string text, int width = 80, string textState = "", string after = "")
     {
         var pdf = new FixturePdf();
         int sq = pdf.AddStream("", "1000 0 0 0 1000 1000 d1 1 0 0 rg 100 100 800 800 re f");
@@ -166,7 +166,41 @@ public class RendererFontTests
         int font = pdf.Add($"<< /Type /Font /Subtype /Type3 /FontBBox [0 0 1000 1000] /FontMatrix [0.001 0 0 0.001 0 0] " +
                            $"/CharProcs << /sq {sq} 0 R /col {col} 0 R /tri {tri} 0 R /bits {bits} 0 R >> " +
                            "/Encoding << /Type /Encoding /Differences [97 /sq /col /tri /bits] >> /FirstChar 97 /LastChar 100 /Widths [1000 1000 1000 1000] >>");
-        return Render(pdf.Build(width, 30, $"0 0 1 rg BT /F1 20 Tf 0 0 Td {text} Tj ET", $"/Font << /F1 {font} 0 R >>"));
+        return Render(pdf.Build(width, 30, $"0 0 1 rg BT /F1 20 Tf {textState} 0 0 Td {text} Tj ET {after}", $"/Font << /F1 {font} 0 R >>"));
+    }
+
+    [Theory]
+    [InlineData(3)]
+    [InlineData(7)]
+    public void Type3_text_that_neither_fills_nor_strokes_paints_nothing(int mode)
+    {
+        // Mode 3 is how scanned pages carry their recognised text; mode 7 only clips. The fill after the text shows that
+        // the clip of mode 7 does not hide what follows.
+        var img = Type3("(ac)", textState: $"{mode} Tr", after: "0 1 0 rg 60 0 20 30 re f");
+        AssertAt(img, 10, 10, 255, 255, 255);
+        AssertAt(img, 25, 5, 255, 255, 255);
+        AssertAt(img, 70, 15, 0, 255, 0);
+    }
+
+    [Theory]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    public void Type3_text_in_a_clipping_mode_paints_its_glyphs_and_leaves_the_clip_alone(int mode)
+    {
+        // Type 3 glyphs add no outline to the text clip, as in MuPDF and Poppler, so the clip must not become empty.
+        var img = Type3("(a)", textState: $"{mode} Tr", after: "0 1 0 rg 60 0 20 30 re f");
+        AssertAt(img, 10, 10, 0, 0, 255);
+        AssertAt(img, 70, 15, 0, 255, 0);
+    }
+
+    [Fact]
+    public void Clipping_text_in_an_outline_font_still_clips_what_follows()
+    {
+        // The square A covers 4 to 24 at size 40, and mode 7 makes it the clip for the fill that follows.
+        var img = Render(Type1Page("(A)", "", prefix: "7 Tr", suffix: "1 0 0 rg 0 0 72 40 re f"));
+        AssertAt(img, 14, 14, 255, 0, 0);
+        AssertAt(img, 40, 14, 255, 255, 255);
     }
 
     [Fact]

@@ -23,6 +23,9 @@ internal readonly struct Operand
 /// <summary>Splits a content stream into operators and their operands.</summary>
 internal sealed class ContentParser
 {
+    // The deepest image samples PDF has; a larger depth is damage, and the data length is then not trusted.
+    private const int MaxBitsPerComponent = 16;
+
     private readonly PdfLexer _lx;
     public readonly List<Operand> Operands = new(16);
     public string Op = "";
@@ -132,10 +135,10 @@ internal sealed class ContentParser
         if (start < lx.End && PdfLexer.IsWhite(d[start])) start++;
         // Find "EI" preceded by whitespace and followed by whitespace or the end of the stream.
         int end = -1;
-        int expected = ExpectedLength(InlineDict);
-        if (expected > 0 && start + expected <= lx.End)
+        long expected = ExpectedLength(InlineDict);
+        if (expected > 0 && expected <= lx.End - start)
         {
-            int p = start + expected;
+            int p = start + (int)expected;
             int q = p;
             while (q < lx.End && PdfLexer.IsWhite(d[q])) q++;
             if (q + 1 < lx.End && d[q] == 'E' && d[q + 1] == 'I' && (q + 2 >= lx.End || !PdfLexer.IsRegular(d[q + 2]))) { end = p; lx.Pos = q + 2; }
@@ -169,7 +172,11 @@ internal sealed class ContentParser
         return true;
     }
 
-    private static int ExpectedLength(PdfDict dict)
+    /// <summary>
+    /// The length of unfiltered image data from the dictionary, or -1 when it cannot be known. It is computed in 64
+    /// bits, because a damaged width or height would overflow 32 and point the search for EI outside the stream.
+    /// </summary>
+    private static long ExpectedLength(PdfDict dict)
     {
         if (dict["F"] != null || dict["Filter"] != null) return -1;
         int w = (dict["W"] ?? dict["Width"]) is PdfNumber wn ? wn.IntValue : 0;
@@ -181,7 +188,7 @@ internal sealed class ContentParser
         if (!mask && cs is PdfName csn)
             comps = csn.Value switch { "RGB" or "DeviceRGB" => 3, "CMYK" or "DeviceCMYK" => 4, _ => 1 };
         else if (!mask && cs is PdfArray) return -1;
-        if (w <= 0 || h <= 0 || bpc <= 0) return -1;
-        return (w * comps * bpc + 7) / 8 * h;
+        if (w <= 0 || h <= 0 || bpc is <= 0 or > MaxBitsPerComponent) return -1;
+        return ((long)w * comps * bpc + 7) / 8 * h;
     }
 }

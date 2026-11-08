@@ -40,6 +40,26 @@ public class HtmlParserTests
         Assert.Equal("<a> & \u00A9 \u00A9 \u00A9 &unknown; &", doc.FindFirst("p")!.InnerText());
     }
 
+    // The expected text and attribute values are what Chrome's parser gives for each input.
+    [Theory]
+    [InlineData("&lambda;&theta;&epsilon;&rArr;&sum;&isin;&forall;&AMP;", "λθε⇒∑∈∀&", "λθε⇒∑∈∀&")]
+    [InlineData("&notin; &notit; &not &notx", "∉ ¬it; ¬ ¬x", "∉ &notit; ¬ &notx")]
+    [InlineData("&parallel; &timesb; &copysr; &copy2024 &copy=1", "∥ ⊠ ℗ ©2024 ©=1", "∥ ⊠ ℗ &copy2024 &copy=1")]
+    [InlineData("&ne &le &pi &mu &ne; &pi;", "&ne &le &pi &mu ≠ π", "&ne &le &pi &mu ≠ π")]
+    [InlineData("&region=eu &reg=1 &reg;x &regx &reg", "®ion=eu ®=1 ®x ®x ®", "&region=eu &reg=1 ®x &regx ®")]
+    [InlineData("q=x&next=2&section=4&region=eu&center=1,2&pid=6&level=7",
+        "q=x&next=2§ion=4®ion=eu¢er=1,2&pid=6&level=7", "q=x&next=2&section=4&region=eu&center=1,2&pid=6&level=7")]
+    [InlineData("&amp &ampx &amp; &AMP &lt3 &gt= &nbspx", "& &x & & <3 >= \u00A0x", "& &ampx & & &lt3 &gt= &nbspx")]
+    [InlineData("&NotEqualTilde; &fjlig; &CounterClockwiseContourIntegral; &bne;", "\u2242\u0338 fj ∳ =\u20E5", "\u2242\u0338 fj ∳ =\u20E5")]
+    [InlineData("&frac34x &frac34= &frac34 &middot1 &szlig;", "¾x ¾= ¾ ·1 ß", "&frac34x &frac34= ¾ &middot1 ß")]
+    [InlineData("&Aacute &AAcute; &aacute=x &eacuteb", "Á &AAcute; á=x éb", "Á &AAcute; &aacute=x &eacuteb")]
+    public void Character_references_decode_as_in_browsers(string input, string text, string attribute)
+    {
+        var p = Body("<p title=\"" + input + "\">" + input + "</p>").FindFirst("p")!;
+        Assert.Equal(System.Text.RegularExpressions.Regex.Unescape(text), p.InnerText());
+        Assert.Equal(System.Text.RegularExpressions.Regex.Unescape(attribute), p.GetAttribute("title"));
+    }
+
     [Fact]
     public void Unclosed_paragraphs_close_implicitly()
     {

@@ -97,20 +97,36 @@ internal sealed partial class PdfFile
     {
         var visited = new HashSet<long>();
         PdfDict? newest = null;
-        while (offset >= 0 && visited.Add(offset))
+        _sectionFree = new HashSet<int>();
+        try
         {
-            var trailer = ReadXrefSection(offset) ?? ReadXrefSection(offset + _headerOffset);
-            if (trailer == null) return false;
-            newest ??= trailer;
-            // Hybrid file: the classic table's trailer points at an xref stream with the compressed objects.
-            if (trailer["XRefStm"] is PdfNumber hybrid && visited.Add((long)hybrid.Value)) ReadXrefSection((long)hybrid.Value);
-            if (trailer["Prev"] is not PdfNumber previous) break;
-            offset = (long)previous.Value;
+            while (offset >= 0 && visited.Add(offset))
+            {
+                _sectionFree.Clear();
+                var trailer = ReadXrefSection(offset) ?? ReadXrefSection(offset + _headerOffset);
+                if (trailer == null) return false;
+                newest ??= trailer;
+                // Hybrid file: the classic table's trailer points at an xref stream with the compressed objects.
+                if (trailer["XRefStm"] is PdfNumber hybrid && visited.Add((long)hybrid.Value)) ReadXrefSection((long)hybrid.Value);
+                if (trailer["Prev"] is not PdfNumber previous) break;
+                offset = (long)previous.Value;
+            }
+        }
+        finally
+        {
+            _sectionFree = null;
         }
         if (newest == null) return false;
         Trailer = newest;
         return true;
     }
+
+    /// <summary>
+    /// The numbers the section being read lists as free in its table. A hybrid file's table lists the objects of its
+    /// object streams as free, for readers that know no xref streams, and its /XRefStm stream then says where they are;
+    /// only those entries may replace a free entry, as a free entry of a newer section is a deleted object.
+    /// </summary>
+    private HashSet<int>? _sectionFree;
 
     /// <summary>Reads one xref table or stream at <paramref name="offset"/>, adding entries not already known. Returns its trailer.</summary>
     private PdfDict? ReadXrefSection(long offset)
@@ -169,7 +185,9 @@ internal sealed partial class PdfFile
             bool inUse = lexer.KeywordIs("n");
             int num = (int)(firstNumber + i);
             if (_xref.ContainsKey(num)) continue;
-            _xref[num] = inUse && offset > 0 ? XrefEntry.AtOffset(offset, (int)generation) : XrefEntry.Free;
+            // An entry in use without a valid offset is damaged rather than free: its lookup fails and rebuilds the table.
+            _xref[num] = inUse ? XrefEntry.AtOffset(Math.Max(0, offset), (int)generation) : XrefEntry.Free;
+            if (!inUse) _sectionFree?.Add(num);
         }
         return true;
     }
@@ -202,7 +220,7 @@ internal sealed partial class PdfFile
             {
                 int num = start + i;
                 var entry = ReadXrefRow(rows.AsSpan(position, rowLength), layout);
-                if (!_xref.ContainsKey(num)) _xref[num] = entry;
+                if (!_xref.TryGetValue(num, out var known) || known.Kind == XrefEntryKind.Free && _sectionFree?.Remove(num) == true) _xref[num] = entry;
             }
         }
     }
