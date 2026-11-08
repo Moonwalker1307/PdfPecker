@@ -36,9 +36,41 @@ internal sealed partial class StyleResolver
         public bool Inherit { get; }
     }
 
+    /// <summary>
+    /// The logical properties, which <see cref="Apply"/> hands on as the physical property the writing mode and direction
+    /// give. Every case of its switch that calls Apply again is listed here.
+    /// </summary>
+    private static readonly HashSet<string> LogicalProperties = new(StringComparer.Ordinal)
+    {
+        "margin-inline-start", "margin-inline-end", "padding-inline-start", "padding-inline-end", "margin-block-start",
+        "margin-block-end", "padding-block-start", "padding-block-end", "inset-inline-start", "inset-inline-end",
+        "inset-block-start", "inset-block-end", "border-inline-start-width", "border-inline-end-width",
+        "border-block-start-width", "border-block-end-width", "border-inline-start-style", "border-inline-end-style",
+        "border-block-start-style", "border-block-end-style", "border-inline-start-color", "border-inline-end-color",
+        "border-block-start-color", "border-block-end-color", "border-start-start-radius", "border-start-end-radius",
+        "border-end-start-radius", "border-end-end-radius", "corner-start-start-shape", "corner-start-end-shape",
+        "corner-end-start-shape", "corner-end-end-shape", "inline-size", "block-size", "min-inline-size",
+        "min-block-size", "max-inline-size", "max-block-size",
+    };
+
     private void Apply(ComputedStyle s, ComputedStyle parent, string prop, string raw)
     {
+        // While revert or revert-layer applies earlier declarations again, only the property being rolled back is set.
+        // A logical property passes, as it comes back here with the physical property it maps to.
+        if (_revertFilter != null)
+        {
+            if (prop == _revertFilter) _revertHit = true;
+            else if (!LogicalProperties.Contains(prop)) return;
+        }
         var d = new DeclaredValue(raw, s.FontSize);
+        if (d.Lower is "revert" or "revert-layer" && !LogicalProperties.Contains(prop))
+        {
+            // Inside a rollback (where prop is the property rolled back), a declaration that reverts again continues the
+            // same rollback from where it stands.
+            if (_revertFilter != null) _pendingRevert = d.Lower == "revert-layer" ? (byte)2 : (byte)1;
+            else Revert(s, parent, prop, d.Lower == "revert-layer");
+            return;
+        }
         if (d.Lower is "inherit" or "initial" or "unset" && ApplyCssWideKeyword(s, parent, prop, d.Lower)) return;
 
         // A string switch compiles to a hash jump, so one flat switch is the cheapest way to find the property, and this
