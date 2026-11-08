@@ -159,14 +159,37 @@ internal static class ConvertOptions
         _ => throw new UsageException($"--accessibility must be tagged, ua1 or ua2, not '{s}'."),
     };
 
+    private static readonly string[] BandTexts =
+        { "header-left", "header-center", "header-right", "footer-left", "footer-center", "footer-right" };
+
+    /// <summary>Whether a header or footer text holds <paramref name="token"/>, such as [page].</summary>
+    public static bool BandsUse(ParsedArgs a, string token)
+        => BandTexts.Any(name => a.Get(name) is { } text && text.Contains(token, StringComparison.Ordinal));
+
+    /// <summary>
+    /// With several inputs, refuses what the merged file cannot have: the merge keeps PDF/UA-1 but not PDF/UA-2, and
+    /// existing PDFs convert to PDF/A-2 and PDF/A-3 but not to PDF/A-4. Saying so is better than a file that silently
+    /// lacks what was asked for.
+    /// </summary>
+    public static void CheckSeveralInputs(ParsedArgs a)
+    {
+        if (a.Get("pdfa") is { } pdfa && ParseConformance(pdfa) is PdfConformance.PdfA4 or PdfConformance.PdfA4f)
+            throw new UsageException($"--pdfa {pdfa} needs a single input: the joined file can be made PDF/A-2 or PDF/A-3 (2b, 2u, 3b or 3u), not PDF/A-4. Convert the inputs one at a time, or choose another level.");
+        if (a.Get("accessibility") is { } acc && ParseAccessibility(acc) == PdfAccessibility.PdfUA2)
+            throw new UsageException($"--accessibility {acc} needs a single input: the joined file can claim PDF/UA-1 (ua1) but not PDF/UA-2. Convert the inputs one at a time, or choose ua1.");
+    }
+
     /// <summary>
     /// wkhtmltopdf's <c>--header-left</c>, <c>--footer-center</c> and the rest become CSS page margin boxes, which the
     /// library draws in the page margins. The tokens <c>[page]</c>, <c>[topage]</c>, <c>[date]</c>, <c>[title]</c> and
-    /// the other wkhtmltopdf tokens are replaced, either by a page counter or by their value now.
+    /// the other wkhtmltopdf tokens are replaced, either by a page counter or by their value now. <paramref name="pages"/>
+    /// places one of several inputs in the whole output, where [page] and [topage] count every input's pages, as in
+    /// wkhtmltopdf, while [sitepage] and [sitepages] count the input's own.
     /// </summary>
-    public static string? HeaderFooterStyleSheet(ParsedArgs a, string? documentTitle, string? source, DateTimeOffset now)
+    public static string? HeaderFooterStyleSheet(ParsedArgs a, string? title, string? documentTitle, string? source, DateTimeOffset now, BandPages pages)
     {
         var sb = new StringBuilder();
+        bool offsetUsed = false;
         foreach (var band in new[] { "header", "footer" })
         {
             float size = a.GetFloat($"{band}-font-size") ?? 12f;
@@ -177,15 +200,27 @@ internal static class ConvertOptions
             {
                 var text = a.Get($"{band}-{side}");
                 if (string.IsNullOrEmpty(text)) continue;
-                sb.Append($"@page {{ @{position}-{side} {{ content: {ContentValue(text, documentTitle, source, now)}; ")
+                sb.Append($"@page {{ @{position}-{side} {{ content: {ContentValue(text, title, documentTitle, source, now, pages, ref offsetUsed)}; ")
                   .Append($"font-size: {size.ToString("0.##", CultureInfo.InvariantCulture)}pt;{font} }} }}\n");
             }
+        }
+
+        if (offsetUsed)
+        {
+            // CSS has no offset for the page counter, so a counter style names the input's pages by their numbers in
+            // the whole output.
+            sb.Append("@counter-style ").Append(PageStyle).Append(" { system: fixed; symbols:");
+            for (int p = 1; p <= pages.Count; p++)
+                sb.Append(" \"").Append((pages.Offset + p).ToString(CultureInfo.InvariantCulture)).Append('"');
+            sb.Append("; }\n");
         }
 
         return sb.Length == 0 ? null : sb.ToString();
     }
 
-    private static string ContentValue(string text, string? title, string? source, DateTimeOffset now)
+    private const string PageStyle = "pdfpecker-output-page";
+
+    private static string ContentValue(string text, string? title, string? documentTitle, string? source, DateTimeOffset now, BandPages pages, ref bool offsetUsed)
     {
         var parts = new List<string>();
         var literal = new StringBuilder();
@@ -207,16 +242,20 @@ internal static class ConvertOptions
                     var token = text.Substring(i + 1, end - i - 1);
                     string? counter = token switch
                     {
+                        "page" when pages.Offset > 0 => $"counter(page, {PageStyle})",
                         "page" or "sitepage" => "counter(page)",
+                        "topage" when pages.Total is not null => null,
                         "topage" or "sitepages" => "counter(pages)",
                         _ => null,
                     };
                     string? value = token switch
                     {
+                        "topage" when pages.Total is int total => total.ToString(CultureInfo.InvariantCulture),
                         "frompage" => "1",
                         "date" or "isodate" => now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                         "time" => now.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
-                        "title" or "doctitle" => title ?? "",
+                        "title" => title ?? "",
+                        "doctitle" => documentTitle ?? "",
                         "webpage" => source ?? "",
                         "section" or "subsection" => "",
                         _ => null,
@@ -225,6 +264,7 @@ internal static class ConvertOptions
                     {
                         FlushLiteral();
                         parts.Add(counter);
+                        offsetUsed |= token == "page" && pages.Offset > 0;
                         i = end;
                         continue;
                     }
@@ -262,4 +302,14 @@ internal static class ConvertOptions
 
         return sb.ToString();
     }
+}
+
+/// <summary>
+/// Where one input's pages lie in the whole output: after <see cref="Offset"/> pages of earlier inputs, with
+/// <see cref="Count"/> pages of its own, out of <see cref="Total"/> (null when not known, or for a single input).
+/// </summary>
+internal readonly record struct BandPages(int Offset, int Count, int? Total)
+{
+    /// <summary>A single input, or a first conversion before the page counts are known: the counters count the input.</summary>
+    public static BandPages Alone => default;
 }
