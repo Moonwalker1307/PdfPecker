@@ -475,4 +475,100 @@ public class StyleTests
         Assert.False(ById(doc, "s").Style.Bold);
         Assert.True(ById(doc, "b").Style.Bold);
     }
+
+    // The expected values are what Chrome computes for the same documents.
+    [Fact]
+    public void Revert_on_a_property_rolls_back_to_the_user_agents_value()
+    {
+        var doc = Styled(@"<style>p { margin: 0 } p { margin: revert } div.f { display: flex } div.f { display: revert }
+            h1 { font-weight: 400; font-size: 10px } h1 { font-weight: revert; font-size: revert }
+            .c { color: blue } .c { color: revert } dd { margin-left: 0 } dd { margin-left: revert }
+            td { background-color: blue } td { background-color: revert } .i { margin-top: 3px !important } .i { margin-top: revert !important }</style>
+          <div style='color: red'><p id=p class=c>x</p><div id=f class=f>y</div><h1 id=h>z</h1><dl><dd id=dd>d</dd></dl>
+          <p id=i class=i>i</p><table><tr><td id=td bgcolor=red>t</td></tr></table></div>");
+        var p = ById(doc, "p").Style;
+        Assert.Equal(12f, p.MarginTop.Resolve(0));
+        Assert.Equal(0f, p.MarginLeft.Resolve(0));
+        Assert.Equal(0xFFFF0000u, p.Color); // the user agent sets no colour, so the parent's red is inherited
+        Assert.Equal(Display.Block, ById(doc, "f").Style.Display);
+        var h = ById(doc, "h").Style;
+        Assert.True(h.Bold);
+        Assert.Equal(24f, h.FontSize);
+        Assert.Equal(30f, ById(doc, "dd").Style.MarginLeft.Resolve(0)); // the user agent's margin-inline-start: 40px
+        Assert.Equal(12f, ById(doc, "i").Style.MarginTop.Resolve(0));
+        // A presentational attribute is the page's, so revert drops bgcolor as well.
+        Assert.Equal(0u, ById(doc, "td").Style.BackgroundColor >> 24);
+    }
+
+    [Fact]
+    public void Revert_layer_rolls_back_to_the_earlier_layers()
+    {
+        var doc = Styled(@"<style>@layer a { p { margin-top: 3px; color: red } .n { all: initial } }
+            @layer b { .b { margin-top: 5px; margin-top: revert-layer } .imp { color: green; color: revert-layer !important } }
+            p.u { margin-top: 9px } p.u { margin-top: revert-layer } .n { margin-top: 5px; margin-top: revert-layer }
+            p.s { color: green } @layer a { p.rt { margin-top: revert } } p.rt { margin-top: 5px; margin-top: revert-layer }</style>
+          <div><p id=b class=b>b</p><p id=u class=u>u</p><p id=imp class=imp>i</p><p id=s class=s style='color: revert-layer'>s</p>
+          <p id=n class=n>n</p><p id=rt class=rt>r</p></div>");
+        Assert.Equal(2.25f, ById(doc, "b").Style.MarginTop.Resolve(0));
+        Assert.Equal(2.25f, ById(doc, "u").Style.MarginTop.Resolve(0));
+        Assert.Equal(0xFFFF0000u, ById(doc, "imp").Style.Color); // the layer's own normal green is rolled back too
+        Assert.Equal(0xFF008000u, ById(doc, "s").Style.Color); // a style attribute rolls back to the style sheets
+        var n = ById(doc, "n").Style;
+        Assert.Equal(0f, n.MarginTop.Resolve(0)); // all: initial in the earlier layer
+        Assert.Equal(Display.Inline, n.Display);
+        Assert.Equal(12f, ById(doc, "rt").Style.MarginTop.Resolve(0)); // rolled back to a revert, and so to the user agent
+    }
+
+    [Fact]
+    public void The_new_css_reset_keeps_the_user_agents_display()
+    {
+        // all: unset with display: revert, as "The New CSS Reset" has it: every element gets its usual display back, so
+        // the style sheet stays hidden and paragraphs and table cells stay apart.
+        const string html = @"<!DOCTYPE html><html><head><style>
+            *:where(:not(html, iframe, canvas, img, svg, video, audio):not(svg *, symbol *)) { all: unset; display: revert; }
+            ol, ul, menu { list-style: none; }</style></head>
+            <body><p>First paragraph</p><p>Second paragraph</p><table><tr><td>Cell one</td><td>Cell two</td></tr></table></body></html>";
+        var doc = Styled(html);
+        Assert.Equal(Display.None, doc.FindFirst("head")!.Style.Display);
+        Assert.Equal(Display.Block, doc.FindFirst("p")!.Style.Display);
+        Assert.Equal(Display.TableCell, doc.FindFirst("td")!.Style.Display);
+        var text = PdfText.Extract(HtmlToPdf.Convert(html));
+        Assert.DoesNotContain("unset", text, StringComparison.Ordinal);
+        Assert.Contains("First paragraph\nSecond paragraph", text.Replace("\r", "", StringComparison.Ordinal), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_failed_var_or_if_makes_the_property_unset()
+    {
+        var doc = Styled(@"<style>p.m { margin: var(--missing) } .c { padding-left: 20px } .c { padding-left: var(--missing) }
+            div.r { color: red } p.k { color: blue } p.k { color: var(--missing) } div.r { font-size: 30px } h1 { font-size: var(--missing) }
+            p.f { margin: 1px if(style(--nope): 2px) } .v { margin-top: 7px } .v { margin-top: var(--word) } .v { --word: red }</style>
+          <div class=r><p id=m class=m>m</p><p id=c class=c>c</p><p id=k class=k>k</p><h1 id=h>h</h1><p id=f class=f>f</p>
+          <p id=v class=v>v</p></div>");
+        Assert.Equal(0f, ById(doc, "m").Style.MarginTop.Resolve(0)); // not the user agent's 1em
+        Assert.Equal(0f, ById(doc, "c").Style.PaddingLeft.Resolve(0));
+        Assert.Equal(0xFFFF0000u, ById(doc, "k").Style.Color); // color inherits, so unset is the parent's
+        Assert.Equal(22.5f, ById(doc, "h").Style.FontSize);
+        Assert.Equal(0f, ById(doc, "f").Style.MarginTop.Resolve(0));
+        Assert.Equal(0f, ById(doc, "v").Style.MarginTop.Resolve(0)); // a value that does not parse as a length
+    }
+
+    [Fact]
+    public void Custom_properties_take_empty_values_css_wide_keywords_and_strings()
+    {
+        var doc = Styled(@"<style>p.e { --x:; margin: 5px var(--x, 20px) } p.w { --y: ; width: calc(1px var(--y) + 2px) }
+            div { --z: 5px } p.un { --z: 7px } p.un { --z: unset; margin-top: var(--z) } p.rv { --z: 7px } p.rv { --z: revert; margin-top: var(--z) }
+            @layer a { p.rl { --z: 3px } } p.rl { --z: 7px } p.rl { --z: revert-layer; margin-top: var(--z) }
+            p.s { font-family: 'var(--nope)' }</style>
+          <div><p id=e class=e>e</p><p id=w class=w>w</p><p id=un class=un>u</p><p id=rv class=rv>r</p><p id=rl class=rl>l</p>
+          <p id=s class=s>s</p></div>");
+        var e = ById(doc, "e").Style;
+        Assert.Equal(3.75f, e.MarginTop.Resolve(0));
+        Assert.Equal(3.75f, e.MarginLeft.Resolve(0)); // the empty value is a value, so the fallback is not used
+        Assert.Equal(2.25f, ById(doc, "w").Style.Width.Resolve(0));
+        Assert.Equal(3.75f, ById(doc, "un").Style.MarginTop.Resolve(0)); // inherited from the div
+        Assert.Equal(3.75f, ById(doc, "rv").Style.MarginTop.Resolve(0));
+        Assert.Equal(2.25f, ById(doc, "rl").Style.MarginTop.Resolve(0));
+        Assert.Contains("var(--nope)", ById(doc, "s").Style.FontFamilyName, StringComparison.Ordinal);
+    }
 }
