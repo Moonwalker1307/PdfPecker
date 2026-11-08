@@ -20,7 +20,8 @@ page count checks. It depends on no test framework: a failed check throws `PdfAs
 The repository also holds PdfPecker.Cli (`src/PdfPecker.Cli`), the `pdfpecker` dotnet tool: a thin command line over the
 library's public API (convert, watch, merge, split, sign, ...) with wkhtmltopdf-compatible options. It is a fourth NuGet
 package, released with every PdfPecker release under the same version; it carries the PdfPecker assembly inside it and
-has no dependencies of its own.
+has no dependencies of its own. A .NET 10 SDK installs it as a Native AOT executable from `PdfPecker.Cli.<rid>`, packed
+per platform in CI, and older SDKs install the framework-dependent build inside the package itself.
 
 PdfPecker.Razor (`src/PdfPecker.Razor`) is the fifth package, released the same way. It renders Razor components to
 HTML with Microsoft's `HtmlRenderer` and converts the HTML with PdfPecker. It is the only project that may depend on a
@@ -251,3 +252,8 @@ are in `BUILD.md` and `TESTING.md`.
 - `Microsoft.AspNetCore.Components` reports trim warnings from its own code (it reads component members through
   `GetType()`), so the Razor sample folds only that assembly's warnings into one ignored `IL2104` for the AOT publish;
   `@layout` and `LayoutView` warn in the caller's project, so the sample's layout is a component with `ChildContent`.
+- The tool's per-platform packages are a .NET 10 SDK feature: .NET 8 and 9 SDKs refuse a package whose settings file
+  names platform packages, so only the package's net10.0 folder does, and its net8.0 and net9.0 folders keep the
+  framework-dependent tool. Alpine needs the musl packages: without them the SDK picks `linux-x64`, whose executable
+  does not run there. The native tool writes slightly larger PDFs than a Linux distribution's own .NET build, because
+  Native AOT links zlib-ng as Microsoft's runtime builds do; the inflated content is identical.

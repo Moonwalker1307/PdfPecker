@@ -22,6 +22,8 @@ dotnet publish samples/PdfPecker.Sample -c Release -p:PublishAot=true -o aot   #
 dotnet run --project samples/PdfPecker.Fluent.Sample -c Release -- output   # writes the fluent examples as PDF and HTML
 dotnet run --project src/PdfPecker.Cli -c Release -- convert in.html out.pdf   # the pdfpecker command-line tool
 dotnet pack src/PdfPecker.Cli -c Release -o ./nupkg                 # the dotnet tool package, same version as the others
+dotnet pack src/PdfPecker.Cli -c Release -r linux-x64 -o ./nupkg    # its Native AOT package for this machine's platform
+dotnet pack src/PdfPecker.Cli -c Release -r any -o ./nupkg          # and the framework-dependent fallback
 dotnet run --project samples/PdfPecker.Razor.Sample -c Release -- output    # writes the Razor invoice as PDF and HTML
 ```
 
