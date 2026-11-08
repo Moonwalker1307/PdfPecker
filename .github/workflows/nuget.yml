@@ -313,9 +313,12 @@ jobs:
         run: |
           cp tool-packages/*.nupkg tool-feed/
           dotnet tool install PdfPecker.Cli --tool-path tool-check --add-source tool-feed --version "$VERSION"
-          ls -la tool-check
-          echo '<h1>Tool check</h1>' | ./tool-check/pdfpecker convert - tool-check/check.pdf
-          ./tool-check/pdfpecker text tool-check/check.pdf | grep -q 'Tool check'
+          # On Windows the SDK starts a native tool through a pdfpecker.cmd shim, which cmd and PowerShell find on their
+          # own but bash only by its full name.
+          pdfpecker=./tool-check/pdfpecker
+          if [ "$RUNNER_OS" = Windows ]; then pdfpecker=./tool-check/pdfpecker.cmd; fi
+          echo '<h1>Tool check</h1>' | "$pdfpecker" convert - tool-check/check.pdf
+          "$pdfpecker" text tool-check/check.pdf | grep -q 'Tool check'
           # The command must come from this platform's native package, not from the framework-dependent fallback.
           test -n "$(find tool-check/.store -type d -name 'pdfpecker.cli.${{ matrix.rid }}')"
 
