@@ -396,6 +396,10 @@ internal static partial class PageStructure
         {
             var left = Split(run, w => w.CenterX < cut);
             var right = Split(run, w => w.CenterX > cut);
+            // Parts side by side sit level with each other. A letter's date set on the right above the salutation, or a
+            // signature set on the right below the closing, leaves a gap down the lines too, but each is only above or
+            // below the other text and is read in its place.
+            if (!Level(left, right) || !Level(right, left)) return null;
             static double Baseline(FlowLine l) => l.Bottom - 0.2 * l.Size;
             var (few, many) = left.Count <= right.Count ? (left, right) : (right, left);
             // The cells of a table row share a baseline and, nearly always, a font size.
@@ -414,6 +418,28 @@ internal static partial class PageStructure
 
     /// <summary>A gap this many body font sizes wide between two parts of a page sets them side by side.</summary>
     private const double SideGap = 1.5;
+
+    /// <summary>
+    /// Whether one of <paramref name="lines"/> is level with the text of <paramref name="other"/>: it overlaps one of the
+    /// stretches down the page that the other lines cover, with the space between lines no more than a line apart filled
+    /// in, by a quarter of the height of the shorter of the two or more.
+    /// </summary>
+    private static bool Level(List<FlowLine> lines, List<FlowLine> other)
+    {
+        var spans = new List<(double Top, double Bottom)>();
+        foreach (var l in other.OrderBy(l => l.Top))
+        {
+            if (spans.Count > 0 && l.Top - spans[^1].Bottom <= l.Size) spans[^1] = (spans[^1].Top, Math.Max(spans[^1].Bottom, l.Bottom));
+            else spans.Add((l.Top, l.Bottom));
+        }
+        foreach (var l in lines)
+            foreach (var (top, bottom) in spans)
+            {
+                double overlap = Math.Min(l.Bottom, bottom) - Math.Max(l.Top, top);
+                if (overlap > 0 && overlap >= 0.25 * Math.Min(l.Bottom - l.Top, bottom - top)) return true;
+            }
+        return false;
+    }
 
     /// <summary>The stretches from <paramref name="minX"/> to <paramref name="maxX"/> a line leaves empty, at least <paramref name="width"/> wide.</summary>
     private static List<(double X0, double X1)> Gaps(FlowLine line, double minX, double maxX, double width)
