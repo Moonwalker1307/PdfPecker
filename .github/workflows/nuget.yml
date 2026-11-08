@@ -295,7 +295,19 @@ jobs:
         if: ${{ !matrix.alpine }}
         run: dotnet pack src/PdfPecker.Cli -c Release -r ${{ matrix.rid }} -p:Version="$VERSION" -o tool-packages
 
-      # JavaScript actions do not run in Alpine job containers, so the pack runs in the SDK's Alpine image directly.
+      # JavaScript actions do not run in Alpine job containers, so the pack and the check run in the SDK's Alpine images
+      # directly. A pull from mcr.microsoft.com sometimes times out, so it is tried three times before the job fails.
+      - name: Pull the Alpine SDK images
+        if: ${{ matrix.alpine }}
+        run: |
+          for image in sdk:10.0-alpine-aot sdk:10.0-alpine; do
+            for attempt in 1 2 3; do
+              docker pull -q "mcr.microsoft.com/dotnet/$image" && break
+              if [ "$attempt" = 3 ]; then exit 1; fi
+              sleep 15
+            done
+          done
+
       - name: Pack the native tool for Alpine
         if: ${{ matrix.alpine }}
         run: >
