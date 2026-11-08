@@ -127,15 +127,20 @@ internal static partial class PageStructure
     private static List<FlowLine> Lines(PdfTextPage text, List<PageLink> links)
     {
         var lines = new List<FlowLine>(text.Lines.Count);
+        // Most words of a page share a few fonts, so the style read from the last font name is kept for the next word.
+        string? font = null;
+        bool bold = false, italic = false;
         foreach (var line in text.Lines)
         {
             var words = new List<FlowWord>(line.Words.Count);
             foreach (var w in line.Words)
             {
+                if (!string.Equals(w.FontName, font, StringComparison.Ordinal))
+                    (font, bold, italic) = (w.FontName, IsBold(w.FontName), IsItalic(w.FontName));
                 var word = new FlowWord
                 {
                     Text = w.Text, X0 = w.X, X1 = w.X + w.Width, Top = w.Y, Bottom = w.Y + w.Height, Size = w.FontSize,
-                    Bold = IsBold(w.FontName), Italic = IsItalic(w.FontName), Font = w.FontName, Color = w.Color, ColorRuns = w.ColorRuns, Line = lines.Count, Order = words.Count,
+                    Bold = bold, Italic = italic, Font = w.FontName, Color = w.Color, ColorRuns = w.ColorRuns, Line = lines.Count, Order = words.Count,
                 };
                 foreach (var link in links)
                 {
