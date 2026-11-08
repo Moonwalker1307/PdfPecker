@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.Pkcs;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using PdfPecker.Pdf;
+using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker.Tests;
 
@@ -239,6 +241,66 @@ public class SignatureVerificationTests
         var v = Assert.Single(PdfSignatureVerifier.Verify(bytes, Trusting(Cert.Value)));
         Assert.False(v.ByteRangeValid);
         Assert.False(v.Valid);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData(null, "kodeord")] // AES-256, as PdfPecker encrypts
+    [InlineData("encrypted-rc4-40.pdf", "user")]
+    [InlineData("encrypted-aes128.pdf", "user")]
+    public void A_signature_dictionary_that_borrows_another_signatures_byte_range_is_rejected(string? fixture, string? password)
+    {
+        // A second field whose dictionary copies the first signature's byte range has the first signature's /Contents in
+        // its gap, not its own, so the first signature would vouch for it. Encrypted files skipped that check; RC4 and
+        // AES-128 decrypt each object's strings with a key of its own, which the check must use too.
+        var pdf = fixture == null
+            ? HtmlToPdf.Convert(Html, new PdfOptions
+            {
+                Security = password == null ? null : new PdfSecurity { UserPassword = password },
+                Signature = new PdfSignatureOptions(Cert.Value),
+            })
+            : PdfSigner.Sign(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", fixture)), new PdfSignatureOptions(Cert.Value), password);
+        var original = Assert.Single(PdfSignatureVerifier.Verify(pdf, Trusting(Cert.Value), password));
+        Assert.True(original.Valid, string.Join("\n", original.Problems));
+
+        var file = PdfFile.Open(pdf, password);
+        int next = Math.Max(file.GetInt(file.Trailer, "Size", 0), file.MaxObjectNumber + 1);
+        int sigNum = next, fieldNum = next + 1;
+        var update = new PdfUpdateWriter(file, pdf, 4096);
+        update.WriteObject(sigNum, 0, new PdfDict(new Dictionary<string, PdfObject>(StringComparer.Ordinal)
+        {
+            ["Type"] = PdfName.Get("Sig"),
+            ["Filter"] = PdfName.Get("Adobe.PPKLite"),
+            ["SubFilter"] = PdfName.Get(original.SubFilter!),
+            ["ByteRange"] = new PdfArray(original.ByteRange.Select(n => (PdfObject)PdfNumber.Int(n)).ToList()),
+            ["Contents"] = new PdfString(new byte[] { 0 }, hex: true),
+        }));
+        update.WriteObject(fieldNum, 0, new PdfDict(new Dictionary<string, PdfObject>(StringComparer.Ordinal)
+        {
+            ["FT"] = PdfName.Get("Sig"),
+            ["T"] = new PdfString(Encoding.ASCII.GetBytes("Borrowed")),
+            ["V"] = new PdfRef(sigNum, 0),
+        }));
+        var rootRef = (PdfRef)file.Trailer["Root"]!;
+        var catalog = (PdfDict)file.Resolve(rootRef)!;
+        var acroForm = PdfDict.CopyOf((PdfDict)file.Resolve(catalog["AcroForm"])!);
+        acroForm.Entries["Fields"] = new PdfArray(file.GetArray(acroForm, "Fields")!.Items.Append(new PdfRef(fieldNum, 0)).ToList());
+        if (catalog["AcroForm"] is PdfRef acroRef) update.WriteObject(acroRef.Num, acroRef.Gen, acroForm);
+        else
+        {
+            var copy = PdfDict.CopyOf(catalog);
+            copy.Entries["AcroForm"] = acroForm;
+            update.WriteObject(rootRef.Num, rootRef.Gen, copy);
+        }
+        update.Finish(rootRef, fieldNum + 1);
+        var tampered = update.Output.Span.ToArray();
+
+        var results = PdfSignatureVerifier.Verify(tampered, Trusting(Cert.Value), password);
+        Assert.Equal(2, results.Count);
+        var borrowed = Assert.Single(results, r => r.FieldName == "Borrowed");
+        Assert.False(borrowed.ByteRangeValid);
+        Assert.False(borrowed.Valid);
+        Assert.True(Assert.Single(results, r => r.FieldName != "Borrowed").ByteRangeValid);
     }
 
     [Fact]

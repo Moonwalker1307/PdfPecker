@@ -95,6 +95,27 @@ internal sealed partial class PdfFile
     }
 
     /// <summary>
+    /// The bytes a string of object <paramref name="num"/> is read as when <paramref name="raw"/> is what the file holds:
+    /// decrypted as the parser decrypts that object's strings, or as they are when the object is in an object stream
+    /// (whose strings are not encrypted one by one) or the file is not encrypted. Null when the object is not in the
+    /// cross-reference table.
+    /// </summary>
+    public byte[]? StringAsReadFrom(int num, byte[] raw)
+    {
+        XrefEntry entry;
+        lock (_lock)
+        {
+            if (!_xref.TryGetValue(num, out entry)) return null;
+        }
+        return entry.Kind switch
+        {
+            XrefEntryKind.InFile when _decryptor != null && num != _encryptObjNum => _decryptor.DecryptString(raw, num, entry.Generation),
+            XrefEntryKind.InFile or XrefEntryKind.InObjectStream => raw,
+            _ => null,
+        };
+    }
+
+    /// <summary>
     /// Whether the cross-reference table did not hold up and was rebuilt from the object headers, which ignores what
     /// the table said and takes the last body of each object number in the file.
     /// </summary>
