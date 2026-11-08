@@ -288,7 +288,8 @@ jobs:
         if: ${{ !matrix.alpine }}
         with:
           dotnet-version: 10.0.x
-          cache: true
+          # These packages are published too, so a release packs them from a fresh restore, as the build job does.
+          cache: ${{ github.event_name != 'release' }}
           cache-dependency-path: |
             **/*.csproj
             Directory.Build.props

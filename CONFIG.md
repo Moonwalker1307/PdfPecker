@@ -47,9 +47,9 @@ attach files, and the publish job may request an OIDC token.
 
 Every job that restores packages caches `~/.nuget/packages` through `setup-dotnet`, keyed on the project files and
 `Directory.Build.props`. Package validation makes each restore of `src/PdfPecker` fetch the API baseline release, so
-without the cache every job counted as a download of that release on nuget.org. The build of a published release is
-the exception: it restores from nuget.org without the cache, so the packages it publishes never depend on a cache an
-earlier run saved.
+without the cache every job counted as a download of that release on nuget.org. The builds of a published release are
+the exception: the build job and the command-line tool's per-platform packs restore from nuget.org without the cache,
+so the packages it publishes never depend on a cache an earlier run saved.
 
 Repository settings Dependabot auto-merge relies on: "Allow auto-merge" under Settings → General, and a branch
 ruleset (or branch protection) on `main` that requires the status checks `build`, `windows`, `native-aot` and
