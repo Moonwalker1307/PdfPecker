@@ -19,12 +19,16 @@ internal sealed partial class PageRenderer
     private const int FormCost = 16; // running a form XObject costs about as much as this many simple operators
     private const int DashPointsPerOperation = 4; // a line segment strokes to a quad of four points
     /// <summary>
-    /// Pixels of an offscreen canvas (a soft mask or transparency group) that count as one operator. Such a canvas is
-    /// the size of the page and every pixel of it is cleared and read back, however few operators draw into it, so a
-    /// page that sets thousands of masks would otherwise do billions of pixels of work within the operator budget. At
-    /// this rate a letter page may still build about 600 such canvases at 150 dpi, or 150 at 300 dpi.
+    /// Pixels of an offscreen canvas (a soft mask or transparency group) that count as one operator: the part of it that
+    /// is filled, composited, read back and cleared, however few operators draw into it. A page that sets thousands of
+    /// masks would otherwise do billions of pixels of work within the operator budget.
     /// </summary>
     private const int LayerPixelsPerOperation = 64;
+    /// <summary>
+    /// The offscreen canvases a page keeps for its next transparency group or soft mask. Each is the size of the canvas
+    /// and is handed back clean, so a group costs only the area it draws rather than a page to allocate and clear.
+    /// </summary>
+    private const int MaxFreeLayers = 4;
     /// <summary>
     /// How deeply soft masks may nest, a mask's group setting another mask and so on. Files nest two or three; a group
     /// that sets the next mask twice doubles the work at every level, which the content depth limit alone lets reach
@@ -44,6 +48,7 @@ internal sealed partial class PageRenderer
     private readonly FlatPath _flat = new(), _strokePoly = new();
     private GraphicsState _gs;
     private readonly Stack<GraphicsState> _stack = new();
+    private readonly List<Canvas> _freeLayers = new(); // see MaxFreeLayers
     private readonly PathData _path = new();
     private int _pendingClip; // 0 none, 1 non-zero, 2 even-odd
     private int _depth;
@@ -717,11 +722,11 @@ internal sealed partial class PageRenderer
     {
         var clip = _gs.Clip;
         if (clip.IsEmpty) return;
-        ChargeLayer();
+        ChargeLayer(0);
         float alpha = _gs.FillAlpha;
         var blend = _gs.Blend;
         var softMask = _gs.SoftMask;
-        var layer = new Canvas(_canvas.Width, _canvas.Height, 0);
+        var layer = RentLayer();
         var mainCanvas = _canvas;
         var savedBase = _patternBase;
         _canvas = layer;
@@ -738,25 +743,58 @@ internal sealed partial class PageRenderer
             _canvas = mainCanvas;
             _patternBase = savedBase;
         }
-        var pt = _painter;
-        pt.Canvas = _canvas;
-        pt.Clip = clip;
-        pt.Alpha = (int)(alpha * 255 + 0.5f);
-        pt.Blend = blend;
-        pt.SoftMask = softMask;
-        pt.Shader = new CanvasShader(layer);
-        pt.FillRect(clip.X0, clip.Y0, clip.X1, clip.Y1);
-        pt.Shader = null;
+        // Only the part the group drew in is composited: the rest of the layer is transparent, which leaves the page
+        // as it is under any blend mode, alpha or mask.
+        ChargeLayer(layer.DirtyArea);
+        int x0 = Math.Max(clip.X0, layer.DirtyX0), y0 = Math.Max(clip.Y0, layer.DirtyY0);
+        int x1 = Math.Min(clip.X1, layer.DirtyX1), y1 = Math.Min(clip.Y1, layer.DirtyY1);
+        if (x1 > x0 && y1 > y0)
+        {
+            var pt = _painter;
+            pt.Canvas = _canvas;
+            pt.Clip = clip;
+            pt.Alpha = (int)(alpha * 255 + 0.5f);
+            pt.Blend = blend;
+            pt.SoftMask = softMask;
+            pt.Shader = new CanvasShader(layer);
+            pt.FillRect(x0, y0, x1, y1);
+            pt.Shader = null;
+        }
+        ReturnLayer(layer);
     }
 
     /// <summary>
-    /// Charges an offscreen canvas against the operation budget by its area, and checks for cancellation, which the
+    /// A transparent offscreen canvas the size of the current one, from those the page keeps, or else a new one, whose
+    /// every pixel the runtime clears and which is charged for it.
+    /// </summary>
+    private Canvas RentLayer()
+    {
+        for (int i = _freeLayers.Count - 1; i >= 0; i--)
+        {
+            var free = _freeLayers[i];
+            if (free.Width != _canvas.Width || free.Height != _canvas.Height) continue;
+            _freeLayers.RemoveAt(i);
+            return free;
+        }
+        ChargeLayer((long)_canvas.Width * _canvas.Height);
+        return new Canvas(_canvas.Width, _canvas.Height, 0);
+    }
+
+    /// <summary>Clears what was drawn on a layer and keeps it for the next one.</summary>
+    private void ReturnLayer(Canvas layer)
+    {
+        layer.Clean();
+        if (_freeLayers.Count < MaxFreeLayers) _freeLayers.Add(layer);
+    }
+
+    /// <summary>
+    /// Charges pixels of offscreen canvas work against the operation budget, and checks for cancellation, which the
     /// content loop only does every thousand operators: that many masks at print resolution take seconds.
     /// </summary>
-    private void ChargeLayer()
+    private void ChargeLayer(long pixels)
     {
         _cancel.ThrowIfCancellationRequested();
-        if ((_ops += (long)_canvas.Width * _canvas.Height / LayerPixelsPerOperation) > MaxOperations) throw new BudgetExceeded();
+        if ((_ops += pixels / LayerPixelsPerOperation) > MaxOperations) throw new BudgetExceeded();
     }
 
     /// <summary>
@@ -770,15 +808,17 @@ internal sealed partial class PageRenderer
         if ((_ops += outlinePoints / DashPointsPerOperation) > MaxOperations) throw new BudgetExceeded();
     }
 
-    /// <summary>Renders an ExtGState soft mask group to a per-pixel mask over the whole canvas.</summary>
-    private byte[]? BuildSoftMask(PdfDict sm)
+    /// <summary>
+    /// Renders an ExtGState soft mask group to a per-pixel mask over the area its group draws in, with the backdrop's
+    /// value everywhere else.
+    /// </summary>
+    private SoftMask? BuildSoftMask(PdfDict sm)
     {
         if (Collecting) return null;
         var g = _file.GetStream(sm, "G");
         if (g == null) return null;
         // A mask nested deeper than MaxSoftMaskDepth is ignored, as if its group had set none.
         if (_softMaskDepth >= MaxSoftMaskDepth) return null;
-        ChargeLayer();
         bool luminosity = _file.GetName(sm, "S") != "Alpha";
         uint backdrop = 0;
         if (luminosity)
@@ -790,12 +830,19 @@ internal sealed partial class PageRenderer
                 backdrop = groupCs.ToRgb(bc.Select(x => (float)x).ToArray());
             backdrop |= 0xFF000000;
         }
-        var layer = new Canvas(_canvas.Width, _canvas.Height, backdrop);
+        // The group is drawn only where it can change the mask, inside its bounding box, and where the mask can be used:
+        // whatever is painted under the mask stays inside the clip of the state that set it, since restoring an earlier
+        // clip restores the earlier mask with it. Elsewhere the mask is what the backdrop alone gives.
+        var (rx0, ry0, rx1, ry1) = SoftMaskArea(g);
+        long area = (long)(rx1 - rx0) * (ry1 - ry0);
+        ChargeLayer(area);
+        var layer = RentLayer();
+        if (backdrop != 0 && area > 0) layer.FillRect(rx0, ry0, rx1, ry1, backdrop);
         var mainCanvas = _canvas;
         var saved = _gs;
         var savedBase = _patternBase;
         _gs = _gs.Clone();
-        _gs.Clip = new ClipRegion(0, 0, _canvas.Width, _canvas.Height);
+        _gs.Clip = new ClipRegion(rx0, ry0, rx1, ry1);
         _gs.FillAlpha = _gs.StrokeAlpha = 1;
         _gs.Blend = BlendMode.Normal;
         _gs.SoftMask = null;
@@ -803,7 +850,7 @@ internal sealed partial class PageRenderer
         _softMaskDepth++;
         try
         {
-            RunForm(g, null, null);
+            if (area > 0) RunForm(g, null, null);
         }
         finally
         {
@@ -827,21 +874,66 @@ internal sealed partial class PageRenderer
                 lut[i] = (byte)(Math.Clamp(o1[0], 0, 1) * 255 + 0.5);
             }
         }
-        var px = layer.Pixels;
-        var mask = new byte[px.Length];
-        for (int i = 0; i < px.Length; i++)
+        // The values are kept only where the group drew, which lies inside the area; the rest of the area still holds
+        // the backdrop, whose value the mask has everywhere outside. A group that drew nothing leaves an empty rectangle,
+        // whose corners must not be subtracted.
+        int x0 = 0, y0 = 0, w = 0, h = 0;
+        if (layer.DirtyArea > 0)
         {
-            uint c = px[i];
-            int v;
-            if (luminosity)
-            {
-                // The layer is opaque (backdrop), so premultiplied equals straight color.
-                v = ((int)(c & 255) * 77 + (int)((c >> 8) & 255) * 151 + (int)((c >> 16) & 255) * 28) >> 8;
-            }
-            else v = (int)(c >> 24);
-            mask[i] = lut != null ? lut[v] : (byte)v;
+            x0 = layer.DirtyX0;
+            y0 = layer.DirtyY0;
+            w = layer.DirtyX1 - x0;
+            h = layer.DirtyY1 - y0;
         }
-        return mask;
+        var px = layer.Pixels;
+        var mask = new byte[w * h];
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0, i = (y0 + y) * layer.Width + x0; x < w; x++, i++) mask[y * w + x] = MaskValue(px[i], luminosity, lut);
+        }
+        var outside = MaskValue(backdrop, luminosity, lut);
+        if (backdrop != 0 && area > 0) layer.FillRect(rx0, ry0, rx1, ry1, 0);
+        ReturnLayer(layer);
+        return new SoftMask(mask, x0, y0, w, h, outside);
+    }
+
+    /// <summary>The mask value of a pixel of a soft mask's layer: its luminosity or its alpha, through the transfer table.</summary>
+    private static byte MaskValue(uint c, bool luminosity, byte[]? lut)
+    {
+        // A luminosity layer is opaque (backdrop), so premultiplied equals straight color.
+        int v = luminosity ? ((int)(c & 255) * 77 + (int)((c >> 8) & 255) * 151 + (int)((c >> 16) & 255) * 28) >> 8 : (int)(c >> 24);
+        return lut != null ? lut[v] : (byte)v;
+    }
+
+    /// <summary>
+    /// The device rectangle a soft mask's group can draw in and the mask be used in: the clip's bounds, within the
+    /// canvas and the group's bounding box under the current transform. It has a pixel to spare on every side of the
+    /// box, which the clip of the box itself then trims exactly.
+    /// </summary>
+    private (int X0, int Y0, int X1, int Y1) SoftMaskArea(PdfStream group)
+    {
+        var clip = _gs.Clip;
+        int x0 = Math.Max(0, clip.X0), y0 = Math.Max(0, clip.Y0);
+        int x1 = Math.Min(_canvas.Width, clip.X1), y1 = Math.Min(_canvas.Height, clip.Y1);
+        if (_file.GetNumbers(group, "BBox") is { Length: >= 4 } bbox)
+        {
+            var m = Matrix.FromArray(_file.GetNumbers(group, "Matrix")).Multiply(_gs.Ctm);
+            double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+            foreach (var (bx, by) in new[] { (bbox[0], bbox[1]), (bbox[2], bbox[1]), (bbox[0], bbox[3]), (bbox[2], bbox[3]) })
+            {
+                var (dx, dy) = m.Apply(bx, by);
+                minX = Math.Min(minX, dx); minY = Math.Min(minY, dy); maxX = Math.Max(maxX, dx); maxY = Math.Max(maxY, dy);
+            }
+            // A box that does not transform to finite numbers leaves the clip as the only bound.
+            if (double.IsFinite(minX) && double.IsFinite(minY) && double.IsFinite(maxX) && double.IsFinite(maxY))
+            {
+                x0 = (int)Math.Max(x0, Math.Floor(minX) - 1);
+                y0 = (int)Math.Max(y0, Math.Floor(minY) - 1);
+                x1 = (int)Math.Min(x1, Math.Ceiling(maxX) + 1);
+                y1 = (int)Math.Min(y1, Math.Ceiling(maxY) + 1);
+            }
+        }
+        return x1 > x0 && y1 > y0 ? (x0, y0, x1, y1) : (0, 0, 0, 0);
     }
 
     // ------------------------------------------------------------------ annotations

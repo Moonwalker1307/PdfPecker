@@ -9,6 +9,7 @@ internal sealed partial class Painter : ICoverageSink
     // Scratch rows, grown on demand and reused so that painting a row does not allocate.
     private uint[] _colors = new uint[ScratchSize];
     private byte[] _coverage = new byte[ScratchSize];
+    private byte[] _softMaskRow = new byte[ScratchSize];
 
     public Canvas Canvas { get; set; } = null!;
 
@@ -24,8 +25,8 @@ internal sealed partial class Painter : ICoverageSink
 
     public BlendMode Blend { get; set; }
 
-    /// <summary>Optional full-canvas soft mask (from an ExtGState /SMask).</summary>
-    public byte[]? SoftMask { get; set; }
+    /// <summary>Optional soft mask (from an ExtGState /SMask).</summary>
+    public SoftMask? SoftMask { get; set; }
 
     /// <summary>True when painting is a plain overwrite with an opaque solid color: no mask, shader, blend mode or transparency.</summary>
     private bool OverwritesWithSolidColor
@@ -46,6 +47,7 @@ internal sealed partial class Painter : ICoverageSink
         int count = clippedX1 - clippedX0;
         if (cov == FullCoverage && OverwritesWithSolidColor)
         {
+            Canvas.MarkDirty(y, clippedX0, clippedX1);
             Canvas.Pixels.AsSpan(y * Canvas.Width + clippedX0, count).Fill(Color);
             return;
         }
