@@ -508,6 +508,7 @@ internal sealed partial class ComputedStyle
     public Length ShapeMargin { get => _rare.ShapeMargin; set => Rare.ShapeMargin = value; }
     public float ShapeImageThreshold { get => _rare.ShapeImageThreshold; set => Rare.ShapeImageThreshold = value; }
     public ShapeBox OverflowClipBox { get => _rare.OverflowClipBox; set => Rare.OverflowClipBox = value; }
+    public bool OverflowAuto { get => _rare.OverflowAuto; set => Rare.OverflowAuto = value; }
     public float OverflowClipMargin { get => _rare.OverflowClipMargin; set => Rare.OverflowClipMargin = value; }
     public float InitialLetterSize { get => _rare.InitialLetterSize; set => Rare.InitialLetterSize = value; }
     public int InitialLetterSink { get => _rare.InitialLetterSink; set => Rare.InitialLetterSink = value; }
@@ -570,6 +571,9 @@ internal sealed partial class ComputedStyle
         public float ShapeImageThreshold;           // shape-image-threshold, from 0 to 1
         public ShapeBox OverflowClipBox = ShapeBox.PaddingBox; // overflow-clip-margin: the box that overflow: clip clips to
         public float OverflowClipMargin;            // overflow-clip-margin: how far past that box, in points
+        // overflow-x is auto or overlay, which OverflowX stores as hidden because they clip alike on paper. An SVG
+        // viewport does not clip for auto, so the drawing code needs to tell them apart.
+        public bool OverflowAuto;
         /// <summary>
         /// initial-letter on a ::first-letter: how many lines the letter is tall, or 0 for normal, and how many lines it sinks
         /// (0 for drop, which sinks it by its size rounded up; raise is 1). InitialLetterSunk is false for a letter its author

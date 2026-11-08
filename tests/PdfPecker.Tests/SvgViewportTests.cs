@@ -95,4 +95,41 @@ public class SvgViewportTests
         Assert.Equal(White, At(pdf, 310, 150));
         Color(0, 0, 255, At(pdf, 25, 375));
     }
+
+    [Fact]
+    public void Css_overflow_auto_is_visible_in_svg_and_scroll_clips()
+    {
+        // In SVG, auto means visible, which Chrome follows for the property as for the attribute. A marker takes its
+        // overflow from CSS too.
+        var pdf = Svg("<svg x='0' y='0' width='100' height='100' style='overflow:auto'><rect width='150' height='150' fill='#f00'/></svg>"
+            + "<svg x='200' y='0' width='100' height='100' style='overflow:scroll'><rect width='150' height='150' fill='#00f'/></svg>"
+            + "<svg x='0' y='200' width='100' height='100' style='overflow:hidden auto'><rect width='150' height='150' fill='#0a0'/></svg>"
+            + "<marker id='m' markerWidth='10' markerHeight='10' style='overflow:visible'><rect width='30' height='30' fill='#808'/></marker>"
+            + "<marker id='h' markerWidth='10' markerHeight='10'><rect width='30' height='30' fill='#f80'/></marker>"
+            + "<path d='M200 200 L210 200' stroke='#000' marker-start='url(#m)'/><path d='M300 200 L310 200' stroke='#000' marker-start='url(#h)'/>");
+        Color(255, 0, 0, At(pdf, 125, 125));
+        Color(0, 0, 255, At(pdf, 250, 50));
+        Assert.Equal(White, At(pdf, 325, 125));
+        // overflow-x decides, as for the attribute's single value.
+        Assert.Equal(White, At(pdf, 125, 225));
+        Color(136, 0, 136, At(pdf, 225, 225));
+        Color(255, 136, 0, At(pdf, 305, 205));
+        Assert.Equal(White, At(pdf, 325, 225));
+    }
+
+    [Fact]
+    public void Text_positions_take_units_and_percentages()
+    {
+        // 1in is 96 px, 2cm about 75.6 px, 10% of the height 40 px and 10em at 20px 200 px; Chrome places them alike.
+        var pdf = Svg("<text x='1in' y='1in' font-size='20'>Inch</text>"
+            + "<text x='10' y='250' dx='1in' font-size='20'>Dx<tspan dy='0.5in'>Dy</tspan></text>"
+            + "<text x='2cm' y='10%' font-size='20'>Cm</text>"
+            + "<text x='10' y='350' font-size='20'>em<tspan x='10em' dy='12pt'>ten</tspan></text>");
+        var content = System.Text.Encoding.Latin1.GetString(pdf);
+        Assert.Contains("1 0 0 -1 96 96 Tm (Inch)", content);
+        Assert.Contains("1 0 0 -1 106 250 Tm (Dx)", content);
+        Assert.Matches(@"1 0 0 -1 [\d.]+ 298 Tm \(Dy\)", content);
+        Assert.Contains("1 0 0 -1 75.591 40 Tm (Cm)", content);
+        Assert.Contains("1 0 0 -1 200 366 Tm (ten)", content);
+    }
 }

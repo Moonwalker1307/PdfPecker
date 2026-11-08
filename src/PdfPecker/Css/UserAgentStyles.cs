@@ -105,8 +105,8 @@ input[type=date] pdf-field-value, input[type=month] pdf-field-value, input[type=
 input[type=datetime-local] pdf-field-value { padding: 1px 0; }
 textarea pdf-field-value { white-space: pre-wrap; overflow-wrap: break-word; }
 option, optgroup { display: none; }
-/* A nested svg element clips what it draws to its viewport, as in Chrome. */
-svg svg { overflow: hidden; }
+/* A nested svg element and a marker clip what they draw to their viewport, as in Chrome. */
+svg svg, svg marker { overflow: hidden; }
 q::before { content: open-quote; }
 q::after { content: close-quote; }
 /* CSS footnotes (float: footnote), numbered by the footnote counter: a superscript call in the text, as Prince and

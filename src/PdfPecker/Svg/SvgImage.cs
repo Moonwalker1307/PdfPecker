@@ -570,7 +570,7 @@ internal sealed partial class SvgImage
                 return;
             }
             case "text":
-                RenderText(e, ctm, op);
+                RenderText(e, s, ctm, op);
                 return;
             case "image":
                 RenderImage(e, s, ctm, op);
@@ -675,11 +675,12 @@ internal sealed partial class SvgImage
     }
 
     /// <summary>
-    /// Whether a nested svg element clips what it draws to its viewport: it does unless its overflow is visible, which
-    /// the overflow attribute can say as visible or auto.
+    /// Whether a nested svg element or a marker clips what it draws to its viewport: it does unless its overflow is
+    /// visible, which the overflow property and attribute can say as visible or auto. In SVG, auto means visible.
     /// </summary>
-    private static bool ClipsToViewport(Element svg, ComputedStyle s)
-        => s.OverflowX != Overflow.Visible && svg.GetAttribute("overflow")?.Trim().ToLowerInvariant() is not ("visible" or "auto");
+    private static bool ClipsToViewport(Element e, ComputedStyle? s)
+        => (s == null || s.OverflowX != Overflow.Visible && !s.OverflowAuto)
+            && e.GetAttribute("overflow")?.Trim().ToLowerInvariant() is not ("visible" or "auto");
 
     /// <summary>Whether a paint's url refers to a gradient or pattern rather than standing for a context paint.</summary>
     private static bool IsPaintServer(string? url) => url != null && url != ContextFill && url != ContextStroke;
@@ -868,28 +869,48 @@ internal sealed partial class SvgImage
         }
     }
 
-    /// <summary>Renders an element referenced by &lt;use&gt;; the use element's own presentation styles were already
-    /// inherited by the target through the cascade only when the target is its descendant, so they are applied here.</summary>
     /// <summary>
     /// The style of an element that a use element draws, whose parent in that drawing has the style
     /// <paramref name="parent"/>. An element that sets no paint of its own takes the paint of that parent, as the
     /// element's copy in the use element's shadow tree would, instead of the paint where it is defined. One that sets
     /// some keeps its own style: the properties it left alone still come from where it is defined. An element that
     /// inherits its colour takes that parent's too, so that currentColor in its fill or stroke is the use element's
-    /// colour, as icon sprites expect.
+    /// colour, as icon sprites expect. Text takes the font family, weight, style, stretch and size and the letter
+    /// spacing it inherits from that parent in the same way.
     /// </summary>
     private static ComputedStyle InUse(ComputedStyle s, ComputedStyle parent)
     {
         if (s.ParentStyle is not { } defined) return s;
         var used = s.InheritsSvgPaint(defined) && !s.InheritsSvgPaint(parent) ? s.WithSvgPaintOf(parent) : s;
-        if (s.Color == defined.Color && s.Color != parent.Color)
+        // A value equal to the one where the element is defined is taken as inherited, as for the colour before.
+        if (s.Color == defined.Color && s.Color != parent.Color) Own(ref used, s).Color = parent.Color;
+        bool font = false;
+        if (s.FontFamily == defined.FontFamily && s.FontFamilyName == defined.FontFamilyName
+            && (s.FontFamily != parent.FontFamily || s.FontFamilyName != parent.FontFamilyName))
         {
-            if (ReferenceEquals(used, s)) used = s.Clone();
-            used.Color = parent.Color;
+            var u = Own(ref used, s);
+            (u.FontFamily, u.FontFamilyName) = (parent.FontFamily, parent.FontFamilyName);
+            font = true;
         }
+        if (s.FontWeight == defined.FontWeight && s.Bold == defined.Bold && (s.FontWeight != parent.FontWeight || s.Bold != parent.Bold))
+        {
+            var u = Own(ref used, s);
+            (u.FontWeight, u.Bold) = (parent.FontWeight, parent.Bold);
+            font = true;
+        }
+        if (s.Italic == defined.Italic && s.Italic != parent.Italic) { Own(ref used, s).Italic = parent.Italic; font = true; }
+        if (s.FontStretch == defined.FontStretch && s.FontStretch != parent.FontStretch) { Own(ref used, s).FontStretch = parent.FontStretch; font = true; }
+        if (s.FontSize == defined.FontSize && s.FontSize != parent.FontSize) { Own(ref used, s).FontSize = parent.FontSize; font = true; }
+        if (s.LetterSpacing == defined.LetterSpacing && s.LetterSpacing != parent.LetterSpacing) Own(ref used, s).LetterSpacing = parent.LetterSpacing;
+        if (font) used.InvalidateFont();
         return used;
+
+        // The style to change: a copy, so that the element's own style stays as the cascade made it.
+        static ComputedStyle Own(ref ComputedStyle used, ComputedStyle s) => ReferenceEquals(used, s) ? used = s.Clone() : used;
     }
 
+    /// <summary>Renders an element referenced by &lt;use&gt;; the use element's own presentation styles were already
+    /// inherited by the target through the cascade only when the target is its descendant, so they are applied here.</summary>
     private void RenderReferenced(Element target, Element use, Matrix m, float opacity, int depth)
         => Render(target, m, opacity * (use.Style?.Opacity ?? 1), depth);
 
@@ -1225,40 +1246,43 @@ internal sealed partial class SvgImage
     /// Lays out a &lt;text&gt; element and its tspans: x/y start a new text chunk (aligned by text-anchor), dx/dy shift
     /// the pen, white space collapses as with xml:space="default". Only the first value of each position list is used.
     /// Inside a textPath, the pen's x is the distance along the path and its y the shift off it, as in Chromium.
+    /// <paramref name="style"/> is the text element's style where it is drawn; inside what a use element draws, its
+    /// tspans inherit from that style as shapes do (see <see cref="InUse"/>).
     /// </summary>
-    private void RenderText(Element text, Matrix ctm, float opacity)
+    private void RenderText(Element text, ComputedStyle style, Matrix ctm, float opacity)
     {
+        bool inUse = _useParent != null;
         var runs = new List<TextRun>();
         var chunkStarts = new List<int>();
         float penX = 0, penY = 0;
         bool lastSpace = true;
         SvgPathMeasure? onPath = null;
 
-        void Walk(Element el, int depth)
+        void Walk(Element el, ComputedStyle st, int depth)
         {
-            if (depth > 16 || el.Style == null || el.Style.Display == Display.None) return;
+            if (depth > 16 || st.Display == Display.None) return;
             if (el.Name == "textpath" && depth > 0 && onPath == null)
             {
-                WalkTextPath(el, depth);
+                WalkTextPath(el, st, depth);
                 return;
             }
-            var xs = Lens(el.GetAttribute("x"), Axis.X);
+            var xs = Lens(el, "x", Axis.X);
             // Along a path, y has no meaning: only dy shifts the text off it.
-            var ys = onPath == null ? Lens(el.GetAttribute("y"), Axis.Y) : new List<float>();
+            var ys = onPath == null ? Lens(el, "y", Axis.Y) : new List<float>();
             if (xs.Count > 0 || ys.Count > 0 || depth == 0) chunkStarts.Add(runs.Count);
             if (xs.Count > 0) penX = xs[0];
             if (ys.Count > 0) penY = ys[0];
-            var dxs = ParseNumbers(el.GetAttribute("dx"));
-            var dys = ParseNumbers(el.GetAttribute("dy"));
+            var dxs = Lens(el, "dx", Axis.X);
+            var dys = Lens(el, "dy", Axis.Y);
             if (dxs.Count > 0) penX += dxs[0];
             if (dys.Count > 0) penY += dys[0];
-            WalkChildren(el, depth);
+            WalkChildren(el, st, depth);
         }
 
         // A textPath starts a chunk at its startOffset along the referenced path. Text after it continues from the path's
         // end point; Chromium draws nothing for a reference to anything but a path element, and puts the text after it
         // at the origin.
-        void WalkTextPath(Element el, int depth)
+        void WalkTextPath(Element el, ComputedStyle st, int depth)
         {
             var path = TextPathMeasure(Reference(el.GetAttribute("href") ?? el.GetAttribute("xlink:href")), out float units);
             if (path != null)
@@ -1267,7 +1291,7 @@ internal sealed partial class SvgImage
                 penX = StartOffset(el.GetAttribute("startoffset"), path.Length, units);
                 penY = 0;
                 onPath = path;
-                WalkChildren(el, depth);
+                WalkChildren(el, st, depth);
                 onPath = null;
                 penX = path.EndX;
                 penY = path.EndY;
@@ -1276,13 +1300,13 @@ internal sealed partial class SvgImage
             chunkStarts.Add(runs.Count);
         }
 
-        void WalkChildren(Element el, int depth)
+        void WalkChildren(Element el, ComputedStyle st, int depth)
         {
             foreach (var child in el.Children)
             {
                 if (child is Element ce)
                 {
-                    if (ce.Name is "tspan" or "a" or "textpath") Walk(ce, depth + 1);
+                    if (ce.Name is "tspan" or "a" or "textpath" && ce.Style is { } cs) Walk(ce, inUse ? InUse(cs, st) : cs, depth + 1);
                     continue;
                 }
                 if (child is not TextNode tn) continue;
@@ -1297,14 +1321,13 @@ internal sealed partial class SvgImage
                 }
                 if (sb.Length == 0) continue;
                 var str = sb.ToString();
-                var st = el.Style;
                 float size = st.FontSize / 0.75f;
                 float w = st.Font.Measure(str, size) + st.LetterSpacing / 0.75f * str.Length;
                 runs.Add(new TextRun(str, st, penX, penY, w, onPath));
                 penX += w;
             }
         }
-        Walk(text, 0);
+        Walk(text, style, 0);
         if (runs.Count == 0) return;
         // Trailing white space of the element is dropped.
         var last = runs[^1];
@@ -1324,9 +1347,9 @@ internal sealed partial class SvgImage
             float left = float.MaxValue, right = float.MinValue;
             for (int i = from; i < to; i++) { left = Math.Min(left, runs[i].X); right = Math.Max(right, runs[i].X + runs[i].Width); }
             var anchor = runs[from].Style.SvgTextAnchor;
-            if (text.Style!.Rtl || NeedsBidi(runs, from, to))
+            if (style.Rtl || NeedsBidi(runs, from, to))
             {
-                EmitBidiChunk(runs, from, to, text.Style.Rtl, anchor, ctm, opacity);
+                EmitBidiChunk(runs, from, to, style.Rtl, anchor, ctm, opacity);
                 continue;
             }
             float shift = anchor == 1 ? -(right - left) / 2 : anchor == 2 ? -(right - left) : 0;
@@ -1658,18 +1681,33 @@ internal sealed partial class SvgImage
         };
     }
 
-    /// <summary>A list of coordinates (the x and y of text), each a number or a percentage of the viewport.</summary>
-    private List<float> Lens(string? value, Axis axis)
+    /// <summary>
+    /// A list of lengths in an attribute (the x, y, dx and dy of text), each a number, a percentage of the viewport or a
+    /// length with a unit. The list ends at the first value that is none of these.
+    /// </summary>
+    private List<float> Lens(Element e, string name, Axis axis)
     {
-        if (value == null || value.IndexOf('%') < 0) return ParseNumbers(value);
+        var value = e.GetAttribute(name);
+        if (value == null || (value.IndexOf('%') < 0 && !HasUnit(value))) return ParseNumbers(value);
         var list = new List<float>();
         foreach (var token in value.Split(ListSeparators, StringSplitOptions.RemoveEmptyEntries))
         {
             if (Percentage(token, axis) is float f) list.Add(f);
-            else if (float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out float n) && float.IsFinite(n)) list.Add(n);
+            else if (float.TryParse(token.EndsWith("px", StringComparison.OrdinalIgnoreCase) ? token.AsSpan(0, token.Length - 2) : token,
+                NumberStyles.Float, CultureInfo.InvariantCulture, out float n) && float.IsFinite(n)) list.Add(n);
+            else if (UnitLength(e, token) is float length) list.Add(length);
             else break;
         }
         return list;
+
+        // A list of plain numbers goes through the number parser as before. A letter other than the e of an exponent
+        // is a unit.
+        static bool HasUnit(string v)
+        {
+            foreach (char c in v)
+                if (char.IsAsciiLetter(c) && c is not ('e' or 'E')) return true;
+            return false;
+        }
     }
 
     private static readonly char[] ListSeparators = { ' ', ',', '\t', '\n', '\r' };
