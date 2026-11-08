@@ -126,15 +126,20 @@ internal static partial class PageStructure
     /// <summary>The page's lines as flow lines, with each word's style and link.</summary>
     private static List<FlowLine> Lines(PdfTextPage text, List<PageLink> links)
     {
-        var lines = new List<FlowLine>(text.Lines.Count);
+        // The lines and words are read by index, as enumerating them through their interfaces allocates for each line.
+        var textLines = text.Lines;
+        var lines = new List<FlowLine>(textLines.Count);
         // Most words of a page share a few fonts, so the style read from the last font name is kept for the next word.
         string? font = null;
         bool bold = false, italic = false;
-        foreach (var line in text.Lines)
+        for (int l = 0; l < textLines.Count; l++)
         {
-            var words = new List<FlowWord>(line.Words.Count);
-            foreach (var w in line.Words)
+            var line = textLines[l];
+            var lineWords = line.Words;
+            var words = new List<FlowWord>(lineWords.Count);
+            for (int k = 0; k < lineWords.Count; k++)
             {
+                var w = lineWords[k];
                 if (!string.Equals(w.FontName, font, StringComparison.Ordinal))
                     (font, bold, italic) = (w.FontName, IsBold(w.FontName), IsItalic(w.FontName));
                 var word = new FlowWord
@@ -177,6 +182,7 @@ internal static partial class PageStructure
             }
             return dots;
         }
+        bool removed = false;
         for (int i = 0; i < words.Count;)
         {
             int j = i, dots = 0;
@@ -192,6 +198,7 @@ internal static partial class PageStructure
                     words[i - 1].X1 = Math.Max(words[i - 1].X1, reach);
                 }
                 words.RemoveRange(i, j - i);
+                removed = true;
                 continue;
             }
             i = Math.Max(j, i + 1);
@@ -203,7 +210,9 @@ internal static partial class PageStructure
             while (end > 0 && w.Text[end - 1] is '.' or ' ' or '·') { if (w.Text[end - 1] != ' ') dots++; end--; }
             if (dots >= 4 && end > 0) w.Text = w.Text[..end];
         }
-        for (int i = 0; i < words.Count; i++) words[i].Order = i;
+        // The words are numbered in order as they are made, so only removing some needs them numbered again.
+        if (removed)
+            for (int i = 0; i < words.Count; i++) words[i].Order = i;
     }
 
     /// <summary>
@@ -213,7 +222,11 @@ internal static partial class PageStructure
     /// </summary>
     private static void JoinSpacedLetters(List<FlowWord> words)
     {
-        if (words.Count < 5 || words.Count(w => w.Text.Length == 1 && char.IsLetter(w.Text[0])) < 0.7 * words.Count) return;
+        if (words.Count < 5) return;
+        // Counting stops as soon as too many words are not single letters, which in a line of ordinary words is within
+        // its first few.
+        for (int i = 0, others = 0; i < words.Count; i++)
+            if (!(words[i].Text.Length == 1 && char.IsLetter(words[i].Text[0])) && words.Count - ++others < 0.7 * words.Count) return;
         var gaps = new List<double>(words.Count - 1);
         for (int i = 1; i < words.Count; i++) gaps.Add(words[i].X0 - words[i - 1].X1);
         if (gaps.Exists(g => g < -1)) return; // not in order along the line
