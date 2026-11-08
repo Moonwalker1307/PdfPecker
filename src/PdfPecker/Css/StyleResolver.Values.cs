@@ -435,6 +435,12 @@ internal sealed partial class StyleResolver
         return (px < 1 ? 1 : MathF.Floor(px + 0.001f)) * 0.75f;
     }
 
+    /// <summary>
+    /// Border spacing is rounded down to whole CSS pixels, as Chrome keeps it: 10pt (13.33px) is 13px, so rows and
+    /// columns land where Chrome puts them instead of drifting by a pixel every few rows.
+    /// </summary>
+    internal static float SnapBorderSpacing(float pt) => pt > 0 ? MathF.Floor(pt / 0.75f + 0.001f) * 0.75f : ToLayoutUnits(pt);
+
     /// <summary>Notes whether a border-style value makes the side hidden; a value that is not a style leaves it as it is.</summary>
     private static void SetHidden(ComputedStyle s, byte side, string lower)
     {
