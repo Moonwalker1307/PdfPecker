@@ -27,11 +27,48 @@ internal sealed partial class Decryptor
     private static byte[]? Aes256FileKey(PdfFile file, PdfDict encrypt, int revision, byte[] owner, byte[] user, string password)
     {
         if (owner.Length < PasswordEntryBytes || user.Length < PasswordEntryBytes) return null;
-        // NFKC (SASLprep's normalization) from the library's own tables, so the key is the same with or without ICU.
-        var passwordBytes = Encoding.UTF8.GetBytes(UnicodeNormalization.Normalize(password, NormalizationForm.FormKC));
-        if (passwordBytes.Length > MaxPasswordBytes) passwordBytes = passwordBytes.AsSpan(0, MaxPasswordBytes).ToArray();
         var encryptedUserKey = file.GetBytes(encrypt, "UE");
         var encryptedOwnerKey = file.GetBytes(encrypt, "OE");
+        foreach (var passwordBytes in PasswordCandidates(password))
+        {
+            var key = Aes256FileKey(revision, owner, user, encryptedUserKey, encryptedOwnerKey, passwordBytes);
+            if (key != null) return key;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The UTF-8 forms of a password to try, at most 127 bytes each: SASLprep's, as ISO 32000-2 section 7.6.4.3.3 asks,
+    /// unless SASLprep refuses the password (and with a zero width space as a space, as libidn and PDFBox map it); NFKC
+    /// alone, as PdfPecker 1.23 and earlier prepared passwords; and the password as given, as writers that prepare
+    /// nothing write it. Most passwords are the same in all of them, which are then tried once.
+    /// </summary>
+    internal static List<byte[]> PasswordCandidates(string password)
+    {
+        var candidates = new List<byte[]>(4);
+        if (SaslPrep.Prepare(password, stored: false, out var prepared) == SaslPrep.Refusal.None) Add(prepared!);
+        if (password.Contains('\u200B', StringComparison.Ordinal)
+            && SaslPrep.Prepare(password.Replace('\u200B', ' '), stored: false, out prepared) == SaslPrep.Refusal.None)
+            Add(prepared!);
+        Add(UnicodeNormalization.Normalize(password, NormalizationForm.FormKC));
+        Add(password);
+        return candidates;
+
+        void Add(string s)
+        {
+            var bytes = Truncate(Encoding.UTF8.GetBytes(s));
+            foreach (var candidate in candidates)
+                if (candidate.AsSpan().SequenceEqual(bytes)) return;
+            candidates.Add(bytes);
+        }
+    }
+
+    /// <summary>A password's UTF-8 is cut to its first 127 bytes.</summary>
+    internal static byte[] Truncate(byte[] passwordBytes)
+        => passwordBytes.Length > MaxPasswordBytes ? passwordBytes.AsSpan(0, MaxPasswordBytes).ToArray() : passwordBytes;
+
+    private static byte[]? Aes256FileKey(int revision, byte[] owner, byte[] user, byte[]? encryptedUserKey, byte[]? encryptedOwnerKey, byte[] passwordBytes)
+    {
         var userEntry = user.AsSpan(0, PasswordEntryBytes);
 
         // User password.

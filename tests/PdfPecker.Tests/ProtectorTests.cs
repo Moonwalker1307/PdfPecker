@@ -123,6 +123,87 @@ public class ProtectorTests
         Assert.Throws<PdfPasswordException>(() => PdfProtector.Decrypt(encrypted, "Cafe"));
     }
 
+    [Fact]
+    public void Passwords_are_prepared_with_saslprep()
+    {
+        // ISO 32000-2 prepares AES-256 passwords with SASLprep: the soft hyphen goes, a no-break space is a space, and
+        // NFKC folds the Roman numerals. The prepared passwords are ASCII, so opening with them tries nothing else.
+        var encrypted = PdfProtector.Encrypt(Source.Value, new PdfSecurity { UserPassword = "I\u00ADX", OwnerPassword = "\u2163\u00A0b" });
+        foreach (var password in new[] { "IX", "\u2168", "I\u00ADX" })
+            Assert.False(PdfProtector.IsEncrypted(PdfProtector.Decrypt(encrypted, password)));
+        foreach (var password in new[] { "IV b", "IV\u00A0b", "\u2163\u3000b" })
+            Assert.False(PdfProtector.IsEncrypted(PdfProtector.Decrypt(encrypted, password)));
+        Assert.Throws<PdfPasswordException>(() => PdfProtector.Decrypt(encrypted, "I-X"));
+
+        // Only the first 127 bytes of the prepared password count.
+        var longPassword = PdfProtector.Encrypt(Source.Value, new PdfSecurity { UserPassword = new string('\u00E9', 100) });
+        Assert.False(PdfProtector.IsEncrypted(PdfProtector.Decrypt(longPassword, new string('\u00E9', 63) + "e\u0301" + "x")));
+    }
+
+    public static IEnumerable<object[]> RefusedPasswords() => new[]
+    {
+        new object[] { "bell\u0007" }, // a control character
+        new object[] { "\u0627\u0031" }, // a right-to-left letter that does not end the password
+        new object[] { "smile\U0001F600" }, // a character Unicode 3.2 did not have
+        new object[] { "\uE000secret" }, // a private-use character
+        new object[] { "\u00AD\u200B" }, // nothing left once prepared
+    };
+
+    [Theory]
+    [MemberData(nameof(RefusedPasswords))]
+    public void Passwords_that_saslprep_refuses_do_not_encrypt(string password)
+    {
+        var user = new PdfSecurity { UserPassword = password };
+        var owner = new PdfSecurity { UserPassword = "open", OwnerPassword = password };
+        foreach (var security in new[] { user, owner })
+        {
+            var e = Assert.Throws<ArgumentException>(() => PdfProtector.Encrypt(Source.Value, security));
+            Assert.Equal("security", e.ParamName);
+            Assert.Contains("SASLprep", e.Message, StringComparison.Ordinal);
+            Assert.Equal("security", Assert.Throws<ArgumentException>(() => PdfLinearizer.Linearize(Source.Value, security, null)).ParamName);
+            Assert.Equal("options", Assert.Throws<ArgumentException>(() => HtmlToPdf.Convert("<p>x</p>", new PdfOptions { Security = security })).ParamName);
+            Assert.Equal("options", Assert.Throws<ArgumentException>(
+                () => PdfStamper.Stamp(Source.Value, Source.Value, new PdfStampOptions { Security = security })).ParamName);
+        }
+    }
+
+    /// <summary>
+    /// Gives a file that PdfPecker encrypted new /U and /UE entries for a user password's bytes, as a writer that prepares
+    /// passwords differently, or not at all, would write them: the same file key, behind other password bytes.
+    /// </summary>
+    private static byte[] WithUserPasswordBytes(byte[] encrypted, string password, byte[] passwordBytes)
+    {
+        var file = PdfFile.Open(encrypted, password);
+        var dict = (PdfDict)file.Resolve(file.Trailer["Encrypt"])!;
+        byte[] u = file.GetBytes(dict, "U")!, ue = file.GetBytes(dict, "UE")!;
+        using var aes = Aes.Create();
+        aes.Key = Decryptor.Hash(6, Encoding.UTF8.GetBytes(password), u.AsSpan(40, 8), ReadOnlySpan<byte>.Empty);
+        var fileKey = aes.DecryptCbc(ue, new byte[16], PaddingMode.None);
+        var newU = Decryptor.Hash(6, passwordBytes, u.AsSpan(32, 8), ReadOnlySpan<byte>.Empty).AsSpan(0, 32).ToArray().Concat(u.Skip(32)).ToArray();
+        aes.Key = Decryptor.Hash(6, passwordBytes, u.AsSpan(40, 8), ReadOnlySpan<byte>.Empty);
+        var newUE = aes.EncryptCbc(fileKey, new byte[16], PaddingMode.None);
+        string text = Encoding.Latin1.GetString(encrypted);
+        foreach (var (key, from, to) in new[] { ("/U ", u, newU), ("/UE ", ue, newUE) })
+        {
+            string old = $"{key}<{Convert.ToHexString(from)}>";
+            Assert.Equal(1, text.Split(old).Length - 1);
+            text = text.Replace(old, $"{key}<{Convert.ToHexString(to)}>", StringComparison.Ordinal);
+        }
+        return Encoding.Latin1.GetBytes(text);
+    }
+
+    [Theory]
+    [InlineData("tab\there", "tab\there")] // a writer that prepares nothing, with a password SASLprep refuses
+    [InlineData("I\u00ADX", "I\u00ADX")] // the same, with a password SASLprep changes
+    [InlineData("IX\u00AD", "\u2168\u00AD")] // PdfPecker 1.23 and earlier, which applied NFKC alone
+    [InlineData("a b", "a\u200Bb")] // libidn and PDFBox, which make the zero width space a space
+    public void Files_whose_passwords_were_prepared_otherwise_still_open(string written, string typed)
+    {
+        var rekeyed = WithUserPasswordBytes(PdfProtector.Encrypt(Source.Value, Security()), "open", Encoding.UTF8.GetBytes(written));
+        Assert.Throws<PdfPasswordException>(() => PdfProtector.Decrypt(rekeyed, "open"));
+        AssertSameRendering(Render(Source.Value, null), Render(rekeyed, typed));
+    }
+
     public static IEnumerable<object[]> LegacyFixtures() => new[]
     {
         new object[] { "encrypted-aes128.pdf", "user", "owner", 4 },

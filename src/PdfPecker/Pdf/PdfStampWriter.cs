@@ -71,6 +71,7 @@ internal sealed class PdfStampWriter : PdfObjectWriter
         if (!(options.Scale >= 0 && options.Scale <= 1000)) throw new ArgumentOutOfRangeException(nameof(options), "PdfStampOptions.Scale must be between 0 and 1000.");
         if (!float.IsFinite(options.OffsetX) || !float.IsFinite(options.OffsetY) || Math.Abs(options.OffsetX) > 1e6 || Math.Abs(options.OffsetY) > 1e6)
             throw new ArgumentOutOfRangeException(nameof(options), "PdfStampOptions.OffsetX and OffsetY must be finite and within a million points.");
+        if (options.Security != null) PdfEncryptor.CheckPasswords(options.Security, nameof(options));
 
         using (PdfFile.BeginRender(cancel))
         {

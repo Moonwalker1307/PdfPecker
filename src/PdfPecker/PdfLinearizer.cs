@@ -95,7 +95,8 @@ public static class PdfLinearizer
     /// <returns>The linearized PDF.</returns>
     /// <exception cref="ArgumentException"><paramref name="pdf"/> is digitally signed; or <paramref name="security"/> is
     /// set and <paramref name="pdf"/> claims PDF/A conformance, or claims PDF/UA while <paramref name="security"/> does
-    /// not allow <see cref="PdfPermissions.ExtractForAccessibility"/>.</exception>
+    /// not allow <see cref="PdfPermissions.ExtractForAccessibility"/>, or has a password that SASLprep refuses (see
+    /// <see cref="PdfSecurity.UserPassword"/>).</exception>
     /// <exception cref="PdfPasswordException"><paramref name="pdf"/> is encrypted and <paramref name="password"/> does not open it.</exception>
     /// <exception cref="InvalidDataException"><paramref name="pdf"/> is not a readable PDF, or has no pages.</exception>
     /// <exception cref="NotSupportedException"><paramref name="pdf"/> uses an encryption handler other than the standard one.</exception>
@@ -133,6 +134,7 @@ public static class PdfLinearizer
     private static ByteBuffer LinearizeCore(byte[] pdf, PdfSecurity? security, string? password, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (security != null) PdfEncryptor.CheckPasswords(security, nameof(security));
         using (PdfFile.BeginRender(cancellationToken))
         {
             PdfFile file;

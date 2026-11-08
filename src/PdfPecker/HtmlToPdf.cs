@@ -227,6 +227,7 @@ public static partial class HtmlToPdf
         int uaPart = options.Accessibility switch { PdfAccessibility.PdfUA1 => 1, PdfAccessibility.PdfUA2 => 2, _ => 0 };
         if (uaPart > 0 && options.Security is { } security && (security.Permissions & PdfPermissions.ExtractForAccessibility) == 0)
             throw new ArgumentException("PDF/UA needs PdfPermissions.ExtractForAccessibility, so screen readers can read an encrypted file.", nameof(options));
+        if (options.Security != null) PdfEncryptor.CheckPasswords(options.Security, nameof(options));
         if (options.Linearize && options.Signature != null)
             throw new ArgumentException("A signature is added as an incremental update, which ends linearization: set PdfOptions.Linearize "
                 + "or PdfOptions.Signature, not both.", nameof(options));

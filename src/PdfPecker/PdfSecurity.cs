@@ -37,12 +37,22 @@ public sealed class PdfSecurity
     /// The password needed to open the document. Null or empty: anyone can open it, but the <see cref="Permissions"/>
     /// still apply in readers that honour them.
     /// </summary>
+    /// <remarks>
+    /// As PDF 2.0 asks, both passwords are prepared with SASLprep (RFC 4013) and the first 127 bytes of their UTF-8 are
+    /// used: non-ASCII spaces count as spaces, invisible characters such as the soft hyphen are dropped, and compatibility
+    /// characters are normalized (NFKC), so the ligature U+FB01 and the letters "fi" are the same password. Encrypting
+    /// fails with <see cref="ArgumentException"/> when SASLprep refuses a password: one with control, private-use,
+    /// non-character or bidi control characters, one that mixes right-to-left and left-to-right letters, one with
+    /// characters that Unicode 3.2 did not have, such as most emoji, or one made only of characters that SASLprep drops.
+    /// Opening accepts any password, and also tries it unprepared, as some other tools write it.
+    /// </remarks>
     public string? UserPassword { get; set; }
 
     /// <summary>
     /// The password that gives full access regardless of <see cref="Permissions"/>. When not set, a random owner password
     /// is used, so the permissions cannot be lifted.
     /// </summary>
+    /// <remarks>Prepared and checked like <see cref="UserPassword"/>.</remarks>
     public string? OwnerPassword { get; set; }
 
     /// <summary>What a reader may do when the document is opened with the user password. Default: print and copy for accessibility only.</summary>
