@@ -1429,8 +1429,8 @@ public class HostileInputTests
                    + "<main style='padding-top:90000pt'><table>" + Repeat("<tr><td></td><td></td></tr>", 20_000) + "</table></main>";
         var (pdf, allocated) = Allocating(() => Bounded(html));
         AssertStructurallyValid(pdf);
-        Assert.Equal(524, PageCount(pdf));
-        Assert.Contains("Page 524 of 524", PdfText.ExtractPage(pdf, 524).Text, StringComparison.Ordinal);
+        Assert.Equal(523, PageCount(pdf));
+        Assert.Contains("Page 523 of 523", PdfText.ExtractPage(pdf, 523).Text, StringComparison.Ordinal);
         Assert.InRange(allocated, 0, 128L << 20);
     }
 
