@@ -73,20 +73,24 @@ internal static partial class JpegEncoder
     /// </summary>
     private static void ConvertRow(uint[] pixels, int source, int width, uint matte, Span<byte> y, Span<byte> cb, Span<byte> cr)
     {
-        // Rendered pages are mostly runs of one colour, so a pixel equal to the one before reuses its conversion.
-        uint previous = 0;
+        // Rendered pages are mostly runs of one colour, so a pixel equal to the one before reuses its conversion, and
+        // a run is filled at once.
+        var row = pixels.AsSpan(source, width);
         var color = default(YCbCr);
-        for (int x = 0; x < width; x++)
+        for (int x = 0; x < width;)
         {
-            uint p = pixels[source + x];
-            if (x == 0 || p != previous)
+            uint p = row[x];
+            color = Convert(p, matte);
+            int run = 1;
+            if (x + 1 < width && row[x + 1] == p)
             {
-                color = Convert(p, matte);
-                previous = p;
+                run = row[(x + 1)..].IndexOfAnyExcept(p);
+                run = run < 0 ? width - x : run + 1;
             }
-            y[x] = color.Y;
-            cb[x] = color.Cb;
-            cr[x] = color.Cr;
+            y.Slice(x, run).Fill(color.Y);
+            cb.Slice(x, run).Fill(color.Cb);
+            cr.Slice(x, run).Fill(color.Cr);
+            x += run;
         }
         for (int x = width; x < y.Length; x++)
         {
