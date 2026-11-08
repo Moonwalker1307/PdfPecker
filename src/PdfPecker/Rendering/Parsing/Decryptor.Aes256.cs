@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using PdfPecker.Text;
 
 namespace PdfPecker.Rendering.Parsing;
 
@@ -26,7 +27,8 @@ internal sealed partial class Decryptor
     private static byte[]? Aes256FileKey(PdfFile file, PdfDict encrypt, int revision, byte[] owner, byte[] user, string password)
     {
         if (owner.Length < PasswordEntryBytes || user.Length < PasswordEntryBytes) return null;
-        var passwordBytes = Encoding.UTF8.GetBytes(password.Normalize(NormalizationForm.FormKC));
+        // NFKC (SASLprep's normalization) from the library's own tables, so the key is the same with or without ICU.
+        var passwordBytes = Encoding.UTF8.GetBytes(UnicodeNormalization.Normalize(password, NormalizationForm.FormKC));
         if (passwordBytes.Length > MaxPasswordBytes) passwordBytes = passwordBytes.AsSpan(0, MaxPasswordBytes).ToArray();
         var encryptedUserKey = file.GetBytes(encrypt, "UE");
         var encryptedOwnerKey = file.GetBytes(encrypt, "OE");

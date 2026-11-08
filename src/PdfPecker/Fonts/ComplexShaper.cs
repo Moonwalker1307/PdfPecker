@@ -251,7 +251,7 @@ internal static partial class ComplexShaper
         AddText(font, layout, run, s, start, length, rtl, decomposeFirst: false);
         if (script is Script.Thai or Script.Lao) DecomposeSaraAm(run, font, layout);
         ReorderMarks(run, script);
-        Compose(font, layout, run);
+        Compose(font, layout, run, script);
         if (Joins(script)) ArabicJoining(run, script);
         // Joiners and other invisible controls have done their part; they are not drawn. Thai and Lao keep them as
         // long as HarfBuzz does, which keeps the marks on either side apart, and so does text with emoji, whose font

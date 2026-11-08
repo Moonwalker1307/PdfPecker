@@ -110,6 +110,19 @@ public class ProtectorTests
         AssertDocumentIntact(changed, "new");
     }
 
+    [Fact]
+    public void Passwords_in_another_normal_form_open_the_file()
+    {
+        // AES-256 passwords are normalized (NFKC) before they are hashed, so a password typed precomposed, decomposed or
+        // in fullwidth letters opens the file. The library normalizes them itself: string.Normalize does nothing without
+        // ICU, so the command-line tool and the Native AOT packages hashed other bytes than an ICU host.
+        var encrypted = PdfProtector.Encrypt(Source.Value, new PdfSecurity { UserPassword = "Café", OwnerPassword = "Ａdmin①" });
+        Assert.False(PdfProtector.IsEncrypted(PdfProtector.Decrypt(encrypted, "Café")));
+        Assert.False(PdfProtector.IsEncrypted(PdfProtector.Decrypt(encrypted, "Admin1")));
+        AssertSameRendering(Render(Source.Value, null), Render(encrypted, "Café"));
+        Assert.Throws<PdfPasswordException>(() => PdfProtector.Decrypt(encrypted, "Cafe"));
+    }
+
     public static IEnumerable<object[]> LegacyFixtures() => new[]
     {
         new object[] { "encrypted-aes128.pdf", "user", "owner", 4 },

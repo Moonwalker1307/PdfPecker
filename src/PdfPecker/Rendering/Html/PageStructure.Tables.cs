@@ -44,36 +44,56 @@ internal static partial class PageStructure
             while (parent[i] != i) i = parent[i] = parent[parent[i]];
             return i;
         }
+        void Union(int a, int b)
+        {
+            a = Find(a);
+            b = Find(b);
+            if (a != b) parent[a] = b;
+        }
         for (int i = 0; i < h.Count; i++)
         {
             if ((i & 0xFF) == 0) cancellationToken.ThrowIfCancellationRequested();
             for (int j = 0; j < v.Count; j++)
             {
                 if (v[j].Pos < h[i].Start - Reach || v[j].Pos > h[i].End + Reach || h[i].Pos < v[j].Start - Reach || h[i].Pos > v[j].End + Reach) continue;
-                int a = Find(i), b = Find(h.Count + j);
-                if (a != b) parent[a] = b;
+                Union(i, h.Count + j);
             }
         }
-        var groups = new Dictionary<int, (List<Segment> H, List<Segment> V)>();
+        var strict = new int[parent.Length];
+        for (int i = 0; i < parent.Length; i++) strict[i] = Find(i);
+        var groups = Groups(i => strict[i]);
+
+        // Tables with separate borders, the CSS default, draw each cell's box on its own, the border spacing and a border's
+        // width from the next: the facing sides of two cells of a row run the same length side by side a few points apart,
+        // as do those of two cells of a column. Such sides join the boxes into one grid. Boxes side by side or one under
+        // another are as often cards or panels, so a joined grid, and each grid it joins, is a table only with two rows
+        // and two columns or more; a row of cells whose lines meet is read with the rest of its table.
+        long work = 0;
+        Pair(h, 0);
+        Pair(v, h.Count);
+        var joined = new Dictionary<int, int>(); // a grid each joined grid holds, or -1 once it holds two
         for (int i = 0; i < parent.Length; i++)
         {
             int root = Find(i);
-            if (!groups.TryGetValue(root, out var g)) groups[root] = g = (new List<Segment>(), new List<Segment>());
-            if (i < h.Count) g.H.Add(h[i]); else g.V.Add(v[i - h.Count]);
+            if (!joined.TryGetValue(root, out int first)) joined[root] = strict[i];
+            else if (first >= 0 && first != strict[i]) joined[root] = -1;
         }
+        var separate = Groups(i => joined[Find(i)] == -1 ? Find(i) : -1);
 
         // Grids, smallest first: a frame around a table, or around a box that holds one, is not a table itself.
-        var grids = groups.Values.Where(g => g.H.Count > 0 && g.V.Count > 0).Select(g => (g.H, g.V, Box: Bounds(g.H, g.V)))
+        var grids = groups.Select(e => (e.Value.H, e.Value.V, Joined: joined[Find(e.Key)] == -1))
+            .Concat(separate.Values.Select(g => (g.H, g.V, Joined: true)))
+            .Where(g => g.H.Count > 0 && g.V.Count > 0).Select(g => (g.H, g.V, g.Joined, Box: Bounds(g.H, g.V)))
             .OrderBy(g => (g.Box.X1 - g.Box.X0) * (g.Box.Y1 - g.Box.Y0)).ToList();
         var found = new List<(double X0, double Y0, double X1, double Y1)>();
-        foreach (var (gh, gv, box) in grids)
+        foreach (var (gh, gv, boxes, box) in grids)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (found.Exists(f => f.X0 >= box.X0 - Reach && f.X1 <= box.X1 + Reach && f.Y0 >= box.Y0 - Reach && f.Y1 <= box.Y1 + Reach)) continue;
             var inside = words.FindAll(w => !w.Used && Inside(w, box));
             if (inside.Count == 0) continue;
             var breaks = Breaks(rules, gh, gv, box, inside);
-            var block = Grid(gh, gv.Concat(breaks).ToList(), box, inside, body);
+            var block = Grid(gh, gv.Concat(breaks).ToList(), box, inside, body, boxes);
             // Columns drawn only by breaks in the row lines say nothing of a row whose one bold label spans them.
             if (breaks.Count > 0 && block is TableBlock broken) SpanHeadings(broken);
             if (block == null) continue;
@@ -90,6 +110,35 @@ internal static partial class PageStructure
         {
             cancellationToken.ThrowIfCancellationRequested();
             RuledRows(stack, words, body, blocks);
+        }
+
+        // The lines of each group, by the group a line's index maps to; -1 leaves a line out.
+        Dictionary<int, (List<Segment> H, List<Segment> V)> Groups(Func<int, int> group)
+        {
+            var result = new Dictionary<int, (List<Segment> H, List<Segment> V)>();
+            for (int i = 0; i < parent.Length; i++)
+            {
+                int root = group(i);
+                if (root < 0) continue;
+                if (!result.TryGetValue(root, out var g)) result[root] = g = (new List<Segment>(), new List<Segment>());
+                if (i < h.Count) g.H.Add(h[i]); else g.V.Add(v[i - h.Count]);
+            }
+            return result;
+        }
+
+        // Joins lines of one direction, sorted by position, that run the same length a few points apart. A page of so
+        // many lines that comparing them takes long is a drawing, and its lines stay as they are.
+        void Pair(List<Segment> list, int offset)
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                if ((i & 0xFF) == 0) cancellationToken.ThrowIfCancellationRequested();
+                for (int j = i + 1; j < list.Count && list[j].Pos - list[i].Pos <= Close; j++)
+                {
+                    if (++work > MaxCrossings) return;
+                    if (Math.Abs(list[j].Start - list[i].Start) <= SameLine && Math.Abs(list[j].End - list[i].End) <= SameLine) Union(offset + i, offset + j);
+                }
+            }
         }
     }
 
@@ -249,14 +298,16 @@ internal static partial class PageStructure
     /// <summary>
     /// The table a grid of crossing rules outlines, or null when it is not one: cells come from the boundaries drawn
     /// between them, and a cell no boundary divides spans several rows or columns. A grid of one row or one column takes
-    /// its other direction from the text, as tables with only row lines or only column lines have.
+    /// its other direction from the text, as tables with only row lines or only column lines have. A grid of
+    /// <paramref name="boxes"/>, cells that each draw their own border, or a part of one needs two rows and two columns.
     /// </summary>
-    private static FlowBlock? Grid(List<Segment> h, List<Segment> v, (double X0, double Y0, double X1, double Y1) box, List<FlowWord> words, double body)
+    private static FlowBlock? Grid(List<Segment> h, List<Segment> v, (double X0, double Y0, double X1, double Y1) box, List<FlowWord> words, double body,
+        bool boxes = false)
     {
         var xs = Boundaries(v, box.X0, box.X1, w => w.CenterX, words);
         var ys = Boundaries(h, box.Y0, box.Y1, w => w.CenterY, words);
         int columns = xs.Count - 1, rows = ys.Count - 1;
-        if (columns < 1 || rows < 1 || (columns == 1 && rows == 1)) return null;
+        if (columns < 1 || rows < 1 || (columns == 1 && rows == 1) || (boxes && (columns == 1 || rows == 1))) return null;
         if ((long)columns * rows > 100_000) return null;
 
         // Cells that no drawn boundary separates are one cell.

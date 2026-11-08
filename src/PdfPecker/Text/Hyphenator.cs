@@ -249,18 +249,10 @@ internal sealed class Hyphenator
         var starts = new List<int>(word.Length);
         for (int i = 0; i < word.Length;)
         {
-            // A letter outside the Basic Multilingual Plane is a surrogate pair; normalising half of one throws.
+            // A letter outside the Basic Multilingual Plane is a surrogate pair, whose halves stay together.
             int j = i + (char.IsSurrogatePair(word[i], i + 1 < word.Length ? word[i + 1] : '\0') ? 2 : 1);
             while (j < word.Length && CharUnicodeInfo.GetUnicodeCategory(word[j]) == UnicodeCategory.NonSpacingMark) j++;
-            string letter;
-            try
-            {
-                letter = word.Slice(i, j - i).ToString().Normalize(NormalizationForm.FormC);
-            }
-            catch (PlatformNotSupportedException)
-            {
-                return 0; // invariant globalization mode without normalization data
-            }
+            string letter = UnicodeNormalization.Normalize(word.Slice(i, j - i).ToString(), NormalizationForm.FormC);
             // A mark with no letter before it (at the start of the word) stays a mark when composed, and hyphenating the
             // composed word would come back here for ever.
             if (letter.Length != 1 || CharUnicodeInfo.GetUnicodeCategory(letter[0]) == UnicodeCategory.NonSpacingMark) return 0;

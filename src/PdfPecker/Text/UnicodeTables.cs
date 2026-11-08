@@ -179,37 +179,71 @@ internal static partial class UnicodeTables
         };
     }
 
-    /// <summary>The canonical decomposition of a Hebrew or Arabic letter (second is 0 for one character), or false.</summary>
-    public static bool Decompose(int cp, out int first, out int second)
+    // DecompositionStarts: where a mapping starts in DecompositionData, with this bit set for a compatibility mapping.
+    private const int CompatibilityMapping = 0x8000, MappingStart = 0x7FFF;
+
+    /// <summary>
+    /// The index of a code point's decomposition mapping, one level deep, or -1 when it has none (or only a compatibility
+    /// mapping and those are not wanted). Hangul syllables are not in the table.
+    /// </summary>
+    public static int FindDecomposition(int cp, bool compatibility)
     {
-        var t = Decompositions;
-        int lo = 0, hi = t.Length / 3 - 1;
+        var keys = DecompositionKeys;
+        int lo = 0, hi = keys.Length - 1;
         while (lo <= hi)
         {
-            int mid = (lo + hi) >> 1, v = t[mid * 3];
-            if (v == cp)
-            {
-                first = t[mid * 3 + 1];
-                second = t[mid * 3 + 2];
-                return true;
-            }
+            int mid = (lo + hi) >> 1, v = keys[mid];
+            if (v == cp) return compatibility || (DecompositionStarts[mid] & CompatibilityMapping) == 0 ? mid : -1;
             if (v < cp) lo = mid + 1;
             else hi = mid - 1;
         }
-        first = second = 0;
-        return false;
+        return -1;
+    }
+
+    /// <summary>Where the mapping at an index of the decomposition table starts and ends in DecompositionData.</summary>
+    public static (int Start, int End) DecompositionMapping(int index)
+        => (DecompositionStarts[index] & MappingStart, DecompositionStarts[index + 1] & MappingStart);
+
+    /// <summary>The code point at an index of DecompositionData, which is UTF-16; moves the index past it.</summary>
+    public static int MappingCodePoint(ref int index)
+    {
+        var data = DecompositionData;
+        char c = (char)data[index++];
+        return char.IsHighSurrogate(c) && index < data.Length && char.IsLowSurrogate((char)data[index])
+            ? char.ConvertToUtf32(c, (char)data[index++]) : c;
     }
 
     /// <summary>
-    /// The Arabic letter that a letter and a following mark compose to (alef with madda or hamza, waw or yeh with
-    /// hamza, and the like), or 0. Hebrew presentation forms are composition exclusions and never composed.
+    /// The primary composite of two characters, the one whose canonical mapping they are and that normalization
+    /// composes (composition exclusions are not listed), or 0. Hangul syllables are left to the caller.
     /// </summary>
-    public static int Compose(int first, int second)
+    public static int Composite(int first, int second)
     {
-        var t = Decompositions;
-        for (int k = 0; k < t.Length; k += 3)
-            if (t[k + 1] == first && t[k + 2] == second && t[k] is >= 0x0600 and <= 0x08FF) return t[k];
+        var compositions = Compositions;
+        int lo = 0, hi = compositions.Length - 1;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) >> 1, index = compositions[mid];
+            int i = DecompositionStarts[index] & MappingStart;
+            int a = MappingCodePoint(ref i), b = MappingCodePoint(ref i);
+            int order = a != first ? a.CompareTo(first) : b.CompareTo(second);
+            if (order == 0) return DecompositionKeys[index];
+            if (order < 0) lo = mid + 1;
+            else hi = mid - 1;
+        }
         return 0;
+    }
+
+    /// <summary>The canonical decomposition of a Hebrew or Arabic letter (second is 0 for one character), or false.</summary>
+    public static bool Decompose(int cp, out int first, out int second)
+    {
+        first = second = 0;
+        int k = cp is (>= 0x0590 and <= 0x08FF) or (>= 0xFB1D and <= 0xFB4F) ? FindDecomposition(cp, compatibility: false) : -1;
+        if (k < 0) return false;
+        var (i, end) = DecompositionMapping(k);
+        first = MappingCodePoint(ref i);
+        if (i < end) second = MappingCodePoint(ref i);
+        return true;
     }
 
     /// <summary>True for non-spacing and enclosing combining marks.</summary>

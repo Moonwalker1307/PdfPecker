@@ -108,12 +108,13 @@ public class HyphenationTests
     public void Decomposed_words_break_where_their_composed_form_does(string lang, string word)
     {
         // Text pasted from macOS is often decomposed: a letter, then its accent as a combining mark, which the patterns
-        // do not know. Such words were never hyphenated.
-        string decomposed = word.Normalize(System.Text.NormalizationForm.FormD);
+        // do not know. Such words were never hyphenated, and later only where ICU composed them. The library's own
+        // normalization decomposes the word here, as string.Normalize does nothing with invariant globalization.
+        string decomposed = UnicodeNormalization.Normalize(word, System.Text.NormalizationForm.FormD);
         Assert.NotEqual(word.Length, decomposed.Length);
         string expected = Hyphenate(lang, word);
         Assert.Contains("-", expected);
-        Assert.Equal(expected, Hyphenate(lang, decomposed).Normalize(System.Text.NormalizationForm.FormC));
+        Assert.Equal(expected, UnicodeNormalization.Normalize(Hyphenate(lang, decomposed), System.Text.NormalizationForm.FormC));
     }
 
     [Fact]
