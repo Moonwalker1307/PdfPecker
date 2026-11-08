@@ -30,6 +30,32 @@ public sealed class HyphenationPatterns
         _hyphenator = new Lazy<Hyphenator>(() => Hyphenator.FromTeX(patterns, exceptions, leftMin, rightMin));
     }
 
+    private HyphenationPatterns(Func<string> patterns, int leftMin, int rightMin)
+    {
+        LeftMin = leftMin;
+        RightMin = rightMin;
+        _hyphenator = new Lazy<Hyphenator>(() => Hyphenator.FromTeX(patterns() ?? throw new InvalidOperationException("The hyphenation patterns are null."), null, leftMin, rightMin));
+    }
+
+    /// <summary>
+    /// Patterns that are read only when a document hyphenates text in their language, so that a package can offer many
+    /// languages without holding their patterns in memory. <paramref name="patterns"/> returns the same text as the
+    /// constructor takes: a TeX patterns file (with its <c>\hyphenation{...}</c> exceptions, if any) or the patterns
+    /// separated by white space. It is called at most once, by the first conversion that needs the patterns; an exception it throws fails
+    /// that conversion and every later one that needs them.
+    /// </summary>
+    /// <param name="patterns">Returns the patterns, or a TeX file with them.</param>
+    /// <param name="leftMin">The fewest letters before a hyphen (TeX's \lefthyphenmin), at least 1.</param>
+    /// <param name="rightMin">The fewest letters after a hyphen (TeX's \righthyphenmin), at least 1.</param>
+    /// <example><code>options.Hyphenation = new Dictionary&lt;string, HyphenationPatterns&gt; { ["fi"] = HyphenationPatterns.Deferred(() => File.ReadAllText("hyph-fi.tex")) };</code></example>
+    public static HyphenationPatterns Deferred(Func<string> patterns, int leftMin = 2, int rightMin = 2)
+    {
+        ArgumentNullException.ThrowIfNull(patterns);
+        if (leftMin < 1) throw new ArgumentOutOfRangeException(nameof(leftMin));
+        if (rightMin < 1) throw new ArgumentOutOfRangeException(nameof(rightMin));
+        return new HyphenationPatterns(patterns, leftMin, rightMin);
+    }
+
     /// <summary>The fewest letters before a hyphen.</summary>
     public int LeftMin { get; }
 

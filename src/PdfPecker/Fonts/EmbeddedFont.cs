@@ -680,10 +680,18 @@ internal sealed class UnicodeRange
 
     private UnicodeRange((int, int)[] ranges) => _ranges = ranges;
 
+    // The ranges are sorted and merged, so that a font package's range of a CJK font, with hundreds of ranges, is
+    // searched in a few steps for each character.
     public bool Contains(int cp)
     {
-        foreach (var (lo, hi) in _ranges)
-            if (cp >= lo && cp <= hi) return true;
+        int lo = 0, hi = _ranges.Length - 1;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) >>> 1;
+            if (cp < _ranges[mid].Lo) hi = mid - 1;
+            else if (cp > _ranges[mid].Hi) lo = mid + 1;
+            else return true;
+        }
         return false;
     }
 
@@ -707,7 +715,17 @@ internal sealed class UnicodeRange
             }
             else if (TryHex(part, out int cp)) list.Add((cp, cp));
         }
-        return list.Count == 0 ? null : new UnicodeRange(list.ToArray());
+        if (list.Count == 0) return null;
+        list.Sort();
+        var merged = new List<(int, int)>(list.Count) { list[0] };
+        for (int i = 1; i < list.Count; i++)
+        {
+            var (lo, hi) = list[i];
+            var (lastLo, lastHi) = merged[^1];
+            if (lo <= lastHi + 1) merged[^1] = (lastLo, Math.Max(lastHi, hi));
+            else merged.Add((lo, hi));
+        }
+        return new UnicodeRange(merged.ToArray());
     }
 
     private static bool TryHex(string s, out int value)
