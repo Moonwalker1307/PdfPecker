@@ -447,7 +447,6 @@ public static class PdfToHtml
     private static void AddImages(RenderDocument doc, int index, TextTurn turn, bool renderAnnotations, List<FlowBlock> blocks,
         CancellationToken cancellationToken)
     {
-        if (!MayDrawImages(doc, index, renderAnnotations, cancellationToken)) return;
         double width = turn.Width, height = turn.Height;
         int placed = 0;
         foreach (var image in PdfImages.PageImages(doc, index, renderAnnotations, MaxPageImages, cancellationToken))
@@ -482,54 +481,6 @@ public static class PdfToHtml
                 };
                 FlowStyles.Place(blocks, block);
             }
-        }
-    }
-
-    /// <summary>
-    /// Whether a page may draw pictures. Run for its pictures, a page draws them only with the operators Do, which draws
-    /// one of its XObjects, directly or as part of a form, and BI, which starts an inline image, and in the appearances
-    /// of its annotations; so a page without these, as most pages of text are, is not run a second time to find none.
-    /// </summary>
-    private static bool MayDrawImages(RenderDocument doc, int index, bool annotations, CancellationToken cancellationToken)
-    {
-        var file = doc.File;
-        var page = doc.Pages[index];
-        // The run for the page's text has resolved the annotations and the contents already, while the XObjects are only
-        // looked at, not resolved, as the run does that only for a Do.
-        if (annotations && file.GetArray(page.Dict, "Annots") is { } annots)
-        {
-            foreach (var item in annots.Items)
-                if (file.Resolve(item) is PdfDict annot && annot["AP"] != null) return true;
-        }
-        bool xobjects = page.Resources?["XObject"] != null;
-        using (PdfFile.BeginRender(cancellationToken))
-        {
-            switch (file.Resolve(page.Dict["Contents"]))
-            {
-                case PdfStream content:
-                    return MayDraw(file, content, xobjects);
-                case PdfArray contents:
-                    foreach (var item in contents.Items)
-                        if (file.Resolve(item) is PdfStream part && MayDraw(file, part, xobjects)) return true;
-                    break;
-            }
-        }
-        return false;
-
-        // Any two bytes that spell an operator count, even inside a string or a longer word, which only costs the run. A
-        // content stream that cannot be decoded is left to the run, which reports it as it does on any page.
-        static bool MayDraw(PdfFile file, PdfStream content, bool xobjects)
-        {
-            byte[] data;
-            try
-            {
-                data = file.DecodeStream(content);
-            }
-            catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or PdfFormatException or IndexOutOfRangeException)
-            {
-                return true;
-            }
-            return data.AsSpan().IndexOf("BI"u8) >= 0 || xobjects && data.AsSpan().IndexOf("Do"u8) >= 0;
         }
     }
 
