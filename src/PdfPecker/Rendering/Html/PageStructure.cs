@@ -68,7 +68,7 @@ internal sealed class TableCell
 {
     public int Row, Column, RowSpan = 1, ColumnSpan = 1;
     public double X0, X1; // the cell's sides, which tell a wrapped line from a line break
-    public readonly List<FlowLine> Lines = new();
+    public List<FlowLine> Lines = new(); // the cell's own list, which may be the one its lines were made in rather than a copy
     public List<ImageBlock>? Images; // pictures at the top of the cell, with images included
 }
 

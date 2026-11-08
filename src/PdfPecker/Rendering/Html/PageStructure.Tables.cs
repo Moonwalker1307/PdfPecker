@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace PdfPecker.Rendering.Html;
 
 internal static partial class PageStructure
@@ -31,10 +33,27 @@ internal static partial class PageStructure
     /// </summary>
     private static void FindRuledTables(List<FlowLine> lines, List<PageRule> rules, double body, List<FlowBlock> blocks, CancellationToken cancellationToken)
     {
-        var h = Merge(rules.Where(r => r.Horizontal && !r.Edge).Select(r => new Segment(r.Position, r.Start, r.End)));
-        var v = Merge(rules.Where(r => !r.Horizontal).Select(r => new Segment(r.Position, r.Start, r.End)));
+        var all = CollectionsMarshal.AsSpan(rules);
+        int downs = 0, edges = 0;
+        foreach (ref readonly var r in all)
+        {
+            if (!r.Horizontal) downs++;
+            else if (r.Edge) edges++;
+        }
+        var across = new List<Segment>(all.Length - downs - edges);
+        var down = new List<Segment>(downs);
+        foreach (ref readonly var r in all)
+        {
+            if (!r.Horizontal) down.Add(new Segment(r.Position, r.Start, r.End));
+            else if (!r.Edge) across.Add(new Segment(r.Position, r.Start, r.End));
+        }
+        var h = Merge(across);
+        var v = Merge(down);
         if ((long)h.Count * v.Count > MaxCrossings) return;
-        var words = lines.SelectMany(l => l.Words).ToList();
+        int count = 0;
+        foreach (var l in lines) count += l.Words.Count;
+        var words = new List<FlowWord>(count);
+        foreach (var l in lines) words.AddRange(l.Words);
 
         // Lines that cross or meet belong to one grid.
         var parent = new int[h.Count + v.Count];
@@ -90,7 +109,9 @@ internal static partial class PageStructure
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (found.Exists(f => f.X0 >= box.X0 - Reach && f.X1 <= box.X1 + Reach && f.Y0 >= box.Y0 - Reach && f.Y1 <= box.Y1 + Reach)) continue;
-            var inside = words.FindAll(w => !w.Used && Inside(w, box));
+            var inside = new List<FlowWord>();
+            foreach (var w in words)
+                if (!w.Used && Inside(w, box)) inside.Add(w);
             if (inside.Count == 0) continue;
             var breaks = Breaks(rules, gh, gv, box, inside);
             var block = Grid(gh, gv.Concat(breaks).ToList(), box, inside, body, boxes);
@@ -104,8 +125,12 @@ internal static partial class PageStructure
 
         // Horizontal lines that meet no vertical one, and the edges of backgrounds: lines between the rows of a table
         // without column lines, or the tops and bottoms of shaded rows.
-        var loose = Merge(groups.Values.Where(g => g.V.Count == 0).SelectMany(g => g.H)
-            .Concat(rules.Where(r => r.Edge).Select(r => new Segment(r.Position, r.Start, r.End))));
+        var loose = new List<Segment>();
+        foreach (var g in groups.Values)
+            if (g.V.Count == 0) loose.AddRange(g.H);
+        foreach (var r in rules)
+            if (r.Edge) loose.Add(new Segment(r.Position, r.Start, r.End));
+        loose = Merge(loose);
         foreach (var stack in Stacks(loose))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -213,11 +238,60 @@ internal static partial class PageStructure
     }
 
     /// <summary>Rules of one direction, with rules on one line that touch or overlap joined into one.</summary>
-    private static List<Segment> Merge(IEnumerable<Segment> rules)
+    private static List<Segment> Merge(List<Segment> list)
     {
-        var list = rules.ToList();
-        list.Sort((a, b) => a.Pos.CompareTo(b.Pos));
         var result = new List<Segment>();
+        if (!AnyOrder(list))
+        {
+            MergeSorted(list, result);
+            return result;
+        }
+        // With no ties that could come out differently, any sort gives the same lines, and sorting the places as
+        // numbers is several times faster than sorting through a comparison. The rules are sorted in place, as the list
+        // is the caller's copy.
+        var items = CollectionsMarshal.AsSpan(list);
+        var keys = new double[items.Length];
+        for (int k = 0; k < items.Length; k++) keys[k] = items[k].Pos;
+        keys.AsSpan().Sort(items);
+        for (int i = 0; i < items.Length;)
+        {
+            int j = i + 1;
+            while (j < items.Length && keys[j] - keys[j - 1] <= SameLine) j++;
+            double sum = 0;
+            for (int k = i; k < j; k++) sum += keys[k];
+            double pos = sum / (j - i);
+            if (j - i > 1)
+            {
+                for (int k = i; k < j; k++) keys[k] = items[k].Start;
+                keys.AsSpan(i, j - i).Sort(items.Slice(i, j - i));
+            }
+            AddJoined(items, i, j, pos, result);
+            i = j;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Whether the order of rules that sort the same cannot change what <see cref="Merge"/> makes of them: every place
+    /// is a finite number and every rule runs forwards, so rules on one line in either order join the same, and no
+    /// start is a negative zero, which sorts with zero but would be kept as it is.
+    /// </summary>
+    private static bool AnyOrder(List<Segment> list)
+    {
+        foreach (var s in list)
+            if (!double.IsFinite(s.Pos) || double.IsNaN(s.Start) || double.IsNaN(s.End) || s.End + Join < s.Start
+                || (s.Start == 0 && double.IsNegative(s.Start)))
+                return false;
+        return true;
+    }
+
+    /// <summary>
+    /// The joining for any rules, damaged ones included, with the sorts whose order of ties the lines can depend on.
+    /// </summary>
+    private static void MergeSorted(List<Segment> list, List<Segment> result)
+    {
+        list.Sort((a, b) => a.Pos.CompareTo(b.Pos));
+        var items = CollectionsMarshal.AsSpan(list);
         for (int i = 0; i < list.Count;)
         {
             int j = i + 1;
@@ -227,18 +301,26 @@ internal static partial class PageStructure
             for (int k = i; k < j; k++) sum += list[k].Pos;
             double pos = sum / (j - i);
             list.Sort(i, j - i, StartOrder.Instance);
-            double start = list[i].Start, end = list[i].End;
-            for (int k = i; k < j; k++)
-            {
-                var s = list[k];
-                if (s.Start <= end + Join) { end = Math.Max(end, s.End); continue; }
-                result.Add(new Segment(pos, start, end));
-                (start, end) = (s.Start, s.End);
-            }
-            result.Add(new Segment(pos, start, end));
+            AddJoined(items, i, j, pos, result);
             i = j;
         }
-        return result;
+    }
+
+    /// <summary>
+    /// Adds the rules of one line, from <paramref name="i"/> to <paramref name="j"/> sorted by where they start, joined
+    /// where they touch.
+    /// </summary>
+    private static void AddJoined(Span<Segment> items, int i, int j, double pos, List<Segment> result)
+    {
+        double start = items[i].Start, end = items[i].End;
+        for (int k = i; k < j; k++)
+        {
+            var s = items[k];
+            if (s.Start <= end + Join) { end = Math.Max(end, s.End); continue; }
+            result.Add(new Segment(pos, start, end));
+            (start, end) = (s.Start, s.End);
+        }
+        result.Add(new Segment(pos, start, end));
     }
 
     private sealed class StartOrder : IComparer<Segment>
@@ -364,15 +446,20 @@ internal static partial class PageStructure
             return ColumnsTable(xs, box, words, body);
         }
 
-        var texts = new List<FlowWord>?[cells.Length];
+        // The cell each word is in, and then each cell's words in a list of the size it needs.
+        var xp = Positions(xs);
+        var yp = Positions(ys);
+        var at = new int[words.Count];
+        var counts = new int[cells.Length];
         int filled = 0;
-        foreach (var w in words)
+        for (int k = 0; k < words.Count; k++)
         {
-            int c = Index(xs, w.CenterX), r = Index(ys, w.CenterY);
-            int root = Find(r * columns + c);
-            if (texts[root] is not { } list) { texts[root] = list = new List<FlowWord>(); filled++; }
-            list.Add(w);
+            var w = words[k];
+            int root = at[k] = Find(Index(yp, w.CenterY) * columns + Index(xp, w.CenterX));
+            if (counts[root]++ == 0) filled++;
         }
+        var texts = new List<FlowWord>?[cells.Length];
+        for (int k = 0; k < words.Count; k++) (texts[at[k]] ??= new List<FlowWord>(counts[at[k]])).Add(words[k]);
         if (filled < 2) return null;
         // Each cell's lines, worked out once for the check below and the table.
         var cellLines = new List<FlowLine>?[cells.Length];
@@ -392,7 +479,7 @@ internal static partial class PageStructure
         for (int i = 0; i < cells.Length; i++)
         {
             if (cells[i] is not { } tc) continue;
-            if (cellLines[i] is { } lines) tc.Lines.AddRange(lines);
+            if (cellLines[i] is { } lines) tc.Lines = lines;
             table.Cells.Add(tc);
         }
         return Finish(table);
@@ -428,17 +515,27 @@ internal static partial class PageStructure
         return digit || text is "–" or "—" or "-" or "(X)" or "X";
     }
 
-    /// <summary>The index of the band between two boundaries that <paramref name="pos"/> falls in.</summary>
-    private static int Index(List<GridLine> lines, double pos)
+    /// <summary>
+    /// The index of the band between two boundaries, at the sorted places <paramref name="lines"/>, that
+    /// <paramref name="pos"/> falls in.
+    /// </summary>
+    private static int Index(double[] lines, double pos)
     {
         // The last band whose start pos reaches, found by halving: the boundaries are sorted.
-        int lo = 0, hi = lines.Count - 2;
+        int lo = 0, hi = lines.Length - 2;
         while (lo < hi)
         {
             int mid = (lo + hi + 1) >> 1;
-            if (pos >= lines[mid].Pos) lo = mid; else hi = mid - 1;
+            if (pos >= lines[mid]) lo = mid; else hi = mid - 1;
         }
         return lo;
+    }
+
+    private static double[] Positions(List<GridLine> lines)
+    {
+        var positions = new double[lines.Count];
+        for (int i = 0; i < positions.Length; i++) positions[i] = lines[i].Pos;
+        return positions;
     }
 
     /// <summary>
@@ -510,6 +607,14 @@ internal static partial class PageStructure
     /// <summary>A cell's words as lines, from the top, each in reading order.</summary>
     private static List<FlowLine> CellLines(List<FlowWord> words)
     {
+        // Most cells hold the words of one text line in reading order, which are then the cell's one line as they
+        // are; every caller hands over a list of its own that it does not use again.
+        if (InOneLine(words))
+        {
+            int rtl = 0;
+            foreach (var w in words) if (IsRightToLeft(w.Text)) rtl++;
+            return new List<FlowLine>(1) { new FlowLine(words, words[0].Line, rtl * 2 > words.Count) };
+        }
         // The words of each text line, the lines in the order their first words come. Words mostly come line by line,
         // so the last line is tried first, and the others are found through a dictionary.
         var groups = new List<(int Line, List<FlowWord> Words)>();
@@ -547,6 +652,15 @@ internal static partial class PageStructure
         }
         lines.Sort((a, b) => a.Top != b.Top ? a.Top.CompareTo(b.Top) : a.X0.CompareTo(b.X0));
         return lines;
+    }
+
+    /// <summary>Whether words are all of one text line and already in its reading order.</summary>
+    private static bool InOneLine(List<FlowWord> words)
+    {
+        if (words.Count == 0) return false;
+        for (int i = 1; i < words.Count; i++)
+            if (words[i].Line != words[0].Line || words[i - 1].Order > words[i].Order) return false;
+        return true;
     }
 
     /// <summary>

@@ -257,10 +257,13 @@ internal static class TextReadingOrder
                 foreach (var part in Parts(g)) Layout(part, parts);
                 continue;
             }
+            if (current != null)
+            {
+                AddWords(block, current);
+                continue;
+            }
             var words = Words(block);
-            if (words.Count == 0) continue;
-            if (current == null) parts.Add(current = new List<FlowWord>());
-            current.AddRange(words);
+            if (words.Count > 0) parts.Add(current = words);
         }
     }
 
@@ -396,13 +399,34 @@ internal static class TextReadingOrder
         }
     }
 
-    private static List<FlowWord> Words(FlowBlock block) => block switch
+    private static List<FlowWord> Words(FlowBlock block)
     {
-        TextBlock t => t.Lines.SelectMany(l => l.Words).ToList(),
-        TableBlock t => t.Cells.SelectMany(c => c.Lines).SelectMany(l => l.Words).ToList(),
-        GroupBlock g => g.Parts.SelectMany(p => p).SelectMany(Words).ToList(),
-        _ => new List<FlowWord>(),
-    };
+        var words = new List<FlowWord>();
+        AddWords(block, words);
+        return words;
+    }
+
+    /// <summary>Adds the words of a block to <paramref name="words"/>, line by line, cell by cell, part by part.</summary>
+    private static void AddWords(FlowBlock block, List<FlowWord> words)
+    {
+        switch (block)
+        {
+            // Word by word, as a table's lines hold a word or two each, too few for a range to copy faster.
+            case TextBlock t:
+                foreach (var line in t.Lines)
+                    foreach (var w in line.Words) words.Add(w);
+                break;
+            case TableBlock t:
+                foreach (var cell in t.Cells)
+                    foreach (var line in cell.Lines)
+                        foreach (var w in line.Words) words.Add(w);
+                break;
+            case GroupBlock g:
+                foreach (var part in g.Parts)
+                    foreach (var b in part) AddWords(b, words);
+                break;
+        }
+    }
 
     /// <summary>
     /// Whether a group the layout sets side by side is read one part after the other. Every part needs a few lines of

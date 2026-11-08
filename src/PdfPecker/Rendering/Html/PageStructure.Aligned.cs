@@ -33,8 +33,28 @@ internal static partial class PageStructure
     /// <summary>How many cells a line's words make, counted once per line.</summary>
     private static int CellCount(FlowLine line)
     {
-        if (line.Cells < 0) line.Cells = Chunks(line.Words).Count;
+        if (line.Cells < 0) line.Cells = ChunkCount(line.Words);
         return line.Cells;
+    }
+
+    /// <summary>
+    /// How many chunks <see cref="Chunks"/> makes of a row, counted without building them when the words are already in
+    /// order from the left, as a line's nearly always are.
+    /// </summary>
+    private static int ChunkCount(List<FlowWord> row)
+    {
+        for (int i = 1; i < row.Count; i++)
+            if (!(row[i - 1].X0 <= row[i].X0)) return Chunks(row).Count;
+        int count = 0, first = 0; // the chunks so far, and the words in the first
+        FlowWord? previous = null;
+        foreach (var w in row)
+        {
+            bool marker = count == 1 && first == 1 && IsBullet(row[0].Text) && w.X0 - previous!.X1 <= 1.5 * w.Size;
+            if (previous == null || (!marker && w.X0 - previous.X1 > CellGap * Math.Max(w.Size, previous.Size))) count++;
+            if (count == 1) first++;
+            if (previous == null || w.X1 > previous.X1) previous = w;
+        }
+        return count;
     }
 
     /// <summary>
@@ -365,7 +385,7 @@ internal static partial class PageStructure
             (double X0, double X1) best = default;
             int bestEnd = -1;
             // The run's text must reach both sides of a gap: its leftmost word end and rightmost word start.
-            double leftEnd = lines[i].Words.Min(w => w.X1), rightStart = lines[i].Words.Max(w => w.X0);
+            double leftEnd = LeftEnd(lines[i].Words), rightStart = RightStart(lines[i].Words);
             while (common.Count > 0)
             {
                 foreach (var g in common)
@@ -376,8 +396,8 @@ internal static partial class PageStructure
                 }
                 if (j >= lines.Count) break;
                 common = Intersect(common, Gaps(lines[j], minX, maxX, gapWidth), gapWidth);
-                leftEnd = Math.Min(leftEnd, lines[j].Words.Min(w => w.X1));
-                rightStart = Math.Max(rightStart, lines[j].Words.Max(w => w.X0));
+                leftEnd = Math.Min(leftEnd, LeftEnd(lines[j].Words));
+                rightStart = Math.Max(rightStart, RightStart(lines[j].Words));
                 j++;
             }
             if (bestEnd > 0 && Separate(lines.GetRange(i, bestEnd - i), (best.X0 + best.X1) / 2) is { } group)
@@ -410,6 +430,38 @@ internal static partial class PageStructure
             foreach (var l in run) foreach (var w in l.Words) w.Used = true;
             return group;
         }
+    }
+
+    /// <summary>
+    /// The leftmost end of a line's words, as Enumerable.Min finds it, which is NaN when any end is; this runs for
+    /// every line of a stretch, where the enumerator and delegate of Min cost more than the loop.
+    /// </summary>
+    private static double LeftEnd(List<FlowWord> words)
+    {
+        double value = words[0].X1;
+        if (double.IsNaN(value)) return value;
+        for (int i = 1; i < words.Count; i++)
+        {
+            double x = words[i].X1;
+            if (x < value) value = x;
+            else if (double.IsNaN(x)) return x;
+        }
+        return value;
+    }
+
+    /// <summary>The rightmost start of a line's words, as Enumerable.Max finds it, which passes over NaN.</summary>
+    private static double RightStart(List<FlowWord> words)
+    {
+        int i = 0;
+        double value = words[0].X0;
+        while (double.IsNaN(value))
+        {
+            if (++i == words.Count) return value;
+            value = words[i].X0;
+        }
+        for (i++; i < words.Count; i++)
+            if (words[i].X0 > value) value = words[i].X0;
+        return value;
     }
 
     /// <summary>A gap this many body font sizes wide between two parts of a page sets them side by side.</summary>
@@ -493,8 +545,7 @@ internal static partial class PageStructure
             // A line of one cell across several columns, such as a heading between two tables, ends one table.
             for (int k = 0; k < run.Count; k++)
             {
-                var chunks = Chunks(run[k].Words);
-                if (chunks.Count != 1 || RowCells(run[k].Words, bands, 0)[0].ColumnSpan == 1) continue;
+                if (CellCount(run[k]) != 1 || RowCells(run[k].Words, bands, 0)[0].ColumnSpan == 1) continue;
                 Aligned(run.GetRange(0, k), body, blocks, plain);
                 plain.Add(run[k]);
                 Aligned(run.GetRange(k + 1, run.Count - k - 1), body, blocks, plain);
