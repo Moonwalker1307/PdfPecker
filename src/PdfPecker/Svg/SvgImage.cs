@@ -209,14 +209,7 @@ internal sealed partial class SvgImage
         img.ViewportWidth = vpw;
         img.ViewportHeight = vph;
         img._diagonal = MathF.Sqrt((vpw * vpw + vph * vph) / 2);
-        var par = svg.GetAttribute("preserveaspectratio");
-        if (par != null)
-        {
-            var parts = par.Trim().ToLowerInvariant().Split(AspectRatioSeparators, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length > 0 && parts[0] == "defer") parts = parts.Skip(1).ToArray();
-            if (parts.Length > 0) img.Align = parts[0];
-            if (parts.Length > 1) img.Slice = parts[1] == "slice";
-        }
+        ParseAspectRatio(svg.GetAttribute("preserveaspectratio"), ref img.Align, ref img.Slice);
         img._root = svg;
         img.CollectIds(svg);
         var top = svg;
@@ -225,6 +218,34 @@ internal sealed partial class SvgImage
         foreach (var child in svg.Children)
             if (child is Element e) img.Render(e, Matrix.Identity, 1, 0);
         return img;
+    }
+
+    /// <summary>The alignment and meet or slice of a preserveAspectRatio value; a missing part keeps what is given.</summary>
+    private static void ParseAspectRatio(string? par, ref string align, ref bool slice)
+    {
+        if (par == null) return;
+        var parts = par.Trim().ToLowerInvariant().Split(AspectRatioSeparators, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length > 0 && parts[0] == "defer") parts = parts.Skip(1).ToArray();
+        if (parts.Length > 0) align = parts[0];
+        if (parts.Length > 1) slice = parts[1] == "slice";
+    }
+
+    /// <summary>
+    /// The transform that fits a viewBox into a viewport of <paramref name="w"/> × <paramref name="h"/> user units at the
+    /// origin, as the preserveAspectRatio value <paramref name="par"/> says: by default centred and scaled to fit.
+    /// </summary>
+    private static Matrix FitViewBox(List<float> vb, float w, float h, string? par)
+    {
+        string align = "xmidymid";
+        bool slice = false;
+        ParseAspectRatio(par, ref align, ref slice);
+        var origin = Matrix.Translate(-vb[0], -vb[1]);
+        if (align == "none") return origin.Then(Matrix.Scale(w / vb[2], h / vb[3]));
+        float sc = slice ? Math.Max(w / vb[2], h / vb[3]) : Math.Min(w / vb[2], h / vb[3]);
+        float extraX = w - vb[2] * sc, extraY = h - vb[3] * sc;
+        float tx = align.StartsWith("xmid", StringComparison.Ordinal) ? extraX / 2 : align.StartsWith("xmax", StringComparison.Ordinal) ? extraX : 0;
+        float ty = align.EndsWith("ymid", StringComparison.Ordinal) ? extraY / 2 : align.EndsWith("ymax", StringComparison.Ordinal) ? extraY : 0;
+        return origin.Then(Matrix.Scale(sc, sc)).Then(Matrix.Translate(tx, ty));
     }
 
     /// <summary>
@@ -471,8 +492,34 @@ internal sealed partial class SvgImage
             {
                 var size = _useSize;
                 _useSize = null;
-                var inner = NestedSvgTransform(e, size).Then(ctm);
-                foreach (var c in e.Children) if (c is Element ce) Render(ce, inner, op, depth + 1);
+                var inner = NestedSvgTransform(e, size, out var port).Then(ctm);
+                // A width or height of zero turns the drawing off.
+                if (!(port.W > 0 && port.H > 0)) return;
+                bool clips = _clipDepth < 8 && ClipsToViewport(e, s);
+                int start = Shapes.Count;
+                if (clips) { _clipDepth++; _wrapDepth++; }
+                try
+                {
+                    foreach (var c in e.Children) if (c is Element ce) Render(ce, inner, op, depth + 1);
+                }
+                finally
+                {
+                    if (clips) { _clipDepth--; _wrapDepth--; }
+                }
+                if (clips && Shapes.Count > start)
+                {
+                    // What the element drew, clipped to its viewport, as a clip path would clip it.
+                    var rect = new PathBuilder();
+                    rect.MoveTo(port.X, port.Y);
+                    rect.LineTo(port.X + port.W, port.Y);
+                    rect.LineTo(port.X + port.W, port.Y + port.H);
+                    rect.LineTo(port.X, port.Y + port.H);
+                    rect.Close();
+                    var pts = rect.Points.ToArray();
+                    for (int i = 0; i + 1 < pts.Length; i += 2) ctm.Apply(ref pts[i], ref pts[i + 1]);
+                    Shapes.Insert(start, new SvgShape { Kind = SvgShape.KindClip, Verbs = rect.Verbs.ToArray(), Points = pts });
+                    Shapes.Add(new SvgShape { Kind = SvgShape.KindEndClip });
+                }
                 return;
             }
             case "use":
@@ -494,8 +541,8 @@ internal sealed partial class SvgImage
                         }
                     else ContentBounds(target, place, ref minX, ref minY, ref maxX, ref maxY, depth, e);
                 }
-                (_contextFill, _contextStroke) = (Context(s.SvgFill, s.SvgFillUrl, minX, minY, maxX, maxY, ctm),
-                    Context(s.SvgStroke, s.SvgStrokeUrl, minX, minY, maxX, maxY, ctm));
+                (_contextFill, _contextStroke) = (Context(s.SvgFillColor, s.SvgFillUrl, minX, minY, maxX, maxY, ctm),
+                    Context(s.SvgStrokeColor, s.SvgStrokeUrl, minX, minY, maxX, maxY, ctm));
                 // What the use element draws inherits from the use element, not from where it is defined.
                 var useParent = _useParent;
                 _useParent = s;
@@ -600,32 +647,39 @@ internal sealed partial class SvgImage
         float w = Num(use, "width", float.NaN), h = Num(use, "height", float.NaN);
         if (float.IsNaN(w)) w = Num(symbol, "width", ViewportWidth);
         if (float.IsNaN(h)) h = Num(symbol, "height", ViewportHeight);
-        float sc = Math.Min(w / vb[2], h / vb[3]);
-        return Matrix.Translate(-vb[0], -vb[1]).Then(Matrix.Scale(sc, sc))
-            .Then(Matrix.Translate((w - vb[2] * sc) / 2, (h - vb[3] * sc) / 2));
+        return FitViewBox(vb, w, h, symbol.GetAttribute("preserveaspectratio"));
     }
 
     /// <summary>
-    /// The transform a nested svg element's x, y, width, height and viewBox add, with the width and height of a use
-    /// element drawing it in place of its own.
+    /// The transform a nested svg element's x, y, width, height, viewBox and preserveAspectRatio add, with the width and
+    /// height of a use element drawing it in place of its own. <paramref name="viewport"/> is the rectangle it draws in,
+    /// in the user space around it: x and y, and width and height (100% when absent), with percentages of the viewport.
     /// </summary>
-    private static Matrix NestedSvgTransform(Element svg, (float Width, float Height)? useSize)
+    private Matrix NestedSvgTransform(Element svg, (float Width, float Height)? useSize, out (float X, float Y, float W, float H) viewport)
     {
-        var inner = Matrix.Translate(Num(svg, "x"), Num(svg, "y"));
-        var vb = ParseNumbers(svg.GetAttribute("viewbox"));
-        float w = Num(svg, "width", float.NaN), h = Num(svg, "height", float.NaN);
+        float x = Len(svg, "x", Axis.X), y = Len(svg, "y", Axis.Y);
+        float w = Len(svg, "width", Axis.X, float.NaN), h = Len(svg, "height", Axis.Y, float.NaN);
         if (useSize is { } size)
         {
             if (!float.IsNaN(size.Width)) w = size.Width;
             if (!float.IsNaN(size.Height)) h = size.Height;
         }
-        if (vb.Count == 4 && vb[2] > 0 && vb[3] > 0 && !float.IsNaN(w) && !float.IsNaN(h))
-        {
-            float sc = Math.Min(w / vb[2], h / vb[3]);
-            inner = Matrix.Translate(-vb[0], -vb[1]).Then(Matrix.Scale(sc, sc)).Then(inner);
-        }
+        if (float.IsNaN(w)) { w = ViewportWidth; UsesPercentages = true; }
+        if (float.IsNaN(h)) { h = ViewportHeight; UsesPercentages = true; }
+        viewport = (x, y, w, h);
+        var inner = Matrix.Translate(x, y);
+        var vb = ParseNumbers(svg.GetAttribute("viewbox"));
+        if (vb.Count == 4 && vb[2] > 0 && vb[3] > 0 && w > 0 && h > 0)
+            inner = FitViewBox(vb, w, h, svg.GetAttribute("preserveaspectratio")).Then(inner);
         return inner;
     }
+
+    /// <summary>
+    /// Whether a nested svg element clips what it draws to its viewport: it does unless its overflow is visible, which
+    /// the overflow attribute can say as visible or auto.
+    /// </summary>
+    private static bool ClipsToViewport(Element svg, ComputedStyle s)
+        => s.OverflowX != Overflow.Visible && svg.GetAttribute("overflow")?.Trim().ToLowerInvariant() is not ("visible" or "auto");
 
     /// <summary>Whether a paint's url refers to a gradient or pattern rather than standing for a context paint.</summary>
     private static bool IsPaintServer(string? url) => url != null && url != ContextFill && url != ContextStroke;
@@ -661,7 +715,7 @@ internal sealed partial class SvgImage
             case "svg":
             {
                 var size = use != null ? (Num(use, "width", float.NaN), Num(use, "height", float.NaN)) : ((float, float)?)null;
-                var inner = NestedSvgTransform(e, size).Then(m);
+                var inner = NestedSvgTransform(e, size, out _).Then(m);
                 foreach (var c in e.Children) if (c is Element ce) ContentBounds(ce, inner, ref minX, ref minY, ref maxX, ref maxY, depth + 1);
                 return;
             }
@@ -724,7 +778,7 @@ internal sealed partial class SvgImage
             if (maxX >= minX && maxY >= minY)
             {
                 // content-box is the fill box and border-box the stroke box of an element without a CSS layout box.
-                float grow = s.TransformBox is TransformBox.StrokeBox or TransformBox.BorderBox && (s.SvgStroke != null || s.SvgStrokeUrl != null) ? s.SvgStrokeWidth / 2 : 0;
+                float grow = s.TransformBox is TransformBox.StrokeBox or TransformBox.BorderBox && (s.SvgStrokeColor != null || s.SvgStrokeUrl != null) ? s.SvgStrokeWidth / 2 : 0;
                 (bx, by, bw, bh) = (minX - grow, minY - grow, maxX - minX + 2 * grow, maxY - minY + 2 * grow);
             }
         }
@@ -820,10 +874,21 @@ internal sealed partial class SvgImage
     /// The style of an element that a use element draws, whose parent in that drawing has the style
     /// <paramref name="parent"/>. An element that sets no paint of its own takes the paint of that parent, as the
     /// element's copy in the use element's shadow tree would, instead of the paint where it is defined. One that sets
-    /// some keeps its own style: the properties it left alone still come from where it is defined.
+    /// some keeps its own style: the properties it left alone still come from where it is defined. An element that
+    /// inherits its colour takes that parent's too, so that currentColor in its fill or stroke is the use element's
+    /// colour, as icon sprites expect.
     /// </summary>
     private static ComputedStyle InUse(ComputedStyle s, ComputedStyle parent)
-        => s.ParentStyle is { } defined && s.InheritsSvgPaint(defined) && !s.InheritsSvgPaint(parent) ? s.WithSvgPaintOf(parent) : s;
+    {
+        if (s.ParentStyle is not { } defined) return s;
+        var used = s.InheritsSvgPaint(defined) && !s.InheritsSvgPaint(parent) ? s.WithSvgPaintOf(parent) : s;
+        if (s.Color == defined.Color && s.Color != parent.Color)
+        {
+            if (ReferenceEquals(used, s)) used = s.Clone();
+            used.Color = parent.Color;
+        }
+        return used;
+    }
 
     private void RenderReferenced(Element target, Element use, Matrix m, float opacity, int depth)
         => Render(target, m, opacity * (use.Style?.Opacity ?? 1), depth);
@@ -851,9 +916,9 @@ internal sealed partial class SvgImage
             float along = pathLength > 0 && float.IsFinite(pathLength) ? SvgPathMeasure.LengthOf(path) / pathLength : 1;
             shape.Dash = Dashes(s, (s.SvgNonScalingStroke ? NonScalingScale : ctm.ScaleFactor) * along, out shape.DashPhase);
         }
-        if (fillable) shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
+        if (fillable) shape.Fill = Paint(s.SvgFillColor, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
         if (s.SvgStrokeWidth > 0)
-            shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient, out shape.StrokePattern);
+            shape.Stroke = Paint(s.SvgStrokeColor, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient, out shape.StrokePattern);
         if (!shape.HasFill && !shape.HasStroke) return;
         for (int i = 0; i + 1 < pts.Length; i += 2) ctm.Apply(ref pts[i], ref pts[i + 1]);
         Bounds(pts, out shape.MinX, out shape.MinY, out shape.MaxX, out shape.MaxY);
@@ -1454,9 +1519,9 @@ internal sealed partial class SvgImage
             MiterLimit = s.SvgMiterLimit,
         };
         if (s.SvgDashArray != null && s.SvgStrokeWidth > 0) shape.Dash = Dashes(s, s.SvgNonScalingStroke ? NonScalingScale : ctm.ScaleFactor, out shape.DashPhase);
-        shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
+        shape.Fill = Paint(s.SvgFillColor, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
         if (s.SvgStrokeWidth > 0)
-            shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient, out shape.StrokePattern);
+            shape.Stroke = Paint(s.SvgStrokeColor, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient, out shape.StrokePattern);
         if (!shape.HasFill && !shape.HasStroke) return;
         var corners = new[] { minX, minY, maxX, minY, maxX, maxY, minX, maxY };
         for (int i = 0; i < 8; i += 2) ctm.Apply(ref corners[i], ref corners[i + 1]);
@@ -1488,7 +1553,7 @@ internal sealed partial class SvgImage
             if ((_budget.Remaining -= 4) < 0) return;
             var pts = bar.Points.ToArray();
             var shape = new SvgShape { Verbs = bar.Verbs.ToArray(), Points = pts };
-            shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, x, top, x + w, top + thickness, ctm, out shape.FillGradient, out shape.FillPattern);
+            shape.Fill = Paint(s.SvgFillColor, s.SvgFillUrl, s.SvgFillOpacity * opacity, x, top, x + w, top + thickness, ctm, out shape.FillGradient, out shape.FillPattern);
             if (!shape.HasFill) return;
             for (int i = 0; i + 1 < pts.Length; i += 2) ctm.Apply(ref pts[i], ref pts[i + 1]);
             Bounds(pts, out shape.MinX, out shape.MinY, out shape.MaxX, out shape.MaxY);
@@ -1623,7 +1688,36 @@ internal sealed partial class SvgImage
         if (v == null) return fallback;
         v = v.Trim();
         if (v.EndsWith("px", StringComparison.OrdinalIgnoreCase)) v = v.Substring(0, v.Length - 2);
-        return float.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out float f) ? f : fallback;
+        if (float.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out float f)) return f;
+        // pathLength is a plain number; the coordinates and sizes are lengths, which may have a unit.
+        return name != "pathlength" && UnitLength(e, v) is float length ? length : fallback;
+    }
+
+    /// <summary>
+    /// A length attribute in an absolute or font-relative CSS unit (mm, cm, in, pt, pc, Q, em or ex), in user units, which
+    /// are CSS pixels. CAD tools and Inkscape write such values; null for anything else.
+    /// </summary>
+    private static float? UnitLength(Element e, string v)
+    {
+        int unit = v.Length;
+        while (unit > 0 && char.IsAsciiLetter(v[unit - 1])) unit--;
+        if (unit == 0 || unit == v.Length || unit < v.Length - 2
+            || !float.TryParse(v.AsSpan(0, unit), NumberStyles.Float, CultureInfo.InvariantCulture, out float n)) return null;
+        // The font size is in points; ex is half an em, as in the rest of the style resolver.
+        float em = (e.Style?.FontSize ?? 12) / 0.75f;
+        float px = v.Substring(unit).ToLowerInvariant() switch
+        {
+            "mm" => n * 96 / 25.4f,
+            "cm" => n * 96 / 2.54f,
+            "in" => n * 96,
+            "pt" => n / 0.75f,
+            "pc" => n * 16,
+            "q" => n * 96 / 101.6f,
+            "em" => n * em,
+            "ex" => n * em / 2,
+            _ => float.NaN,
+        };
+        return float.IsFinite(px) ? px : null;
     }
 
     internal static List<float> ParseNumbers(string? s)
