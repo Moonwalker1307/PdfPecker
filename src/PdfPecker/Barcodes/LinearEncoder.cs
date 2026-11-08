@@ -120,10 +120,10 @@ internal static class LinearEncoder
     }
 
     // EAN-13 left-hand digits with odd parity (set L); set R is their complement and set G is R reversed.
-    private static readonly int[] EanL = { 0b0001101, 0b0011001, 0b0010011, 0b0111101, 0b0100011, 0b0110001, 0b0101111, 0b0111011, 0b0110111, 0b0001011 };
+    internal static readonly int[] EanL = { 0b0001101, 0b0011001, 0b0010011, 0b0111101, 0b0100011, 0b0110001, 0b0101111, 0b0111011, 0b0110111, 0b0001011 };
 
     // For each first digit, which of the six left-hand digits use set G (bit 5 is the second digit).
-    private static readonly int[] EanParity = { 0b000000, 0b001011, 0b001101, 0b001110, 0b010011, 0b011001, 0b011100, 0b010101, 0b010110, 0b011010 };
+    internal static readonly int[] EanParity = { 0b000000, 0b001011, 0b001101, 0b001110, 0b010011, 0b011001, 0b011100, 0b010101, 0b010110, 0b011010 };
 
     /// <summary>
     /// The 13 digits of an EAN-13 code from 12 digits (the check digit is added) or 13 digits (the check digit is
