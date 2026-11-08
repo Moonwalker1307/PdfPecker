@@ -77,4 +77,24 @@ public class RedactionHostileInputTests
         Assert.Contains("Kept", text);
         Assert.Empty(PdfImages.Extract(redacted));
     }
+
+    [Fact]
+    public void A_form_without_resources_that_draws_itself_ends_when_originals_are_removed()
+    {
+        // The form uses the page's resources, so finding what the page still draws follows it into itself twice at every
+        // level; an image in the area makes that search run.
+        var pdf = Build(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /XObject << /X 5 0 R /I 7 0 R >> /Font << /F 6 0 R >> >> /Contents 4 0 R >>",
+            Stream("", "q 50 0 0 50 20 220 cm /I Do Q /X Do BT /F 12 Tf 200 20 Td (Kept) Tj ET"),
+            Stream("/Type /XObject /Subtype /Form /BBox [0 0 400 300]", "0 0 1 rg 300 200 10 10 re f q 1 0 0 1 0.5 0 cm /X Do Q /X Do"),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            Stream("/Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceGray", "\u0080"));
+
+        var redacted = Bounded(pdf, new PdfRedactionArea(1, 0, 0, 100, 100));
+
+        Assert.Contains("Kept", PdfText.Extract(redacted));
+        Assert.Empty(PdfImages.Extract(redacted));
+    }
 }

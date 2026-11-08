@@ -138,7 +138,10 @@ public static class PdfRedactor
                 redaction.RedactPage(doc, page.Key - 1, page.Select(a => new Redaction.Area(a.X, a.Y, a.X + a.Width, a.Y + a.Height)).ToList());
         }
         using (PdfFile.BeginRender(cancellationToken))
+        {
+            redaction.RemoveOriginals(doc);
             return PdfRewriter.Write(doc.File, null, reproducible: true).Span.ToArray();
+        }
     }
 
     /// <summary>

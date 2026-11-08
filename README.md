@@ -326,7 +326,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   matches, from the file itself: the glyphs leave the content streams (so text extraction and copying no longer find
   them, while the text around them keeps its place), image pixels under an area are overwritten, and shapes, links and
   form fields in an area go, before a black box (or none) is drawn over it. Forms shared with other pages are redacted
-  in copies, replacement texts that would still name what was there are removed, and earlier revisions do not survive.
+  in copies, the originals of redacted images and forms leave the file unless a page still shows them elsewhere,
+  replacement texts that would still name what was there are removed, and earlier revisions do not survive.
 - **Images to PDF**: `ImageToPdf` puts scans and photos on pages of their own size or fitted to a page size, with
   photos turned upright by their EXIF orientation.
   [More](https://pdfpecker.net/docs/images-to-pdf/)
