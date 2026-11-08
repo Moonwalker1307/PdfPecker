@@ -80,7 +80,7 @@ internal static class MarkdownPageWriter
     {
         // Lines set right-aligned or centred one by one, as an address block in a corner is, are each a line of their own.
         var (right, centred) = FlowHtmlWriter.Alignment(block.Lines);
-        double reach = right || centred ? double.MaxValue : block.Lines.Max(l => l.X1);
+        double reach = right || centred ? double.MaxValue : FlowStyles.Max(block.Lines, l => l.X1);
         if (block.Kind == TextKind.Heading)
         {
             EndList(sb, ref list);
