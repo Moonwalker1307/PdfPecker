@@ -216,7 +216,10 @@ internal static partial class PageStructure
         private readonly Dictionary<int, List<int>> _byMcid = new();
         /// <summary>The glyphs of each marked content id, in the order the page first draws them.</summary>
         private readonly List<List<int>> _contents = new();
-        /// <summary>The glyphs one element's lines are laid out from, kept for the next element so it is allocated once.</summary>
+        /// <summary>
+        /// The glyphs one element's lines are laid out from, kept for the next element, so the list grows only when an
+        /// element has more glyphs than any before it.
+        /// </summary>
         private readonly List<TextGlyph> _subset = new();
         private readonly double _width, _height;
         private readonly List<PageLink> _links;

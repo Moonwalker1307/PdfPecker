@@ -153,7 +153,8 @@ internal sealed class RenderDocument
         list.Clear();
         lock (spares)
         {
-            if (spares.Count < MaxSpareLists) spares.Push(list);
+            // A list given back twice must not be handed to two pages at once.
+            if (spares.Count < MaxSpareLists && !spares.Contains(list)) spares.Push(list);
         }
     }
 

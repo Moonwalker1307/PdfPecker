@@ -531,6 +531,7 @@ internal static partial class PageStructure
         return lo;
     }
 
+    /// <summary>The lines' positions on their own, which <see cref="Index"/> searches without reading each line.</summary>
     private static double[] Positions(List<GridLine> lines)
     {
         var positions = new double[lines.Count];

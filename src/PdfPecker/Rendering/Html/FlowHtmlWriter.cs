@@ -232,15 +232,13 @@ internal static class FlowHtmlWriter
             sb.Append("</colgroup>\n");
         }
         // Each grid position is covered by at most one cell; positions no cell covers are empty cells.
-        int rows = Math.Max(0, table.Rows), columns = Math.Max(0, table.Columns);
-        var at = new TableCell?[rows * columns];
-        var covered = new bool[rows * columns];
+        var at = new Dictionary<(int, int), TableCell>();
+        var covered = new HashSet<(int, int)>();
         foreach (var c in table.Cells)
         {
-            int first = table.RightToLeft ? c.Column + c.ColumnSpan - 1 : c.Column;
-            if (c.Row >= 0 && c.Row < rows && first >= 0 && first < columns) at[c.Row * columns + first] = c;
-            for (int r = Math.Max(0, c.Row); r < Math.Min(rows, c.Row + c.RowSpan); r++)
-                for (int k = Math.Max(0, c.Column); k < Math.Min(columns, c.Column + c.ColumnSpan); k++) covered[r * columns + k] = true;
+            at[(c.Row, table.RightToLeft ? c.Column + c.ColumnSpan - 1 : c.Column)] = c;
+            for (int r = c.Row; r < c.Row + c.RowSpan; r++)
+                for (int k = c.Column; k < c.Column + c.ColumnSpan; k++) covered.Add((r, k));
         }
         for (int r = 0; r < table.Rows; r++)
         {
@@ -252,7 +250,7 @@ internal static class FlowHtmlWriter
             for (int i = 0; i < table.Columns; i++)
             {
                 int c = table.RightToLeft ? table.Columns - 1 - i : i;
-                if (at[r * columns + c] is { } cell)
+                if (at.TryGetValue((r, c), out var cell))
                 {
                     sb.Append('<').Append(cellTag);
                     if (cell.RowSpan > 1) sb.Append(" rowspan=\"").Append(cell.RowSpan.ToString(CultureInfo.InvariantCulture)).Append('"');
@@ -268,7 +266,7 @@ internal static class FlowHtmlWriter
                     }
                     sb.Append("</").Append(cellTag).Append('>');
                 }
-                else if (!covered[r * columns + c])
+                else if (!covered.Contains((r, c)))
                 {
                     sb.Append('<').Append(cellTag);
                     if (styles != null) WriteCellClass(sb, styles, grid!, table, new TableCell { Row = r, Column = c }, header, around!.Value);

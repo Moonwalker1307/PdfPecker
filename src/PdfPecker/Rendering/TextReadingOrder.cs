@@ -225,8 +225,8 @@ internal static class TextReadingOrder
 
     /// <summary>
     /// The blocks' words filed under the squares they cover, each square's words in the order they were filed. On a page
-    /// the squares of the words' extent are one array that points into another holding each square's words in a run,
-    /// two allocations in all, where a list per square would take hundreds.
+    /// the squares of the words' extent are one array that points into another holding each square's words in a run, a
+    /// few allocations where a list per square would take hundreds.
     /// </summary>
     private sealed class WordGrid
     {

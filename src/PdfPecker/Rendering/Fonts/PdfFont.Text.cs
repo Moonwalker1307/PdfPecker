@@ -19,8 +19,9 @@ internal sealed partial class PdfFont
     /// The text of each code of a simple or Type 3 font once looked up, or <see cref="NoText"/> for a code that has none.
     /// Every glyph a page shows asks for its text, and working it out from a glyph name allocates a string each time.
     /// Pages read in parallel share the font; each slot is written whole, and a code worked out twice gives equal text.
+    /// The array is made on the first lookup, so CID fonts, which never use it, and fonts only drawn go without.
     /// </summary>
-    private readonly string?[] _codeText = new string?[256];
+    private string?[]? _codeText;
 
     /// <summary>Marks a code in <see cref="_codeText"/> that stands for no text, which only this instance does.</summary>
     private static readonly string NoText = new('\0', 1);
@@ -59,11 +60,18 @@ internal sealed partial class PdfFont
     public string? Unicode(int code)
     {
         if (Kind == FontKind.Cid || (uint)code > 255) return CodeText(code);
-        var known = Volatile.Read(ref _codeText[code]);
+        var texts = Volatile.Read(ref _codeText);
+        if (texts == null)
+        {
+            // Two pages that start at once keep whichever array was stored first.
+            Interlocked.CompareExchange(ref _codeText, new string?[256], null);
+            texts = _codeText!;
+        }
+        var known = Volatile.Read(ref texts[code]);
         if (known == null)
         {
             known = CodeText(code) ?? NoText;
-            Volatile.Write(ref _codeText[code], known);
+            Volatile.Write(ref texts[code], known);
         }
         return ReferenceEquals(known, NoText) ? null : known;
     }
