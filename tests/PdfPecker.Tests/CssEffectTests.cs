@@ -256,6 +256,22 @@ public class CssEffectTests
     }
 
     [Fact]
+    public void Opacity_keeps_blending_inside_the_translucent_box()
+    {
+        // A translucent box is a stacking context, which CSS isolates as Chrome does: its group is written isolated, so
+        // viewers that blend a non-isolated group with the page do not multiply the blue box with the yellow.
+        var pdf = Pdf("""
+            <div style='background:yellow;padding:20px'>
+              <div style='opacity:0.99'><div style='width:100px;height:50px;background:blue;mix-blend-mode:multiply'></div></div>
+            </div>
+            """);
+        Assert.DoesNotContain("/Group << /S /Transparency >>", Latin1(pdf));
+        Near(3, 3, 252, At(pdf, 60, 40));
+        // Without blending inside, the translucent box's group stays as it was written before.
+        Assert.Contains("/Group << /S /Transparency >>", Latin1(Pdf("<div style='opacity:0.5'><div style='background:blue'>x</div></div>")));
+    }
+
+    [Fact]
     public void Background_blend_mode_blends_layers_with_the_background_colour_only()
     {
         var pdf = Pdf("""

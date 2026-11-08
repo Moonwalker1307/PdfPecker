@@ -10,6 +10,7 @@ internal sealed partial class Painter : ICoverageSink
     private uint[] _colors = new uint[ScratchSize];
     private byte[] _coverage = new byte[ScratchSize];
     private byte[] _softMaskRow = new byte[ScratchSize];
+    private uint[] _below = Array.Empty<uint>(); // only painting with a blend mode in a non-isolated group needs it
 
     public Canvas Canvas { get; set; } = null!;
 
