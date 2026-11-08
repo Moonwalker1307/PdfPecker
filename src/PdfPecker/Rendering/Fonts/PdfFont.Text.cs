@@ -15,6 +15,16 @@ internal sealed partial class PdfFont
     private bool _unicodeCodes; // a predefined Uni...-UCS2 or -UTF16 CMap: the codes are UTF-16 code units
     private Lazy<Dictionary<int, int>?>? _gidToUnicode;
 
+    /// <summary>
+    /// The text of each code of a simple or Type 3 font once looked up, or <see cref="NoText"/> for a code that has none.
+    /// Every glyph a page shows asks for its text, and working it out from a glyph name allocates a string each time.
+    /// Pages read in parallel share the font; each slot is written whole, and a code worked out twice gives equal text.
+    /// </summary>
+    private readonly string?[] _codeText = new string?[256];
+
+    /// <summary>Marks a code in <see cref="_codeText"/> that stands for no text, which only this instance does.</summary>
+    private static readonly string NoText = new('\0', 1);
+
     private void LoadUnicode(PdfFile file, PdfDict dict)
     {
         try
@@ -47,6 +57,18 @@ internal sealed partial class PdfFont
 
     /// <summary>The text a character code stands for, or null when the font does not say.</summary>
     public string? Unicode(int code)
+    {
+        if (Kind == FontKind.Cid || (uint)code > 255) return CodeText(code);
+        var known = Volatile.Read(ref _codeText[code]);
+        if (known == null)
+        {
+            known = CodeText(code) ?? NoText;
+            Volatile.Write(ref _codeText[code], known);
+        }
+        return ReferenceEquals(known, NoText) ? null : known;
+    }
+
+    private string? CodeText(int code)
     {
         // An empty mapping is deliberate: the extra glyphs of a shaped cluster stand for no characters of their own, and
         // falling back to the font's cmap would repeat a character the cluster's first glyph already gives.
