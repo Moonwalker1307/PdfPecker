@@ -131,40 +131,59 @@ public static partial class ContainerExtensions
     public static IContainer Border(this IContainer container, float value, Unit unit = Unit.Point)
     {
         float w = Length.Points(value, unit, nameof(value));
-        return Decorate(container, new Decorator(DecoratorKind.Border) { Rank = Rank.Paint, Top = w, Right = w, Bottom = w, Left = w });
+        return Border(container, w, w, w, w);
     }
 
     /// <summary>Borders on the left and right.</summary>
     public static IContainer BorderHorizontal(this IContainer container, float value, Unit unit = Unit.Point)
     {
         float w = Length.Points(value, unit, nameof(value));
-        return Decorate(container, new Decorator(DecoratorKind.Border) { Rank = Rank.Paint, Right = w, Left = w });
+        return Border(container, float.NaN, w, float.NaN, w);
     }
 
     /// <summary>Borders at the top and bottom.</summary>
     public static IContainer BorderVertical(this IContainer container, float value, Unit unit = Unit.Point)
     {
         float w = Length.Points(value, unit, nameof(value));
-        return Decorate(container, new Decorator(DecoratorKind.Border) { Rank = Rank.Paint, Top = w, Bottom = w });
+        return Border(container, w, float.NaN, w, float.NaN);
     }
 
     /// <summary>A border at the top.</summary>
     public static IContainer BorderTop(this IContainer container, float value, Unit unit = Unit.Point)
-        => Decorate(container, new Decorator(DecoratorKind.Border) { Rank = Rank.Paint, Top = Length.Points(value, unit, nameof(value)) });
+        => Border(container, Length.Points(value, unit, nameof(value)), float.NaN, float.NaN, float.NaN);
 
     /// <summary>A border at the bottom.</summary>
     public static IContainer BorderBottom(this IContainer container, float value, Unit unit = Unit.Point)
-        => Decorate(container, new Decorator(DecoratorKind.Border) { Rank = Rank.Paint, Bottom = Length.Points(value, unit, nameof(value)) });
+        => Border(container, float.NaN, float.NaN, Length.Points(value, unit, nameof(value)), float.NaN);
 
     /// <summary>A border on the left.</summary>
     public static IContainer BorderLeft(this IContainer container, float value, Unit unit = Unit.Point)
-        => Decorate(container, new Decorator(DecoratorKind.Border) { Rank = Rank.Paint, Left = Length.Points(value, unit, nameof(value)) });
+        => Border(container, float.NaN, float.NaN, float.NaN, Length.Points(value, unit, nameof(value)));
 
     /// <summary>A border on the right.</summary>
     public static IContainer BorderRight(this IContainer container, float value, Unit unit = Unit.Point)
-        => Decorate(container, new Decorator(DecoratorKind.Border) { Rank = Rank.Paint, Right = Length.Points(value, unit, nameof(value)) });
+        => Border(container, float.NaN, Length.Points(value, unit, nameof(value)), float.NaN, float.NaN);
 
-    /// <summary>The colour of the border set just before, as in <c>.Border(1).BorderColor(Colors.Grey.Lighten1)</c>.</summary>
+    /// <summary>
+    /// Border calls straight after one another make one border, as in QuestPDF: a later call sets its sides again, and
+    /// <see cref="BorderColor"/> colours every side. Separate decorators would nest into doubled borders.
+    /// </summary>
+    private static Container Border(IContainer container, float top, float right, float bottom, float left)
+    {
+        var slot = Container.Of(container);
+        if (slot.Child != null || slot.Owner is not { Kind: DecoratorKind.Border } border)
+            return Decorate(container, new Decorator(DecoratorKind.Border) { Rank = Rank.Paint, Top = top, Right = right, Bottom = bottom, Left = left });
+        if (!float.IsNaN(top)) border.Top = top;
+        if (!float.IsNaN(right)) border.Right = right;
+        if (!float.IsNaN(bottom)) border.Bottom = bottom;
+        if (!float.IsNaN(left)) border.Left = left;
+        return slot;
+    }
+
+    /// <summary>
+    /// The colour of the border set just before, as in <c>.Border(1).BorderColor(Colors.Grey.Lighten1)</c>; with several
+    /// border calls in a row, the colour of all their sides.
+    /// </summary>
     /// <exception cref="InvalidOperationException">The slot does not come straight from a border call.</exception>
     public static IContainer BorderColor(this IContainer container, Color color)
     {

@@ -215,7 +215,9 @@ internal sealed class HtmlWriter
         if (page.Header.Child != null) RenderBand(page.Header, "header", name);
         if (page.EvenHeader.Child != null) RenderEvenBand(page.EvenHeader, "header", name);
         // The footer comes after the content, so a browser that does not repeat it (Chrome) still shows it last.
-        RenderContainer(page.Content, Box.Slot("main"));
+        var content = PageSlot(Box.Slot("main"));
+        content.HasPageHeight = !page.ContinuousHeight;
+        RenderContainer(page.Content, content);
         if (page.Footer.Child != null) RenderBand(page.Footer, "footer", name);
         if (page.EvenFooter.Child != null) RenderEvenBand(page.EvenFooter, "footer", name);
         if (page.ForegroundLayer.Child != null) RenderContainer(page.ForegroundLayer, PageLayer(page, null));
@@ -268,7 +270,13 @@ internal sealed class HtmlWriter
     }
 
     private static Box BandSlot(string tag, string attribute, string? pageName)
-        => pageName == null ? Box.Slot(tag, (attribute, "")) : Box.Slot(tag, (attribute, ""), ("data-sticky-pdf-page", pageName));
+        => PageSlot(pageName == null ? Box.Slot(tag, (attribute, "")) : Box.Slot(tag, (attribute, ""), ("data-sticky-pdf-page", pageName)));
+
+    private static Box PageSlot(Box box)
+    {
+        box.IsPageSlot = true;
+        return box;
+    }
 
     // Slots and decorators
 
@@ -279,6 +287,7 @@ internal sealed class HtmlWriter
     private void RenderContainer(Container slot, Box box)
     {
         int depth = _open.Count;
+        if (box.IsPageSlot) box.TakesAlignment = AlignsVertically(slot);
         int? heading = null;
         string? outerAlternativeText = _alternativeText;
         Element? element = slot.Child;
@@ -380,11 +389,23 @@ internal sealed class HtmlWriter
             case MarkdownElement markdown:
                 if (box.MustEmit) Open(box);
                 _markdown = true;
-                MarkdownHtml.Write(_html, markdown.Html, _markdownIds);
+                MarkdownHtml.Write(_html, markdown.Html, _markdownIds, _band != Band.None);
                 break;
         }
         CloseTo(depth);
         _alternativeText = outerAlternativeText;
+    }
+
+    /// <summary>
+    /// Whether a decorator of the slot aligns its content vertically. A page slot then takes the alignment itself, as
+    /// a div does, since a box inside it would have no height to align in; horizontal alignment alone stays in a box
+    /// inside the slot, as it always has.
+    /// </summary>
+    private static bool AlignsVertically(Container slot)
+    {
+        for (var element = slot.Child; element is Decorator decorator; element = decorator.Inner.Child)
+            if (decorator.Kind == DecoratorKind.Align && decorator.Vertical != null) return true;
+        return false;
     }
 
     /// <summary>The box itself if content can become it (a plain block), or a new box inside it.</summary>
@@ -555,7 +576,10 @@ internal sealed class HtmlWriter
 
     private void RenderRow(RowElement row, Box box)
     {
+        // A row in a page slot of a fixed height fills it, so that its items stretch to that height as in QuestPDF.
+        bool fill = box.IsPageSlot && box.Has("height") && !box.Aligned;
         box = Absorbing(box);
+        if (fill) box.Declarations.Add(("height", "100%"));
         box.Declarations.Add(("display", "flex"));
         if (row.Spacing > 0) box.Declarations.Add(("column-gap", CssValue.Pt(row.Spacing)));
         Open(box);
@@ -1380,6 +1404,18 @@ internal sealed class HtmlWriter
         /// <summary>A page's background or foreground, whose content fills the page as in QuestPDF.</summary>
         public bool FillsPage { get; set; }
 
+        /// <summary>A page's header, content or footer, which keeps its own element and tag.</summary>
+        public bool IsPageSlot { get; set; }
+
+        /// <summary>Whether this page slot takes alignment as a div does, because its content is aligned vertically.</summary>
+        public bool TakesAlignment { get; set; }
+
+        /// <summary>The page content of a page with a height, the space that vertically aligned content is aligned in.</summary>
+        public bool HasPageHeight { get; set; }
+
+        /// <summary>Whether the box aligns its content, which then keeps its own size.</summary>
+        public bool Aligned => _aligned;
+
         /// <summary>A cell's horizontal alignment, which its non-text content gets from a flex wrapper inside it.</summary>
         private HorizontalAlignment? _cellAlignment;
         public List<(string Property, string Value)> Declarations { get; } = [];
@@ -1519,8 +1555,11 @@ internal sealed class HtmlWriter
         /// keeps its own size.
         /// </summary>
         public bool FillsWith(Decorator decorator)
-            => (InGrid || FillsPage) && _cellAlignment == null && !Has("vertical-align") && !(FillsPage && _aligned)
+            => (InGrid || FillsPage || SlotHeight) && _cellAlignment == null && !Has("vertical-align") && !((FillsPage || SlotHeight) && _aligned)
                && (decorator.Kind == DecoratorKind.Border || decorator.Kind == DecoratorKind.Style && decorator.Rank is Rank.Paint or Rank.Opacity);
+
+        /// <summary>A page slot of a fixed height, whose painted content fills that height as in QuestPDF.</summary>
+        private bool SlotHeight => IsPageSlot && Has("height");
 
         /// <summary>The box inside this one: plain, or aligned when this is a cell with a horizontal alignment.</summary>
         public Box Child()
@@ -1580,13 +1619,16 @@ internal sealed class HtmlWriter
                 return true;
             }
 
-            if (Tag is not ("div" or "a")) return false;
+            if (Tag is not ("div" or "a") && !TakesAlignment) return false;
             if (align.Horizontal != null && _alignedHorizontally || align.Vertical != null && _alignedVertically) return false;
             if (!_aligned)
             {
                 if (Has("display")) return false;
                 Declarations.Add(("display", "flex"));
                 Declarations.Add(("flex-direction", "column"));
+                // The page content is as tall as its content; QuestPDF aligns it in the space between the header and the
+                // footer, which PdfPecker gives 100vh. Longer content still flows on to the next pages.
+                if (HasPageHeight && !Has("height") && !Has("min-height")) Declarations.Add(("min-height", "100vh"));
                 _aligned = true;
             }
             if (align.Horizontal is { } horizontal)
