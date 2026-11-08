@@ -58,8 +58,10 @@ jobs:
             9.0.x
             10.0.x
           # Keeps ~/.nuget/packages between runs. Every restore of src/PdfPecker fetches the API baseline release for
-          # package validation, so without the cache each job downloaded it from nuget.org again.
-          cache: true
+          # package validation, so without the cache each job downloaded it from nuget.org again. A release builds
+          # without it: the packages it publishes come from a fresh restore from nuget.org, not from a cache that an
+          # earlier run on main saved and could have altered.
+          cache: ${{ github.event_name != 'release' }}
           cache-dependency-path: |
             **/*.csproj
             Directory.Build.props
