@@ -173,11 +173,19 @@ internal static class Targets
                 {
                     var renderer = PdfRenderer.Open(d);
                     int pages = Math.Min(renderer.PageCount, 3);
-                    var options = new ImageOptions { Dpi = 72, MaxDegreeOfParallelism = 1 };
+                    // The output format and its settings come from the input's length and last byte, so every encoder
+                    // (PNG, JPEG, WebP and each TIFF mode and compression) sees rendered pages and runs repeat exactly.
+                    int pick = d.Length == 0 ? 0 : d.Length * 31 + d[^1];
+                    var options = new ImageOptions
+                    {
+                        Dpi = 72, MaxDegreeOfParallelism = 1, Format = (PdfImageFormat)(pick % 4),
+                        Quality = 1 + (pick / 4 % 100), TiffColorMode = (TiffColorMode)(pick / 7 % 3),
+                        TiffCompression = pick / 21 % 6 == 5 ? null : (TiffCompression)(pick / 21 % 6),
+                    };
                     for (int i = 0; i < pages; i++)
                     {
                         renderer.GetPageSize(i);
-                        renderer.RenderPageToPng(i, options, ct);
+                        renderer.RenderPageEncoded(i, options, ct);
                     }
                 },
             },
