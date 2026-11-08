@@ -115,6 +115,7 @@ internal sealed partial class PdfDocumentWriter
     private bool _noAlpha;                            // writing a stream without the shared ExtGState resources
     private readonly SortedSet<int> _fillAlphas = new(), _strokeAlphas = new(), _groupAlphas = new();
     private readonly List<byte[]> _forms = new(); // transparency groups of translucent layers, written as /Fx1, /Fx2, ...
+    private readonly Dictionary<int, string> _formBoxes = new(); // by form index: its bounding box, where known
     private readonly List<bool> _formIsolated = new(); // by form: an isolated group (blended, isolation: isolate, or blending inside)
     private bool _streamBlends; // the stream being written composites a layer with a blend mode
     private readonly SortedSet<(int Alpha, string Blend)> _blendStates = new(); // /g<alpha><Blend>: group alpha and blend mode

@@ -374,6 +374,8 @@ internal sealed partial class PdfDocumentWriter
         EndText(group);
         EndMarked(group);
         _streamSpace = streamSpace;
+        // The pixels of a filter or a filtered backdrop reach beyond the layer's ops.
+        if (tb.Layer.Raster == null && tb.Layer.Backdrop == null) _formBoxes[_forms.Count] = GroupBox(tb.Items, pageTop);
         _forms.Add(group.Span.ToArray());
         // A translucent or masked box is a stacking context, which CSS isolates: what blends inside it blends only with
         // the rest of its content. Without blending inside, a non-isolated group looks the same and keeps its bytes.
