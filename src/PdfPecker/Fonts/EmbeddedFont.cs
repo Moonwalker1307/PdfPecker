@@ -141,12 +141,20 @@ internal sealed class EmbeddedFont : TextFont
 
     private System.Collections.Concurrent.ConcurrentDictionary<string, TextFont>? _variants;
 
-    public override TextFont WithFeatures(string features)
+    public override TextFont WithFeatures(string features) => WithFeatures(features, null);
+
+    /// <summary>
+    /// This font with OpenType features, drawn with <paramref name="document"/>'s variant of the program when a document
+    /// is given, so that the document has one variant of the program throughout. A font of one conversion keeps its
+    /// variants, as many as the document has settings; a font the process keeps (see <see cref="Shared"/>) keeps none,
+    /// or every new setting a server saw would stay, and the document keeps them instead.
+    /// </summary>
+    public TextFont WithFeatures(string features, DocumentFontVariants? document)
     {
-        var program = Program.WithFeatures(features);
+        var program = document != null ? document.WithFeatures(Program, features) : Program.WithFeatures(features);
         if (ReferenceEquals(program, Program)) return this;
+        if (_shared) return new EmbeddedFont(this, program);
         var variants = LazyInitializer.EnsureInitialized(ref _variants, () => new());
-        // Bounded by the program's own cap: past it the program comes back unchanged and this font is returned above.
         return variants.GetOrAdd(features, _ => new EmbeddedFont(this, program));
     }
 
@@ -518,16 +526,19 @@ internal sealed class FontChain : TextFont
     // is given.
     private readonly Func<int, Func<TextFont, bool>?, TextFont?> _fallback;
     private readonly Dictionary<int, TextFont> _picked = new();
+    // The document's feature variants, which every chain of the document takes its fonts' variants from.
+    private readonly DocumentFontVariants? _document;
 
     public FontChain(TextFont primary, Func<int, Func<TextFont, bool>?, TextFont?> fallback) : this(primary, null, fallback)
     {
     }
 
-    public FontChain(TextFont primary, TextFont? metrics, Func<int, Func<TextFont, bool>?, TextFont?> fallback)
+    public FontChain(TextFont primary, TextFont? metrics, Func<int, Func<TextFont, bool>?, TextFont?> fallback, DocumentFontVariants? document = null)
     {
         _primary = primary;
         _metrics = metrics;
         _fallback = fallback;
+        _document = document;
         Ascent = primary.Ascent;
         Descent = primary.Descent;
         LineGap = primary.LineGap;
@@ -638,15 +649,15 @@ internal sealed class FontChain : TextFont
     private FontChain? _withoutLigatures, _withoutKerning, _withoutContextual;
 
     public override TextFont WithoutLigatures()
-        => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutLigatures());
+        => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutLigatures(), _document);
 
     public override bool ShapesInContext => _primary.ShapesInContext;
 
     public override TextFont WithoutContextual()
-        => _withoutContextual ??= new FontChain(_primary.WithoutContextual(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutContextual());
+        => _withoutContextual ??= new FontChain(_primary.WithoutContextual(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutContextual(), _document);
 
     public override TextFont WithoutKerning()
-        => _withoutKerning ??= new FontChain(_primary.WithoutKerning(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutKerning());
+        => _withoutKerning ??= new FontChain(_primary.WithoutKerning(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutKerning(), _document);
 
     // The first available font is the one font-size-adjust holds constant.
     public override float Metric(FontMetric metric) => (_metrics ?? _primary).Metric(metric);
@@ -662,8 +673,10 @@ internal sealed class FontChain : TextFont
         if (variants.TryGetValue(features, out var cached)) return cached;
         // Bundled font chains live as long as the process, so ever new feature settings must not grow this forever.
         if (variants.Count >= MaxVariants) return this;
-        return variants.GetOrAdd(features, k => new FontChain(_primary.WithFeatures(k), _metrics, (cp, accept) => _fallback(cp, accept)?.WithFeatures(k)));
+        return variants.GetOrAdd(features, k => new FontChain(Variant(_primary, k), _metrics, (cp, accept) => _fallback(cp, accept) is { } f ? Variant(f, k) : null, _document));
     }
+
+    private TextFont Variant(TextFont font, string features) => _document?.WithFeatures(font, features) ?? font.WithFeatures(features);
 
     public override int KernUnits(int left, int right)
     {

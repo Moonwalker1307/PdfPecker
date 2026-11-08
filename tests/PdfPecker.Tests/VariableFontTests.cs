@@ -64,7 +64,76 @@ public class VariableFontTests
         Assert.Same(p, p.Instance(At(("wght", 400))));
         Assert.Same(p, p.Instance(At(("wdth", 50)))); // not an axis of this font
         Assert.Same(p.Instance(At(("wght", 700))), p.Instance(At(("wght", 700))));
-        Assert.Same(p.Instance(At(("wght", 950))), p.Instance(At(("wght", 900)))); // clamped to the axis
+        // A document gets one instance for each location: 950 is clamped to the axis, so it is 900.
+        var document = new DocumentFontVariants();
+        Assert.Same(p.Instance(At(("wght", 950)), document), p.Instance(At(("wght", 900)), document));
+        // Its weight class comes from the value asked for, so another document that asks for 900 gets an instance of its
+        // own rather than the one the earlier request made.
+        Assert.Equal(950, p.Instance(At(("wght", 950))).WeightClass);
+        Assert.Equal(900, p.Instance(At(("wght", 900))).WeightClass);
+    }
+
+    [Fact]
+    public void A_font_keeps_its_latest_instances_and_a_document_keeps_its_own()
+    {
+        var p = FontProgram.Load(Inter)[0];
+        var document = new DocumentFontVariants();
+        var bold = p.Instance(At(("wght", 700)), document);
+        // Fonts registered or installed serve every conversion. Past 64 locations they used to give every new one the
+        // default instance; now they keep the latest 64 and make the others again when asked.
+        for (int weight = 101; weight <= 200; weight++) Assert.Equal(weight, p.Instance(At(("wght", weight))).WeightClass);
+        Assert.Equal(64, p.Cached.Instances);
+        Assert.NotSame(bold, p.Instance(At(("wght", 700))));
+        // What the font dropped meanwhile, the document still has.
+        Assert.Same(bold, p.Instance(At(("wght", 700)), document));
+    }
+
+    [Fact]
+    public void A_document_has_a_bounded_number_of_instances_of_a_font()
+    {
+        var p = FontProgram.Load(Inter)[0];
+        var other = FontProgram.Load(Inter)[0];
+        var document = new DocumentFontVariants();
+        for (int i = 0; i < DocumentFontVariants.MaxInstances; i++)
+            Assert.Same(other, document.Instance(p, i.ToString(System.Globalization.CultureInfo.InvariantCulture), () => other));
+        // Past the bound the document uses the font as it is, and keeps the instances it has.
+        Assert.Same(p, document.Instance(p, "next", () => throw new InvalidOperationException("past the bound")));
+        Assert.Same(other, document.Instance(p, "0", () => throw new InvalidOperationException("kept")));
+    }
+
+    [Fact]
+    public void A_registered_font_keeps_its_instances_after_many_documents()
+    {
+        // After a stream of documents with other weights, bold text in a registered variable font came out regular.
+        PdfOptions Options()
+        {
+            var options = new PdfOptions { CreationDate = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), Compress = false };
+            options.Fonts.Add(Inter, "V");
+            return options;
+        }
+        const string Bold = "<p style='font-family: V'><b>Bold</b> regular</p>";
+        var fresh = HtmlToPdf.Convert(Bold, Options());
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+Inter[^/\s]*-wght700\b", Latin1(fresh));
+        var shared = Options();
+        for (int i = 0; i < 70; i++) HtmlToPdf.Convert($"<p style=\"font-family: V; font-variation-settings: 'wght' {300 + i}\">x</p>", shared);
+        Assert.Equal(fresh, HtmlToPdf.Convert(Bold, shared));
+    }
+
+    [Fact]
+    public void A_document_has_an_instance_for_every_font_size()
+    {
+        // The optical size axis follows the font size, so each size has an instance of its own. After 64 of them, the bold
+        // text that followed used to get the default instance.
+        string[] Fonts(string body)
+            => Regex.Matches(Latin1(ConvertUncompressed($"<style>@font-face {{ font-family: F; src: url('{DataUri(Flex)}'); }}</style><body style='font-family: F'>{body}</body>")),
+                @"/BaseFont /[A-Z]{6}\+([^/\s]+)").Select(m => m.Groups[1].Value).Distinct().ToArray();
+        const string Bold = "<p style='font-size: 30px'><b>Bold</b> text</p>";
+        var alone = Fonts(Bold);
+        Assert.Contains(alone, name => name.EndsWith("-opsz30-wght700", StringComparison.Ordinal));
+        var sizes = string.Concat(Enumerable.Range(0, 70).Select(i => $"<span style='font-size: {(8 + i * 0.5).ToString(System.Globalization.CultureInfo.InvariantCulture)}px'>a</span>"));
+        var many = Fonts($"<p>{sizes}</p>{Bold}");
+        Assert.True(many.Length > 70, $"{many.Length} fonts");
+        Assert.All(alone, name => Assert.Contains(name, many));
     }
 
     [Fact]

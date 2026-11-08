@@ -88,6 +88,7 @@ internal sealed class FontResolver
     private readonly Dictionary<(string, int, bool, FontFamily, FontVariation), TextFont> _resolved = new();
     private readonly Dictionary<(string, int, bool, FontVariation), List<EmbeddedFont>> _matched = new();
     private readonly Dictionary<(FontProgram, bool, bool, UnicodeRange?, FaceMetrics), EmbeddedFont> _fonts = new();
+    private readonly DocumentFontVariants _variants = new();
 
     private readonly bool _embedStandard;
     private readonly Lazy<FontCollection.Snapshot>? _system; // the system font folders, scanned on first use
@@ -340,7 +341,7 @@ internal sealed class FontResolver
                     if (f.Covers(cp) && (accept == null || accept(f))) return f;
             }
             return Bundled(generic, bold, italic, cp) is { } bundled && (accept == null || accept(bundled)) ? bundled : null;
-        });
+        }, _variants);
         _resolved[key] = result;
         return result;
     }
@@ -408,7 +409,7 @@ internal sealed class FontResolver
             bestScore = score;
             bool synthBold = weight >= 600 && face.WeightMax < 600 && variation.Synthesis.HasFlag(FontSynthesis.Weight);
             bool synthItalic = italic && !face.Italic && variation.Synthesis.HasFlag(FontSynthesis.Style);
-            if (program.Axes.Length > 0) program = Instance(program, face, weight, italic, variation, ref synthItalic);
+            if (program.Axes.Length > 0) program = Instance(program, face, weight, italic, variation, _variants, ref synthItalic);
             var fk = (program, synthBold, synthItalic, face.Range, face.Metrics);
             if (!_fonts.TryGetValue(fk, out var font)) _fonts[fk] = font = new EmbeddedFont(program, synthBold, synthItalic, face.Range, faceMetrics: face.Metrics);
             result.Add(font);
@@ -420,9 +421,11 @@ internal sealed class FontResolver
     /// <summary>
     /// The instance of a variable font for the style, as CSS Fonts level 4 picks it: the weight within the face's
     /// declared range, the width from font-stretch, italic from an ital or slnt axis when the face is not italic itself,
-    /// the optical size from the font size, and then font-variation-settings over all of them.
+    /// the optical size from the font size, and then font-variation-settings over all of them. The document keeps the
+    /// instances it uses.
     /// </summary>
-    private static FontProgram Instance(FontProgram program, FontFace face, int weight, bool italic, FontVariation variation, ref bool synthItalic)
+    private static FontProgram Instance(FontProgram program, FontFace face, int weight, bool italic, FontVariation variation, DocumentFontVariants document,
+        ref bool synthItalic)
     {
         var values = new Dictionary<uint, float>();
         if (program.Axis(FontVariations.Wght) != null) values[FontVariations.Wght] = Math.Clamp(weight, face.WeightMin, Math.Max(face.WeightMin, face.WeightMax));
@@ -435,7 +438,7 @@ internal sealed class FontResolver
         if (variation.OpticalSize > 0 && program.Axis(FontVariations.Opsz) != null) values[FontVariations.Opsz] = variation.OpticalSize;
         if (variation.Settings != null)
             foreach (var (tag, value) in ParseVariationSettings(variation.Settings)) values[tag] = value;
-        return program.Instance(values);
+        return program.Instance(values, document);
     }
 
     /// <summary>font-variation-settings: "wght" 650, "wdth" 80. Invalid entries are skipped.</summary>

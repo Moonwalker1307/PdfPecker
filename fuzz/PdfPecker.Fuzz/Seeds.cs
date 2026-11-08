@@ -129,6 +129,11 @@ internal sealed class SeedContext
         for (int i = 0; i < pixels.Length; i++) pixels[i] = (byte)(i * 7 + i / 96 * 13);
         yield return ("generated:flate-predictor.pdf", ImagePdf("/FlateDecode", PdfPecker.Images.PdfImage.DeflatePredicted(pixels, 32, 32, 3, out var parms), 32, 32, "/DeviceRGB", 8, "/DecodeParms " + parms));
         yield return ("generated:colour-spaces.pdf", ColourSpacePdf());
+
+        // Tagged tables with spanned cells, uncompressed so mutations reach the spans and the cells of the structure tree,
+        // which the Markdown and structured HTML targets read within a budget of grid positions per page.
+        var table = "<table><tr><th colspan=\"2\">Both</th><th>C</th></tr><tr><td rowspan=\"2\">Tall</td><td>B1</td><td>C1</td></tr><tr><td>B2</td><td>C2</td></tr></table>";
+        yield return ("generated:tagged-table-spans.pdf", HtmlToPdf.Convert(table + table + table, new PdfOptions { Accessibility = PdfAccessibility.Tagged, Compress = false }));
     }
 
     /// <summary>

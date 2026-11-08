@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 
@@ -58,9 +57,13 @@ internal sealed partial class FontProgram
     // post: the italic angle as a 16.16 fixed number and the fixed pitch flag.
     private const int PostMinimumLength = 16, ItalicAngleField = 4, UnderlinePositionField = 8, IsFixedPitchField = 12;
 
-    // One font keeps at most this many instances, so a stylesheet with many weights cannot grow memory without bound;
-    // further locations use the default instance.
-    private const int MaxInstances = 64;
+    // The instances and feature variants a font keeps for the documents that ask for them again. Past these the least
+    // recently used are dropped rather than new ones refused, so that a font the process keeps for every conversion (a
+    // registered, installed or bundled one) costs no more however many locations and feature settings documents ask
+    // for, and every document still gets what it asks for. A document keeps the ones it uses (DocumentFontVariants),
+    // so dropping one here never changes its output. Feature settings that change nothing are remembered apart, so
+    // that they never push out the variants that do.
+    private const int CachedInstances = 64, CachedVariants = 64, CachedPlainFeatures = 256;
 
     internal readonly byte[] Data; // the sfnt; for a collection, the whole file (table offsets are absolute)
     private readonly Dictionary<uint, (int Offset, int Length)> _tables = new();
@@ -101,8 +104,8 @@ internal sealed partial class FontProgram
     private VariationAxis[]? _axes;
     private ColorGlyphs? _colorGlyphs;
     private bool _colorGlyphsLoaded;
-    private ConcurrentDictionary<string, FontProgram> _instances = new(StringComparer.Ordinal);
-    private ConcurrentDictionary<string, FontProgram>? _featureVariants;
+    private RecentCache<FontProgram> _instances = new(CachedInstances);
+    private RecentCache<FontProgram>? _featureVariants, _plainFeatures;
 
     /// <summary>
     /// The latest subsets of this font as the PDF writer embeds them (see <see cref="EmbeddedFontFiles"/>). The feature
@@ -334,17 +337,20 @@ internal sealed partial class FontProgram
 
     /// <summary>
     /// This font with OpenType features such as tabular figures applied to its character map (a key from
-    /// <see cref="FontFeatures.Key"/>). Returns this font when the features change nothing. Variants are cached.
+    /// <see cref="FontFeatures.Key"/>). Returns this font when the features change nothing. Variants are kept for later
+    /// calls; each copies the character map, so only the most recently used are (see <see cref="CachedVariants"/>).
     /// </summary>
     public FontProgram WithFeatures(string features)
     {
-        var variants = LazyInitializer.EnsureInitialized(ref _featureVariants, () => new());
-        if (variants.TryGetValue(features, out var cached)) return cached;
-        // Each variant copies the character map, and the bundled fonts live as long as the process, so a server that
-        // sees ever new feature settings would keep every copy; past the cap, as for instances, the font is used as is.
-        if (variants.Count >= MaxInstances) return this;
-        return variants.GetOrAdd(features, MakeVariant);
+        var variants = LazyInitializer.EnsureInitialized(ref _featureVariants, () => new(CachedVariants));
+        var plain = LazyInitializer.EnsureInitialized(ref _plainFeatures, () => new(CachedPlainFeatures));
+        if (variants.TryGet(features, out var cached) || plain.TryGet(features, out cached)) return cached;
+        var variant = MakeVariant(features);
+        return ReferenceEquals(variant, this) ? plain.Add(features, this) : variants.Add(features, variant);
     }
+
+    /// <summary>The instances and the feature variants that change the font that it keeps now; for tests.</summary>
+    internal (int Instances, int Variants) Cached => (_instances.Count, _featureVariants?.Count ?? 0);
 
     private FontProgram MakeVariant(string features)
     {
@@ -357,6 +363,7 @@ internal sealed partial class FontProgram
         // are applied after a variable font is instanced, so a variant never makes instances of its own.
         var variant = (FontProgram)MemberwiseClone();
         variant._featureVariants = null;
+        variant._plainFeatures = null;
         variant.ShapedFeatures = contextual;
         if (map == null) return variant;
         var bmp = _bmp ?? BuildCharMap();
@@ -377,8 +384,9 @@ internal sealed partial class FontProgram
     internal FontProgram Copy()
     {
         var copy = (FontProgram)MemberwiseClone();
-        copy._instances = new(StringComparer.Ordinal);
+        copy._instances = new(CachedInstances);
         copy._featureVariants = null;
+        copy._plainFeatures = null;
         return copy;
     }
 
@@ -431,9 +439,11 @@ internal sealed partial class FontProgram
     /// <summary>
     /// The static instance of a variable font at the given axis values (design units, such as wght 700); axes not
     /// given keep their default. Returns this font when it is not variable, when the values are its default (except for
-    /// CFF2 fonts), or when the font's variation data is damaged. Instances are cached, so documents share them.
+    /// CFF2 fonts), when the font's variation data is damaged, or when <paramref name="document"/> has as many instances
+    /// of the font as one document may have. A document gets one instance for each location throughout, the one its
+    /// first request for that location made. Instances are kept for later requests with the same values.
     /// </summary>
-    public FontProgram Instance(IReadOnlyDictionary<uint, float> values)
+    public FontProgram Instance(IReadOnlyDictionary<uint, float> values, DocumentFontVariants? document = null)
     {
         var axes = Axes;
         if (axes.Length == 0 || values.Count == 0) return this;
@@ -442,19 +452,31 @@ internal sealed partial class FontProgram
             var coords = FontVariations.Normalize(this, axes, values);
             // CFF2 outlines are converted even at the default, since few PDF readers can draw them.
             if (coords.All(c => c == 0) && Table("CFF2") == null) return this;
-            var key = string.Join(",", coords.Select(c => ((int)MathF.Round(c * 16384)).ToString(CultureInfo.InvariantCulture)));
-            if (_instances.TryGetValue(key, out var cached)) return cached;
-            if (_instances.Count >= MaxInstances) return this;
-            var instance = new FontProgram(FontVariations.Instance(this, coords, values, axes), 0);
-            instance.PostScriptName = SanitizeName(PostScriptName + InstanceNameSuffix(axes, coords, values));
-            instance.InstanceCoordinates = coords;
-            return _instances.GetOrAdd(key, instance);
+            if (document == null) return CachedInstance(values, coords, axes);
+            var location = string.Join(",", coords.Select(c => ((int)MathF.Round(c * 16384)).ToString(CultureInfo.InvariantCulture)));
+            return document.Instance(this, location, () => CachedInstance(values, coords, axes));
         }
         catch (Exception ex) when (IsFormatError(ex) || ex is InvalidOperationException)
         {
             SwallowedErrors.Record(ex);
             return this;
         }
+    }
+
+    // The instance for exactly these values, made now or kept from an earlier request. Its name and its weight and width
+    // classes come from the values, not only from the location they normalize to, so only requests with the same values
+    // share an instance, and what one document gets does not depend on what others asked for before.
+    private FontProgram CachedInstance(IReadOnlyDictionary<uint, float> values, float[] coords, VariationAxis[] axes)
+    {
+        var request = new StringBuilder();
+        foreach (var (tag, value) in values.OrderBy(v => v.Key))
+            request.Append(tag.ToString(CultureInfo.InvariantCulture)).Append('=').Append(value.ToString("R", CultureInfo.InvariantCulture)).Append(';');
+        var key = request.ToString();
+        if (_instances.TryGet(key, out var cached)) return cached;
+        var instance = new FontProgram(FontVariations.Instance(this, coords, values, axes), 0);
+        instance.PostScriptName = SanitizeName(PostScriptName + InstanceNameSuffix(axes, coords, values));
+        instance.InstanceCoordinates = coords;
+        return _instances.Add(key, instance);
     }
 
     // A name of its own, so the instances of one font are told apart in the PDF.

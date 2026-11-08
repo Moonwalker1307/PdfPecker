@@ -27,6 +27,13 @@ internal static partial class PageStructure
     /// <summary>Grid positions a tagged table's cells may cover, spans included; a larger table is read as its cells' text.</summary>
     private const int MaxTaggedCells = 100_000;
 
+    /// <summary>
+    /// Grid positions the tagged tables with text on one page may cover together, spans included. A page past it is
+    /// read from its layout: thousands of tables whose cells claim huge spans cost a few bytes each in the tree, and
+    /// laying out every one of them would take seconds a page.
+    /// </summary>
+    private const int MaxPageTaggedCells = 200_000;
+
     /// <summary>The most columns a table's rows with cells left out are lined up with.</summary>
     private const int MaxPlacedColumns = 100;
 
@@ -42,6 +49,7 @@ internal static partial class PageStructure
     {
         var reader = new TaggedPage(tree, page, glyphs, width, height, links, cancellationToken);
         reader.Container(tree.Root);
+        if (reader.OverBudget) return null;
         int taken = 0, left = 0;
         var rest = new List<TextGlyph>();
         // Artifacts that copy the text read at nearly the same place, such as a text shadow, are left out.
@@ -133,6 +141,9 @@ internal static partial class PageStructure
     {
         public readonly List<FlowBlock> Blocks = new();
         public readonly bool[] Taken;
+        /// <summary>Whether the page's tables cover more grid positions than <see cref="MaxPageTaggedCells"/>.</summary>
+        public bool OverBudget;
+        private long _cells; // grid positions the tables read so far cover
         private readonly int _page;
         private readonly List<TextGlyph> _glyphs;
         private readonly Dictionary<int, List<int>> _byMcid = new();
@@ -209,6 +220,7 @@ internal static partial class PageStructure
         private void Block(StructureTree.Node node)
         {
             _cancel.ThrowIfCancellationRequested();
+            if (OverBudget) return;
             switch (node.Type)
             {
                 case "Table": Table(node); break;
@@ -343,9 +355,28 @@ internal static partial class PageStructure
                 return;
             }
             foreach (var n in other.Where(n => n.Type == "Caption")) Block(n);
+            // The cells' text comes first, so a table with none on this page, as one the tree places on every page between
+            // its first and its last is on most of them, costs no more than its cells.
+            var texts = new List<List<FlowLine>>();
+            bool text = false;
+            for (int r = 0; r < rows.Count; r++)
+                foreach (var kid in rows[r].Row.Kids)
+                {
+                    if (kid is not StructureTree.Node cellNode) continue;
+                    var cellLines = cellNode.OnPage(_page) ? Lines(Gather(cellNode)) : new List<FlowLine>();
+                    texts.Add(cellLines);
+                    text |= cellLines.Count > 0;
+                }
+            if (!text) return;
+            _cells += area;
+            if (_cells > MaxPageTaggedCells)
+            {
+                OverBudget = true;
+                return;
+            }
             var table = new TableBlock { Rows = rows.Count };
             var covered = new HashSet<(int, int)>();
-            int header = 0;
+            int header = 0, next = 0;
             bool leading = true;
             for (int r = 0; r < rows.Count; r++)
             {
@@ -357,7 +388,7 @@ internal static partial class PageStructure
                     while (covered.Contains((r, column))) column++;
                     int rowSpan = Math.Min(cellNode.RowSpan, rows.Count - r), columnSpan = cellNode.ColumnSpan;
                     var cell = new TableCell { Row = r, Column = column, RowSpan = rowSpan, ColumnSpan = columnSpan };
-                    if (cellNode.OnPage(_page)) cell.Lines.AddRange(Lines(Gather(cellNode)));
+                    cell.Lines.AddRange(texts[next++]);
                     table.Cells.Add(cell);
                     for (int y = r; y < r + rowSpan; y++)
                         for (int x = column; x < column + columnSpan; x++) covered.Add((y, x));
