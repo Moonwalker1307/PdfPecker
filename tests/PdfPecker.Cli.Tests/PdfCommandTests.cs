@@ -31,6 +31,29 @@ public sealed class PdfCommandTests : IDisposable
     }
 
     [Fact]
+    public void MergeReadsLastInAPageSelection()
+    {
+        var three = ThreePages();
+        var out_ = _cli.Path_("tail.pdf");
+        _cli.Ok("merge", three + ":2-last", "-o", out_);
+        Assert.Equal(2, PdfPages.Count(File.ReadAllBytes(out_)));
+        Assert.DoesNotContain("Alpha", CliRunner.Text(out_));
+    }
+
+    /// <summary>The number of images in a TIFF file: the length of its chain of image file directories.</summary>
+    private static int TiffPages(byte[] tiff)
+    {
+        bool little = tiff[0] == (byte)'I';
+        uint U32(long at) => little ? System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(tiff.AsSpan((int)at))
+            : System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(tiff.AsSpan((int)at));
+        int U16(long at) => little ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(tiff.AsSpan((int)at))
+            : System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(tiff.AsSpan((int)at));
+        int count = 0;
+        for (long ifd = U32(4); ifd != 0 && count < 1000; count++) ifd = U32(ifd + 2 + 12L * U16(ifd));
+        return count;
+    }
+
+    [Fact]
     public void MergeRefusesToOverwriteAnInputAndNeedsAnOutput()
     {
         var three = ThreePages();
@@ -41,6 +64,10 @@ public sealed class PdfCommandTests : IDisposable
     [Theory]
     [InlineData("C:\\docs\\a.pdf", "C:\\docs\\a.pdf", null)]
     [InlineData("a.pdf:1-3,5", "a.pdf", "1-3,5")]
+    [InlineData("a.pdf:2-last", "a.pdf", "2-last")]
+    [InlineData("a.pdf:last-1", "a.pdf", "last-1")]
+    [InlineData("a.pdf:1, 3", "a.pdf", "1, 3")]
+    [InlineData("notes:draft.pdf", "notes:draft.pdf", null)]
     [InlineData("a.pdf", "a.pdf", null)]
     public void PageSelectionSyntax(string arg, string path, string? pages)
     {
@@ -144,6 +171,9 @@ public sealed class PdfCommandTests : IDisposable
 
         _cli.Ok("to-image", three, _cli.Path_("tiff"), "--format", "tiff", "--dpi", "40");
         Assert.Single(Directory.GetFiles(_cli.Path_("tiff")));
+        Assert.Equal(3, TiffPages(File.ReadAllBytes(Directory.GetFiles(_cli.Path_("tiff"))[0])));
+        _cli.Ok("to-image", three, _cli.Path_("tiff2"), "--format", "tiff", "--dpi", "40", "--pages", "2-last");
+        Assert.Equal(2, TiffPages(File.ReadAllBytes(Directory.GetFiles(_cli.Path_("tiff2"))[0])));
         Assert.Equal(2, _cli.Run("to-image", three, "--format", "bmp").Exit);
     }
 
