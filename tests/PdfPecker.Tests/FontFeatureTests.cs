@@ -87,13 +87,60 @@ public class FontFeatureTests
     }
 
     [Fact]
-    public void Feature_variants_of_one_font_are_capped()
+    public void A_font_keeps_its_latest_feature_variants()
     {
-        // Bundled fonts live as long as the process, so every new feature setting a server saw used to keep a copy of
-        // the font's character map forever.
+        // Each variant copies the character map, and bundled and registered fonts serve every conversion, so a font keeps
+        // the latest 64. Past 64 settings it used to give every new one the font without features instead.
         var font = FontProgram.Load(Inter)[0];
-        var variants = Enumerable.Range(0, 200).Select(i => font.WithFeatures("tnum,ss01=" + (i + 2))).Distinct(ReferenceEqualityComparer.Instance).Count();
-        Assert.InRange(variants, 2, 65);
+        int tabularOne = font.WithFeatures("tnum").GlyphId('1');
+        for (int i = 0; i < 200; i++) Assert.Equal(tabularOne, font.WithFeatures("tnum,ss01=" + (i + 2)).GlyphId('1'));
+        Assert.Equal(64, font.Cached.Variants);
+        // Settings that change nothing make no variant and push none out.
+        var latest = font.WithFeatures("tnum,ss01=201");
+        for (int i = 0; i < 200; i++) Assert.Same(font, font.WithFeatures("onum=" + (i + 2)));
+        Assert.Same(latest, font.WithFeatures("tnum,ss01=201"));
+        Assert.Equal(64, font.Cached.Variants);
+    }
+
+    [Fact]
+    public void A_document_keeps_its_feature_variants_and_a_bounded_number_of_them()
+    {
+        var font = FontProgram.Load(Inter)[0];
+        var document = new DocumentFontVariants();
+        var tabular = document.WithFeatures(font, "tnum");
+        for (int i = 0; i < 100; i++) font.WithFeatures("tnum,ss01=" + (i + 2)); // what other documents ask for
+        Assert.NotSame(tabular, font.WithFeatures("tnum"));
+        Assert.Same(tabular, document.WithFeatures(font, "tnum"));
+        // Settings that change nothing do not count towards the variants one document may have.
+        for (int i = 0; i < 100; i++) Assert.Same(font, document.WithFeatures(font, "onum=" + (i + 2)));
+        for (int i = 1; i < DocumentFontVariants.MaxFeatureVariants; i++) Assert.NotSame(font, document.WithFeatures(font, "tnum,ss01=" + (i + 2)));
+        Assert.Same(font, document.WithFeatures(font, "frac"));
+    }
+
+    [Fact]
+    public void Registered_and_bundled_fonts_keep_their_features_after_many_documents()
+    {
+        // Registered and bundled fonts serve every conversion. After 64 feature settings, the features of every new one
+        // used to be left out, so a document's output depended on the documents converted before it.
+        var date = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        PdfOptions Registered()
+        {
+            var options = new PdfOptions { CreationDate = date };
+            options.Fonts.Add(Inter, "R");
+            return options;
+        }
+        const string Tabular = "<p style='font-family: R; font-variant-numeric: tabular-nums'>1111</p>";
+        var fresh = HtmlToPdf.Convert(Tabular, Registered());
+        var shared = Registered();
+        for (int i = 0; i < 70; i++) HtmlToPdf.Convert($"<p style=\"font-family: R; font-feature-settings: 'tnum', 'ss01' {i + 2}\">1</p>", shared);
+        Assert.Equal(fresh, HtmlToPdf.Convert(Tabular, shared));
+
+        // Liberation Sans stands in for Helvetica when the standard fonts are embedded, and its sups feature raises the
+        // digits from four to nine; the last setting is one the font has not seen before.
+        var embedded = new PdfOptions { CreationDate = date, EmbedStandardFonts = true };
+        var plain = HtmlToPdf.Convert("<p style='font-family: Helvetica'>x5</p>", embedded);
+        for (int i = 0; i < 70; i++) HtmlToPdf.Convert($"<p style=\"font-family: Helvetica; font-feature-settings: 'sups', 'cv01' {i + 2}\">5</p>", embedded);
+        Assert.NotEqual(plain, HtmlToPdf.Convert("<p style=\"font-family: Helvetica; font-feature-settings: 'sups', 'cv01' 1000\">x5</p>", embedded));
     }
 
     [Fact]
