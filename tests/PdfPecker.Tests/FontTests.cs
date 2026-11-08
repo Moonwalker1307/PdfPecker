@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using PdfPecker.Fonts;
 using PdfPecker.Rendering.Fonts;
@@ -227,6 +228,95 @@ public class FontTests
         Assert.NotNull(actual);
         Assert.Equal(expected!.Verbs, actual!.Verbs);
         Assert.Equal(expected.Points, actual.Points);
+    }
+
+    // ------------------------------------------------------------------ deferred fonts
+
+    [Fact]
+    public void DeferredFontIsReadOnlyWhenADocumentUsesIt()
+    {
+        int reads = 0;
+        var options = new PdfOptions { Compress = false };
+        options.Fonts.AddDeferred("Later Sans", () => { reads++; return Regular; });
+        Assert.Equal(1, options.Fonts.Count);
+        Assert.Contains("Later Sans", options.Fonts.FamilyNames);
+
+        Assert.DoesNotContain("WorkSans", Latin1(ConvertUncompressed("<p>Plain text</p>", options)));
+        Assert.Equal(0, reads);
+        for (int i = 0; i < 2; i++)
+            Assert.Contains("WorkSans", Latin1(ConvertUncompressed("<p style='font-family: \"Later Sans\"'>Łódź</p>", options)));
+        Assert.Equal(1, reads);
+    }
+
+    [Fact]
+    public void DeferredFontsAreNotReadForCharactersOutsideTheirRange()
+    {
+        int cjkReads = 0, workSansReads = 0;
+        var options = new PdfOptions { Compress = false };
+        options.Fonts.AddDeferred("Cjk", () => { cjkReads++; return Regular; }, unicodeRange: "U+4E00-9FFF, U+3000-303F");
+        options.Fonts.AddDeferred("Greek", () => { workSansReads++; return Regular; }, unicodeRange: "U+0370-03FF");
+        // Ω is not in WinAnsi, so it falls back to the registered fonts: the first one's range lacks it.
+        var text = Latin1(ConvertUncompressed("<p>Ω</p>", options));
+        Assert.Equal(0, cjkReads);
+        Assert.Equal(1, workSansReads);
+        Assert.Contains("WorkSans", text);
+        // Text outside every range is not drawn with the faces, even though Work Sans has it.
+        ConvertUncompressed("<p>Ł</p>", options);
+        Assert.Equal(0, cjkReads);
+    }
+
+    [Fact]
+    public void DeferredFontPicksTheFaceOfACollectionAndTheWeight()
+    {
+        var ttc = Font("WorkSans.ttc");
+        var options = new PdfOptions { Compress = false };
+        options.Fonts.AddDeferred("Collection", () => ttc, weight: 400).AddDeferred("Collection", () => ttc, weight: 700, faceIndex: 1);
+        var text = Latin1(ConvertUncompressed("<p style='font-family: Collection'>Light <b>Bold</b></p>", options));
+        Assert.Contains("WorkSans-Regular", text);
+        Assert.Contains("WorkSans-Bold", text);
+    }
+
+    [Fact]
+    public void DeferredFacesOfOneArrayShareTheirFont()
+    {
+        int reads = 0;
+        var options = new PdfOptions { Compress = false };
+        var file = new Lazy<byte[]>(() => { reads++; return Regular; });
+        options.Fonts.AddDeferred("First name", () => file.Value).AddDeferred("Second name", () => file.Value);
+        var text = Latin1(ConvertUncompressed("<p style='font-family: \"First name\"'>One</p><p style='font-family: \"Second name\"'>Two</p>", options));
+        Assert.Equal(1, reads);
+        Assert.Single(Regex.Matches(text, "/FontFile2"));
+    }
+
+    [Fact]
+    public void DeferredFontThatCannotBeReadIsLeftOut()
+    {
+        var options = new PdfOptions { Compress = false };
+        options.Fonts.AddDeferred("Broken", () => throw new IOException("gone")).AddDeferred("Junk", () => new byte[] { 1, 2, 3 })
+            .AddDeferred("Missing face", () => Regular, faceIndex: 5);
+        var text = Latin1(ConvertUncompressed("<p style='font-family: Broken, Junk, \"Missing face\"'>Text</p>", options));
+        Assert.DoesNotContain("WorkSans", text);
+    }
+
+    [Fact]
+    public void DeferredFontArgumentsAreChecked()
+    {
+        var fonts = new FontCollection();
+        Assert.Throws<ArgumentNullException>(() => fonts.AddDeferred(null!, () => Regular));
+        Assert.Throws<ArgumentNullException>(() => fonts.AddDeferred("A", null!));
+        Assert.Throws<ArgumentException>(() => fonts.AddDeferred(" ", () => Regular));
+        Assert.Throws<ArgumentOutOfRangeException>(() => fonts.AddDeferred("A", () => Regular, weight: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => fonts.AddDeferred("A", () => Regular, faceIndex: -1));
+        Assert.Throws<ArgumentException>(() => fonts.AddDeferred("A", () => Regular, unicodeRange: "latin"));
+        Assert.Equal(0, fonts.Count);
+    }
+
+    [Fact]
+    public void UnicodeRangesAreMergedAndSearched()
+    {
+        var range = UnicodeRange.Parse("U+4E00-9FFF, U+0041, U+0030-0039, U+0035-0045, U+3??")!;
+        foreach (int cp in new[] { 0x30, 0x41, 0x45, 0x300, 0x3FF, 0x4E00, 0x9FFF }) Assert.True(range.Contains(cp), cp.ToString("X", CultureInfo.InvariantCulture));
+        foreach (int cp in new[] { 0x2F, 0x46, 0x2FF, 0x400, 0x4DFF, 0xA000 }) Assert.False(range.Contains(cp), cp.ToString("X", CultureInfo.InvariantCulture));
     }
 
     // ------------------------------------------------------------------ embedding
