@@ -52,10 +52,11 @@ internal static class TextLayout
             double rad = angle * Math.PI / 180, cx = Math.Cos(rad), cy = Math.Sin(rad);
             var groupLines = BuildLines(glyphs, groups[angle], cx, cy, attached, cancellationToken);
             Line? previous = null;
+            var directions = new LineDirections(glyphs, groupLines);
             foreach (var line in groupLines)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var textLine = MakeLine(glyphs, line, cx, cy, angle, expandLigatures, drawsSpaces, scratch);
+                var textLine = MakeLine(glyphs, line, cx, cy, angle, expandLigatures, drawsSpaces, directions, scratch);
                 if (textLine == null) continue;
                 if (sb.Length > 0)
                 {
@@ -420,7 +421,7 @@ internal static class TextLayout
     }
 
     private static PdfTextLine? MakeLine(List<TextGlyph> glyphs, Line line, double cx, double cy, int angle, bool expandLigatures, bool drawsSpaces,
-        Scratch scratch)
+        LineDirections directions, Scratch scratch)
     {
         // Visual order with spaces: a glyph drawn twice in the same place (fake bold) counts once, and a gap wider than
         // a fraction of the font's space becomes a space when the PDF does not draw one.
@@ -451,7 +452,7 @@ internal static class TextLayout
             prev = it;
         }
 
-        var order = LogicalOrder(glyphs, visual, out bool rtl);
+        var order = LogicalOrder(glyphs, visual, directions, out bool rtl);
 
         var words = new List<PdfTextWord>();
         var lineText = scratch.Line.Clear();
@@ -536,21 +537,35 @@ internal static class TextLayout
     /// letters is given bidi levels from its strong characters, and reordering by those levels (rule L2, which undoes
     /// itself) turns visual order back into logical order. Null when that is the visual order.
     /// </summary>
-    private static int[]? LogicalOrder(List<TextGlyph> glyphs, List<Item> visual, out bool rtl)
+    private static int[]? LogicalOrder(List<TextGlyph> glyphs, List<Item> visual, LineDirections directions, out bool rtl)
     {
         int n = visual.Count;
         int rCount = 0, lCount = 0;
+        BidiClass first = BidiClass.ON, last = BidiClass.ON;
         for (int i = 0; i < n; i++)
         {
             var c = visual[i].Glyph < 0 ? BidiClass.WS : ClassOf(glyphs[visual[i].Glyph].Text);
             if (c is BidiClass.R or BidiClass.AL) rCount++;
             else if (c == BidiClass.L) lCount++;
+            else continue;
+            if (first == BidiClass.ON) first = c;
+            last = c;
         }
-        rtl = rCount > lCount;
         // Most lines have no right-to-left letters and are read as they are drawn.
-        if (rCount == 0) return null;
+        if (rCount == 0)
+        {
+            rtl = false;
+            return null;
+        }
+        // The paragraph direction is that of the first strong letter (rules P2 and P3). Read left to right, a line starts
+        // at its leftmost letter, and read right to left at its rightmost one, so a line that starts and ends with
+        // letters of one direction can be read only one way. A line with Latin at one end and Hebrew at the other, such
+        // as a Hebrew sentence that ends with an e-mail address, fits both, and reads as the page's other lines do.
+        rtl = OwnDirection(first, last) ?? directions.Common() ?? rCount > lCount;
+
         var cls = new BidiClass[n];
         for (int i = 0; i < n; i++) cls[i] = visual[i].Glyph < 0 ? BidiClass.WS : ClassOf(glyphs[visual[i].Glyph].Text);
+        ResolveNumbers(cls, rtl);
 
         var levels = new byte[n];
         // Strong and number levels first: right-to-left letters at 1, left-to-right letters at the next even level, and
@@ -566,25 +581,19 @@ internal static class TextLayout
                 _ => 0,
             };
         }
-        // The nearest strong or number direction on each side of every item, and the nearest strong one, found in one
-        // pass each way so a long run of neutrals is not walked again for every item in it.
+        // The nearest strong or number direction on each side of every item, found in one pass each way so a long run
+        // of neutrals is not walked again for every item in it.
         var leftAny = new int[n];
-        var leftStrong = new int[n];
         var rightAny = new int[n];
-        var rightStrong = new int[n];
-        for (int i = 0, any = 0, strong = 0; i < n; i++)
+        for (int i = 0, any = 0; i < n; i++)
         {
             leftAny[i] = any;
-            leftStrong[i] = strong;
             if (dir[i] != 0) any = dir[i];
-            if (dir[i] is 1 or 2) strong = dir[i];
         }
-        for (int i = n - 1, any = 0, strong = 0; i >= 0; i--)
+        for (int i = n - 1, any = 0; i >= 0; i--)
         {
             rightAny[i] = any;
-            rightStrong[i] = strong;
             if (dir[i] != 0) any = dir[i];
-            if (dir[i] is 1 or 2) strong = dir[i];
         }
         for (int i = 0; i < n; i++)
         {
@@ -598,12 +607,6 @@ internal static class TextLayout
                 else if (leftR && rightR) d = 2;
                 else d = rtl ? 2 : 1;
             }
-            else if (d == 3)
-            {
-                // Numbers next to right-to-left text are read left to right within it.
-                int left = leftStrong[i], right = rightStrong[i];
-                d = rtl || left == 2 || right == 2 ? 3 : 1;
-            }
             levels[i] = d switch
             {
                 1 => (byte)(rtl ? 2 : 0),
@@ -615,8 +618,167 @@ internal static class TextLayout
     }
 
     /// <summary>
-    /// The bidi class of a glyph's text: its first strong character, else its first number or space. Passing the class
-    /// of earlier text as <paramref name="result"/> continues from it, giving the class of the two joined.
+    /// The direction a line's own letters give it: right to left (true) when only reading from its rightmost letter
+    /// starts it with a right-to-left letter, left to right (false) when only reading from its leftmost letter starts it
+    /// with a left-to-right one, and null when both readings, or neither, do.
+    /// </summary>
+    private static bool? OwnDirection(BidiClass leftmost, BidiClass rightmost)
+    {
+        bool ltr = leftmost == BidiClass.L, rtl = rightmost is BidiClass.R or BidiClass.AL;
+        return ltr == rtl ? null : rtl;
+    }
+
+    /// <summary>
+    /// Rules W2 and W4 to W7 for the numbers of a line in visual order: whether each run of digits, separators and
+    /// terminators is a European number, an Arabic one or part of the left-to-right text around it, and which of its
+    /// separators and terminators belong to it. A separator between two digits (the comma and point of 1,234.56, the
+    /// slash of a date, the colon of a time, the hyphen of a phone number) and a percent or currency sign next to one
+    /// join the number, so it keeps one level and is not turned around at them; the rest become neutral. The rules look
+    /// at the letters before a number in logical order, which visual order has on its right in right-to-left text and
+    /// on its left in left-to-right text.
+    /// </summary>
+    private static void ResolveNumbers(BidiClass[] cls, bool rtl)
+    {
+        int n = cls.Length;
+        // The nearest strong letter on each side of every item, and the nearest space, found in one pass each way.
+        var leftStrong = new int[n];
+        var rightStrong = new int[n];
+        var leftSpace = new int[n];
+        var rightSpace = new int[n];
+        for (int i = 0, strong = -1, space = -1; i < n; i++)
+        {
+            leftStrong[i] = strong;
+            leftSpace[i] = space;
+            if (IsStrong(cls[i])) strong = i;
+            else if (cls[i] is BidiClass.WS or BidiClass.S or BidiClass.B) space = i;
+        }
+        for (int i = n - 1, strong = n, space = n; i >= 0; i--)
+        {
+            rightStrong[i] = strong;
+            rightSpace[i] = space;
+            if (IsStrong(cls[i])) strong = i;
+            else if (cls[i] is BidiClass.WS or BidiClass.S or BidiClass.B) space = i;
+        }
+        for (int i = 0; i < n;)
+        {
+            if (!IsNumberPart(cls[i]))
+            {
+                i++;
+                continue;
+            }
+            int start = i;
+            bool digits = false;
+            for (; i < n && IsNumberPart(cls[i]); i++) digits |= cls[i] is BidiClass.EN or BidiClass.AN;
+            if (!digits) continue;
+            int end = i;
+            var left = leftStrong[start] >= 0 ? cls[leftStrong[start]] : BidiClass.ON;
+            var right = rightStrong[end - 1] < n ? cls[rightStrong[end - 1]] : BidiClass.ON;
+            // The letters the number follows in logical order. In left-to-right text, a number beside right-to-left
+            // letters belongs to their run, which reads on from its right. In right-to-left text, a number inside a
+            // run of left-to-right letters, or joined to the letters on its left with no space between (item-42,
+            // COVID-19), is part of that run; otherwise it follows the text on its right, or starts the line.
+            BidiClass context;
+            if (rtl)
+            {
+                bool attached = leftStrong[start] > leftSpace[start];
+                if (left == BidiClass.L && (right is BidiClass.L or BidiClass.ON || attached)) context = BidiClass.L;
+                else if (right is BidiClass.R or BidiClass.AL) context = right;
+                else if (right == BidiClass.ON) context = BidiClass.R;
+                else context = left is BidiClass.R or BidiClass.AL ? left : BidiClass.L;
+            }
+            else if (right is BidiClass.R or BidiClass.AL) context = right;
+            else context = left is BidiClass.R or BidiClass.AL ? left : BidiClass.L;
+            // W2: European digits after Arabic letters are Arabic numbers.
+            if (context == BidiClass.AL)
+                for (int k = start; k < end; k++) if (cls[k] == BidiClass.EN) cls[k] = BidiClass.AN;
+            // W4: a single separator between two numbers of one type joins them; a European separator (+ -) joins
+            // only European numbers.
+            for (int k = start + 1; k < end - 1; k++)
+            {
+                var before = cls[k - 1];
+                if (before != cls[k + 1]) continue;
+                if (cls[k] == BidiClass.ES && before == BidiClass.EN || cls[k] == BidiClass.CS && before is BidiClass.EN or BidiClass.AN)
+                    cls[k] = before;
+            }
+            // W5: terminators (%, currency signs, #) next to a European number join it.
+            for (int k = start; k < end;)
+            {
+                if (cls[k] != BidiClass.ET)
+                {
+                    k++;
+                    continue;
+                }
+                int run = k;
+                while (k < end && cls[k] == BidiClass.ET) k++;
+                if (run > start && cls[run - 1] == BidiClass.EN || k < end && cls[k] == BidiClass.EN)
+                    for (int t = run; t < k; t++) cls[t] = BidiClass.EN;
+            }
+            for (int k = start; k < end; k++)
+            {
+                // W6: separators and terminators left over are neutral. W7: a European number in left-to-right text is
+                // left to right.
+                if (cls[k] is BidiClass.ES or BidiClass.ET or BidiClass.CS) cls[k] = BidiClass.ON;
+                else if (cls[k] == BidiClass.EN && context == BidiClass.L) cls[k] = BidiClass.L;
+            }
+        }
+
+        static bool IsStrong(BidiClass c) => c is BidiClass.L or BidiClass.R or BidiClass.AL;
+
+        static bool IsNumberPart(BidiClass c) => c is BidiClass.EN or BidiClass.AN or BidiClass.ES or BidiClass.ET or BidiClass.CS;
+    }
+
+    /// <summary>
+    /// The direction most of a group's lines read in when their own letters decide it, for the lines whose letters
+    /// leave it open. Only lines with right-to-left letters count, so that a Hebrew page's lines of Latin text, such as
+    /// product codes, do not outvote its Hebrew ones; the lines are looked at once, when a line first needs them.
+    /// </summary>
+    private sealed class LineDirections
+    {
+        private readonly List<TextGlyph> _glyphs;
+        private readonly List<Line> _lines;
+        private bool? _common;
+        private bool _counted;
+
+        public LineDirections(List<TextGlyph> glyphs, List<Line> lines)
+        {
+            _glyphs = glyphs;
+            _lines = lines;
+        }
+
+        /// <summary>True when most such lines read right to left, false when most read left to right, else null.</summary>
+        public bool? Common()
+        {
+            if (_counted) return _common;
+            _counted = true;
+            int rtl = 0, ltr = 0;
+            foreach (var line in _lines)
+            {
+                BidiClass first = BidiClass.ON, last = BidiClass.ON;
+                bool right = false;
+                foreach (var it in line.Items)
+                {
+                    var c = ClassOf(_glyphs[it.Glyph].Text);
+                    if (c is not (BidiClass.L or BidiClass.R or BidiClass.AL)) continue;
+                    right |= c != BidiClass.L;
+                    if (first == BidiClass.ON) first = c;
+                    last = c;
+                }
+                if (!right) continue;
+                switch (OwnDirection(first, last))
+                {
+                    case true: rtl++; break;
+                    case false: ltr++; break;
+                }
+            }
+            _common = rtl > ltr ? true : ltr > rtl ? false : null;
+            return _common;
+        }
+    }
+
+    /// <summary>
+    /// The bidi class of a glyph's text: its first strong character, else its first number, else its first separator,
+    /// terminator or space. Passing the class of earlier text as <paramref name="result"/> continues from it, giving the
+    /// class of the two joined.
     /// </summary>
     private static BidiClass ClassOf(string text, BidiClass result = BidiClass.ON)
     {
@@ -627,8 +789,8 @@ internal static class TextLayout
             if (cp > 0xFFFF) i++;
             var c = UnicodeTables.Bidi(cp);
             if (c is BidiClass.L or BidiClass.R or BidiClass.AL) return c;
-            if (c is BidiClass.EN or BidiClass.AN && result == BidiClass.ON) result = c;
-            else if (c == BidiClass.WS && result == BidiClass.ON) result = BidiClass.WS;
+            if (c is BidiClass.EN or BidiClass.AN && result is not (BidiClass.EN or BidiClass.AN)) result = c;
+            else if (c is BidiClass.ES or BidiClass.ET or BidiClass.CS or BidiClass.WS && result == BidiClass.ON) result = c;
         }
         return result;
     }
