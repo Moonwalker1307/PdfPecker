@@ -19,6 +19,8 @@ public sealed class FontCollection
     private volatile Snapshot? _snapshot;
     // The fonts parsed from each array a deferred face's loader returned, so that faces sharing a file share its fonts.
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], List<FontProgram>> _deferredFiles = new();
+    // Parsed unicode-ranges by their text: a font package gives dozens of faces the same range of thousands of parts.
+    private readonly Dictionary<string, UnicodeRange> _ranges = new(StringComparer.Ordinal);
 
     /// <summary>Number of font faces registered.</summary>
     public int Count
@@ -133,8 +135,15 @@ public sealed class FontCollection
         if (weight is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(weight), weight, "The weight must be from 1 to 1000.");
         if (faceIndex < 0) throw new ArgumentOutOfRangeException(nameof(faceIndex), faceIndex, "The face index must not be negative.");
         UnicodeRange? range = null;
-        if (unicodeRange != null && (range = UnicodeRange.Parse(unicodeRange)) == null)
-            throw new ArgumentException("The unicode-range has no valid range.", nameof(unicodeRange));
+        if (unicodeRange != null)
+        {
+            lock (_lock) _ranges.TryGetValue(unicodeRange, out range);
+            if (range == null)
+            {
+                range = UnicodeRange.Parse(unicodeRange) ?? throw new ArgumentException("The unicode-range has no valid range.", nameof(unicodeRange));
+                lock (_lock) _ranges[unicodeRange] = range;
+            }
+        }
         var program = new Lazy<FontProgram?>(() =>
         {
             try
