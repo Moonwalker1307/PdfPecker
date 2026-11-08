@@ -133,6 +133,20 @@ public class BidiAndShapingTests
     }
 
     [Fact]
+    public void Letters_that_share_a_glyph_extract_as_themselves()
+    {
+        // The font draws beh, teh, theh, noon and yeh with one dotless body and their dots as a mark. The body maps to
+        // the first letter it was drawn for, so before, نبيل copied as ببيل and تين as ثين; each such letter is now in a
+        // span with its own text as /ActualText, the body first and the dots in an empty span after it.
+        const string text = "بيت ثابت نبيل تين يثبت";
+        var pdf = ConvertUncompressed("<!doctype html><style>" + FontFaces + "</style><p dir=\"rtl\" style=\"font:20px Ar\">" + text + "</p>");
+        AssertStructurallyValid(pdf);
+        Assert.Equal(text, PdfText.Extract(pdf).Trim());
+        Assert.Contains("/ActualText <FEFF0646>", AllContent(pdf));
+        Assert.Contains("/ActualText <FEFF>", AllContent(pdf));
+    }
+
+    [Fact]
     public void Arabic_and_hebrew_documents_are_valid_pdfs()
     {
         var pdf = ConvertUncompressed("<!doctype html><style>" + FontFaces + "</style>" +

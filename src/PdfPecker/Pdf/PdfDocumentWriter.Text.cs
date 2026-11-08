@@ -159,7 +159,7 @@ internal sealed partial class PdfDocumentWriter
         float notdefAdjust = skipNotdef ? -(font.Program.Advance1000(0) + charSpacing * 1000f / size) : 0;
         if (positioned && size > 0)
         {
-            WritePositionedGlyphs(b, font, subset, text, size, 0, skipNotdef, notdefAdjust, 0);
+            WritePositionedGlyphs(b, font, subset, text, size, 0, skipNotdef, notdefAdjust, 0, rtl);
             return;
         }
         // A colour font's glyphs are one-byte codes of Type 3 fonts, and a glyph of another of them ends the array.
@@ -355,7 +355,7 @@ internal sealed partial class PdfDocumentWriter
         if (t.Rtl) _glyphs.Reverse();
         if (positioned && size > 0)
         {
-            WritePositionedGlyphs(b, font, subset, t.Text, size, t.WordSpacing, skipNotdef, notdefAdjust, spaceAdjust);
+            WritePositionedGlyphs(b, font, subset, t.Text, size, t.WordSpacing, skipNotdef, notdefAdjust, spaceAdjust, t.Rtl);
             return;
         }
         b.Ascii(adjust ? "[<" : "<");
@@ -383,38 +383,215 @@ internal sealed partial class PdfDocumentWriter
 
     /// <summary>
     /// Shows glyphs that complex shaping positioned, in drawing order: TJ moves each glyph by its offset and corrects
-    /// its advance to the shaped one, and a vertical offset (a mark above or below its base) raises it with Ts.
+    /// its advance to the shaped one, and a vertical offset (a mark above or below its base) raises it with Ts. A
+    /// cluster of a complex script whose glyphs would copy as other characters is shown in a span with its text as
+    /// /ActualText (see <see cref="FindClusterSpans"/>).
     /// </summary>
     private void WritePositionedGlyphs(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, string text, float size, float wordSpacing,
-        bool skipNotdef, float notdefAdjust, float spaceAdjust)
+        bool skipNotdef, float notdefAdjust, float spaceAdjust, bool rtl)
     {
+        FindClusterSpans(subset, text, rtl);
         b.Ascii("[<");
+        int spanEnd = -1;
         for (int k = 0; k < _glyphs.Count; k++)
         {
             var g = _glyphs[k];
-            int cid = subset.Cid(_glyphs, k, text);
+            int cid = _cids[k];
             float width = font.Program.Advance1000(g.Gid);
-            if (cid == 0 && skipNotdef)
+            if (_spanEnds[k] >= 0)
             {
-                b.Ascii(">").Num(notdefAdjust - g.Advance + width).Ascii("<");
-                continue;
+                spanEnd = _spanEnds[k];
+                BeginActualText(b, _spanTexts[k]!, array: true);
             }
-            var actual = subset.ActualText(_glyphs, k, text, cid);
-            if (actual != null) BeginActualText(b, actual, array: true);
-            if (g.Dy != 0)
+            if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust - g.Advance + width).Ascii("<");
+            else
             {
-                // The raised glyph is shown on its own, between two TJ arrays.
-                b.Ascii(">] TJ ").Num(g.Dy * size / 1000f).Ascii(" Ts [<");
+                var actual = spanEnd < 0 ? subset.ActualText(_glyphs, k, text, cid) : null;
+                if (actual != null) BeginActualText(b, actual, array: true);
+                if (g.Dy != 0)
+                {
+                    // The raised glyph is shown on its own, between two TJ arrays.
+                    b.Ascii(">] TJ ").Num(g.Dy * size / 1000f).Ascii(" Ts [<");
+                }
+                if (g.Dx != 0) b.Ascii(">").Num(-g.Dx).Ascii("<");
+                WriteCode(b, font, subset, cid, size);
+                float after = g.Dx + width - g.Advance;
+                if (wordSpacing != 0 && g.Length > 0 && text[g.Start] == ' ' && k + 1 < _glyphs.Count) after += spaceAdjust;
+                if (after != 0) b.Ascii(">").Num(after).Ascii("<");
+                if (g.Dy != 0) b.Ascii(">] TJ 0 Ts [<");
+                if (actual != null) EndActualText(b, array: true);
             }
-            if (g.Dx != 0) b.Ascii(">").Num(-g.Dx).Ascii("<");
-            WriteCode(b, font, subset, cid, size);
-            float after = g.Dx + width - g.Advance;
-            if (wordSpacing != 0 && g.Length > 0 && text[g.Start] == ' ' && k + 1 < _glyphs.Count) after += spaceAdjust;
-            if (after != 0) b.Ascii(">").Num(after).Ascii("<");
-            if (g.Dy != 0) b.Ascii(">] TJ 0 Ts [<");
-            if (actual != null) EndActualText(b, array: true);
+            if (k == spanEnd)
+            {
+                spanEnd = -1;
+                EndActualText(b, array: true);
+            }
         }
         b.Ascii(">] TJ\n");
+    }
+
+    // For each glyph being shown: its CID, and when a cluster span starts at it, the index of the cluster's last glyph
+    // (else -1) and the cluster's text.
+    private readonly List<int> _cids = new(), _spanEnds = new();
+    private readonly List<string?> _spanTexts = new();
+    private readonly System.Text.StringBuilder _mappedText = new();
+
+    /// <summary>
+    /// Finds the clusters of complex-script text in <see cref="_glyphs"/> (in drawing order) that a reader would extract
+    /// as other characters than the cluster's own, and fills <see cref="_cids"/>, <see cref="_spanEnds"/> and
+    /// <see cref="_spanTexts"/>.
+    /// </summary>
+    /// <remarks>
+    /// A ToUnicode CMap maps each glyph to fixed characters, and a reader puts them together in the order the glyphs are
+    /// drawn. That cannot describe what shaping does to Indic, Thai and Arabic clusters: a vowel sign drawn before the
+    /// consonant it follows, a vowel split into two glyphs on either side of it, a glyph shared by several letters
+    /// (Naskh draws a letter as a dotless body and its dots) that maps to the first of them. Such a cluster is shown in a
+    /// span with its characters as /ActualText, which readers extract in place of its glyphs, as Chrome does. A cluster
+    /// is the shortest run of glyphs whose characters no other glyph draws and that no later glyph draws characters
+    /// before. One that already extracts as its text, or as that text canonically decomposed, gets no span, nor does
+    /// one with a glyph the font lacks, so most text is written as before. Right to left, the extra glyphs of a cluster
+    /// are shown apart (see <see cref="ShowExtraGlyphsApart"/>).
+    /// </remarks>
+    private void FindClusterSpans(GlyphSubset subset, string text, bool rtl)
+    {
+        int n = _glyphs.Count, lo = int.MaxValue, hi = 0;
+        _cids.Clear();
+        _spanEnds.Clear();
+        _spanTexts.Clear();
+        for (int k = 0; k < n; k++)
+        {
+            var g = _glyphs[k];
+            _cids.Add(subset.Cid(_glyphs, k, text));
+            _spanEnds.Add(-1);
+            _spanTexts.Add(null);
+            lo = Math.Min(lo, g.Start);
+            hi = Math.Max(hi, CharsEnd(g));
+        }
+        if (n == 0 || hi > text.Length || !ComplexShaper.Handles(text, lo, hi - lo)) return;
+        // The last glyph that draws each character: a cluster goes on until it has every glyph of its characters. And
+        // the first character any glyph from each on draws (the last one right to left, whose glyphs are drawn last
+        // first): a cluster also goes on while a later glyph draws a character before its own, such as the consonant
+        // after a vowel sign drawn in front of it.
+        var last = System.Buffers.ArrayPool<int>.Shared.Rent(hi - lo);
+        var rest = System.Buffers.ArrayPool<int>.Shared.Rent(n + 1);
+        try
+        {
+            last.AsSpan(0, hi - lo).Fill(-1);
+            for (int k = 0; k < n; k++)
+                for (int c = _glyphs[k].Start, end = CharsEnd(_glyphs[k]); c < end; c++) last[c - lo] = k;
+            rest[n] = rtl ? lo : hi;
+            for (int k = n - 1; k >= 0; k--) rest[k] = rtl ? Math.Max(rest[k + 1], CharsEnd(_glyphs[k])) : Math.Min(rest[k + 1], _glyphs[k].Start);
+            for (int first = 0; first < n;)
+            {
+                // The cluster's characters run from a to b; those from scanA to scanB have had their last glyph looked up.
+                int k = first, a = _glyphs[k].Start, b = CharsEnd(_glyphs[k]), scanA = a, scanB = a, end = k;
+                while (true)
+                {
+                    for (int c = a; c < scanA; c++) end = Math.Max(end, last[c - lo]);
+                    for (int c = scanB; c < b; c++) end = Math.Max(end, last[c - lo]);
+                    scanA = a;
+                    scanB = b;
+                    if (k >= end && (rtl ? rest[k + 1] <= a : rest[k + 1] >= b)) break;
+                    k++;
+                    a = Math.Min(a, _glyphs[k].Start);
+                    b = Math.Max(b, CharsEnd(_glyphs[k]));
+                }
+                if (NeedsSpan(subset, text, first, k, a, b, rtl))
+                {
+                    _spanEnds[first] = k;
+                    _spanTexts[first] = text.Substring(a, b - a);
+                    if (rtl) ShowExtraGlyphsApart(first, k);
+                }
+                first = k + 1;
+            }
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<int>.Shared.Return(last);
+            System.Buffers.ArrayPool<int>.Shared.Return(rest);
+        }
+
+        // The characters a glyph draws: an extra glyph of a cluster (no characters) draws part of the one it starts at.
+        static int CharsEnd(ShapedGlyph g) => g.Start + Math.Max(g.Length, 1);
+    }
+
+    private readonly List<(ShapedGlyph Glyph, int Cid)> _clusterGlyphs = new();
+
+    /// <summary>
+    /// Shows the glyphs of a right-to-left cluster that stand for characters before its extra glyphs, each where it was
+    /// drawn, and the extra glyphs after them in a span of their own with an empty /ActualText.
+    /// </summary>
+    /// <remarks>
+    /// Drawn right to left, a cluster's extra glyphs come first: Naskh draws a letter as its dotless body and the dots
+    /// as a mark, and the dots, raised above the line, are drawn before the body. Readers place a span's text where its
+    /// first glyph starts and end it where its last glyph ends, so a span starting at the dots sits above the line, and
+    /// one ending at them is narrower than the letter; Poppler and MuPDF then split or repeat letters. Shown body first,
+    /// and the dots apart, the span has the letter's place, and the dots copy as nothing.
+    /// </remarks>
+    private void ShowExtraGlyphsApart(int first, int last)
+    {
+        var cluster = _clusterGlyphs;
+        cluster.Clear();
+        int bases = 0;
+        float pen = 0;
+        // Each glyph's offset from where the cluster starts, so that it is drawn there in any order.
+        for (int k = first; k <= last; k++)
+        {
+            var g = _glyphs[k];
+            cluster.Add((new ShapedGlyph(g.Gid, g.Start, g.Length, 0, pen + g.Dx, g.Dy), _cids[k]));
+            pen += g.Advance;
+            if (g.Length > 0) bases++;
+        }
+        if (bases == 0 || bases == cluster.Count) return;
+        int at = first;
+        for (int pass = 0; pass < 2; pass++)
+            foreach (var (g, cid) in cluster)
+            {
+                if (g.Length == 0 != (pass == 1)) continue;
+                // The last glyph shown moves on by the whole cluster.
+                _glyphs[at] = at == last ? new ShapedGlyph(g.Gid, g.Start, g.Length, pen, g.Dx, g.Dy) : g;
+                _cids[at++] = cid;
+            }
+        _spanEnds[first] = first + bases - 1;
+        _spanEnds[first + bases] = last;
+        _spanTexts[first + bases] = "";
+    }
+
+    // Whether the cluster of glyphs first to last, drawing characters a to b, is complex-script text that its glyphs'
+    // mappings would copy as other characters, in logical order (right to left, the glyphs are drawn last first).
+    private bool NeedsSpan(GlyphSubset subset, string text, int first, int last, int a, int b, bool rtl)
+    {
+        if (!ComplexShaper.Handles(text, a, b - a)) return false;
+        var mapped = _mappedText.Clear();
+        bool unmapped = false;
+        for (int i = 0; i <= last - first; i++)
+        {
+            int cid = _cids[rtl ? last - i : first + i];
+            if (cid == 0) return false;
+            int before = mapped.Length;
+            subset.AppendMappedText(cid, mapped);
+            unmapped |= mapped.Length == before;
+        }
+        // A glyph mapped to no characters, such as the second glyph of a split vowel, copies as its code in some
+        // readers (MuPDF), so its cluster gets a span even when the others copy as its text.
+        if (unmapped) return true;
+        // A letter drawn as its canonical decomposition, such as alef with hamza as alef and a hamza mark, copies as the
+        // same text decomposed, which needs no span.
+        int m = 0;
+        for (int c = a; c < b; c++)
+        {
+            if (Text.UnicodeTables.Decompose(text[c], out int first0, out int second) && second != 0 && first0 < 0x10000 && second < 0x10000)
+            {
+                if (m + 1 >= mapped.Length || mapped[m] != first0 || mapped[m + 1] != second)
+                {
+                    if (m >= mapped.Length || mapped[m] != text[c]) return true;
+                    m++;
+                }
+                else m += 2;
+            }
+            else if (m >= mapped.Length || mapped[m++] != text[c]) return true;
+        }
+        return m != mapped.Length;
     }
 
     /// <summary>

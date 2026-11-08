@@ -115,8 +115,8 @@ internal sealed class GlyphSubset
         int cp = g.Length == 1 ? text[g.Start]
             : g.Length == 2 && char.IsHighSurrogate(text[g.Start]) ? char.ConvertToUtf32(text[g.Start], text[g.Start + 1]) : -1;
         if (cp >= 0 && Program.GlyphId(cp) == g.Gid) return null;
-        // Complex scripts keep the first mapping of a shared glyph, as they always have: their contextual forms share
-        // glyphs much more often, and giving them spans too is a change of its own to their output.
+        // Complex scripts get a span for each cluster whose glyphs copy as other characters than its own instead (see
+        // PdfDocumentWriter.FindClusterSpans): their glyphs are reordered and split, not only shared.
         if (ComplexShaper.Handles(text, g.Start, g.Length)) return null;
         // A part of a split character maps part by part (see Cid(List, int, string)) and is left as it is.
         if ((k > 0 && glyphs[k - 1].Start == g.Start && glyphs[k - 1].Length == 0)
@@ -130,6 +130,21 @@ internal sealed class GlyphSubset
         else if (_texts == null || !_texts.TryGetValue(index, out var mapped) || mapped.Length == 0
             || text.AsSpan(g.Start, g.Length).SequenceEqual(mapped)) return null;
         return text.Substring(g.Start, g.Length);
+    }
+
+    /// <summary>
+    /// Appends the characters the ToUnicode CMap maps a CID to, which is what a reader extracts for the glyph: nothing
+    /// for an extra glyph of a cluster or .notdef.
+    /// </summary>
+    public void AppendMappedText(int cid, System.Text.StringBuilder text)
+    {
+        int index = Index(cid);
+        if (index <= 0) return;
+        int cp = Unicode[index];
+        // A lone surrogate is mapped as the code unit it is (see PdfDocumentWriter.WriteToUnicode).
+        if (cp >= 0x10000) text.Append(char.ConvertFromUtf32(cp));
+        else if (cp != 0) text.Append((char)cp);
+        else if (_texts != null && _texts.TryGetValue(index, out var mapped)) text.Append(mapped);
     }
 
     // The index into Glyphs and Unicode of a CID: CFF subsets keep the original glyph ids as CIDs.
