@@ -53,21 +53,14 @@ internal sealed class DocMdpChanges
     }
 
     /// <summary>
-    /// The disallowed changes in <paramref name="file"/> after the certified revision that ends at
-    /// <paramref name="revisionEnd"/>, in plain words; empty when every change is one <paramref name="level"/> allows.
+    /// The disallowed changes in <paramref name="file"/> after <paramref name="certified"/>, the certified revision opened
+    /// on its own (null when it cannot be read), in plain words; empty when every change is one <paramref name="level"/>
+    /// allows.
     /// </summary>
-    public static List<string> Find(PdfFile file, long revisionEnd, int level, string? password)
+    public static List<string> Find(PdfFile file, PdfFile? certified, int level)
     {
-        PdfFile old;
-        try
-        {
-            old = PdfFile.Open(file.Data.AsSpan(0, (int)revisionEnd).ToArray(), password);
-        }
-        catch (Exception ex) when (ex is PdfFormatException or PdfPasswordException or InvalidDataException or ArgumentException
-            or InvalidOperationException or OverflowException or NotSupportedException)
-        {
+        if (certified is not { } old)
             return new List<string> { "The certified revision of the document cannot be read, so the changes made after it cannot be checked." };
-        }
         var changes = new DocMdpChanges(old, file, level);
         changes.Check();
         return changes._found;
@@ -98,7 +91,7 @@ internal sealed class DocMdpChanges
         foreach (int num in changed)
         {
             if (_found.Count >= MaxReported) break;
-            // Free objects are not looked up, as that would rebuild the table; a freed object reads as deleted.
+            // A freed object reads as deleted, and one free in the certified revision as new.
             var before = _old.IsFree(num) ? null : _old.GetObject(num);
             var after = _new.IsFree(num) ? PdfNull.Instance : _new.GetObject(num);
             if (before == null || before.IsNull || Same(before, after, 0)) continue; // new objects count where they are used
@@ -306,7 +299,8 @@ internal sealed class DocMdpChanges
             bool allowed = key switch
             {
                 "V" or "AP" or "F" when signature => signing,
-                "V" or "AP" or "AS" or "RV" => _level >= 2 && !signature,
+                // /I holds the selected items of a list or combo box, and is filled in with /V.
+                "V" or "AP" or "AS" or "RV" or "I" => _level >= 2 && !signature,
                 _ => false,
             };
             if (!allowed)
@@ -433,7 +427,7 @@ internal sealed class DocMdpChanges
     }
 
     /// <summary>Whether two direct objects from the two revisions are equal; references are equal when they name the same object.</summary>
-    private static bool Same(PdfObject? a, PdfObject? b, int depth)
+    internal static bool Same(PdfObject? a, PdfObject? b, int depth)
     {
         if (ReferenceEquals(a, b)) return true;
         if (a == null || a.IsNull) return b == null || b.IsNull;

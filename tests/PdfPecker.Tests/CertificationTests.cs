@@ -374,4 +374,72 @@ public class CertificationTests
         Assert.Contains(v.DisallowedChanges, c => c.Contains("/Perms", StringComparison.Ordinal));
         Assert.Contains(v.DisallowedChanges, c => c.StartsWith($"Object {num} was changed", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void Writing_the_signature_dictionary_again_without_its_certification_is_reported()
+    {
+        // The update drops /Reference from the signature dictionary, keeping its byte range and value, drops /Perms and
+        // changes the page: read from the newest revision, the certification would be gone and every change allowed.
+        var certified = Certified(PdfCertificationLevel.NoChanges);
+        var (file, _, _) = FirstPage(certified);
+        var sigRef = (PdfRef)file.GetDict(file.Catalog, "Perms")!["DocMDP"]!;
+        var sig = Copy((PdfDict)file.Resolve(sigRef)!);
+        sig.Entries.Remove("Reference");
+        sig.Entries["Reason"] = new PdfString(Encoding.ASCII.GetBytes("Approved"));
+        var catalog = Copy(file.Catalog!);
+        catalog.Entries.Remove("Perms");
+        var (num, _, decoded) = FirstContent(certified);
+        var attacked = Rewrite(Rewrite(Rewrite(certified, sigRef.Num, sig), ((PdfRef)file.Trailer["Root"]!).Num, catalog), num, RedBox(decoded));
+
+        var v = Assert.Single(Verify(attacked));
+        Assert.True(v.IsIntact);
+        Assert.Equal(PdfCertificationLevel.NoChanges, v.CertificationLevel);
+        Assert.Equal("Issued", v.Reason);
+        Assert.False(v.Valid);
+        Assert.Contains(v.DisallowedChanges, c => c.StartsWith("The signature dictionary was replaced or written again", StringComparison.Ordinal));
+        Assert.Contains(v.DisallowedChanges, c => c.StartsWith($"Object {num} was changed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void An_approval_signature_reports_its_signed_reason_and_a_rewritten_dictionary()
+    {
+        var signed = HtmlToPdf.Convert(Html, new PdfOptions { Signature = new PdfSignatureOptions(Second.Value) { Reason = "Approved", Location = "Aarhus" } });
+        var countersigned = PdfSigner.Sign(signed, new PdfSignatureOptions(Cert.Value));
+        Assert.All(Verify(countersigned), v => Assert.True(v.Valid, string.Join("\n", v.Problems)));
+
+        var file = PdfFile.Open(countersigned, null);
+        var field = (PdfDict)file.Resolve(file.GetArray(file.GetDict(file.Catalog, "AcroForm"), "Fields")![0])!;
+        var sigRef = (PdfRef)field["V"]!;
+        var sig = Copy((PdfDict)file.Resolve(sigRef)!);
+        sig.Entries["Reason"] = new PdfString(Encoding.ASCII.GetBytes("Rejected"));
+        var attacked = Rewrite(countersigned, sigRef.Num, sig);
+
+        var first = Verify(attacked)[0];
+        Assert.True(first.IsIntact);
+        Assert.Equal("Approved", first.Reason);
+        Assert.Equal("Aarhus", first.Location);
+        Assert.False(first.Valid);
+        Assert.Contains(first.DisallowedChanges, c => c.StartsWith("The signature dictionary was replaced or written again", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Form_filling_allows_choosing_in_a_list()
+    {
+        const string select = """
+            <!DOCTYPE html><html><body style="font:12px Helvetica">
+            <p>Colour <select name="color"><option value="r">Red</option><option value="g">Green</option></select></p>
+            </body></html>
+            """;
+        var pdf = Certified(PdfCertificationLevel.FormFilling, select);
+        var filled = PdfForm.Fill(pdf, new Dictionary<string, string> { ["color"] = "g" });
+        Assert.Contains("/I", Encoding.Latin1.GetString(filled, pdf.Length, filled.Length - pdf.Length), StringComparison.Ordinal);
+
+        var v = Assert.Single(Verify(filled));
+        Assert.Empty(v.DisallowedChanges);
+        Assert.True(v.Valid, string.Join("\n", v.Problems));
+
+        // At no changes, the same fill is reported.
+        var strict = PdfForm.Fill(Certified(PdfCertificationLevel.NoChanges, select), new Dictionary<string, string> { ["color"] = "g" });
+        Assert.False(Assert.Single(Verify(strict)).Valid);
+    }
 }
