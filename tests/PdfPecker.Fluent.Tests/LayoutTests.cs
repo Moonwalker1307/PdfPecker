@@ -846,6 +846,138 @@ public sealed class LayoutTests
         }
     }
 
+    /// <summary>The top and bottom of the dark pixels of a page rendered at 72 dpi, in points, or (-1, -1) when it has none.</summary>
+    private static (int Top, int Bottom) InkRows(byte[] pdf, int page = 0, int fromX = 0, int toX = int.MaxValue, int fromY = 0, int toY = int.MaxValue)
+    {
+        var image = PdfRenderer.Open(pdf).RenderPage(page, new ImageOptions { Dpi = 72 });
+        int top = -1, bottom = -1;
+        for (int y = fromY; y < Math.Min(toY, image.Height); y++)
+            for (int x = fromX; x < Math.Min(toX, image.Width); x++)
+            {
+                int i = (y * image.Width + x) * 4;
+                if (image.Rgba[i] + image.Rgba[i + 1] + image.Rgba[i + 2] >= 300) continue;
+                if (top < 0) top = y;
+                bottom = y;
+            }
+        return (top, bottom);
+    }
+
+    [Fact]
+    public void Vertical_alignment_of_the_page_content_aligns_in_the_page()
+    {
+        // A cover page: QuestPDF centres the title in the space between the header and the footer.
+        var cover = Document.Create(d => d.Page(p =>
+        {
+            p.Size(300, 200);
+            p.Margin(20);
+            p.Content().AlignMiddle().AlignCenter().Text("Cover title");
+        }));
+        Assert.Equal("<main class=\"c0\"><p>Cover title</p></main>", Html.Body(cover.GenerateHtml()));
+        Assert.Contains(".c0{display:flex;flex-direction:column;min-height:100vh;justify-content:center;align-items:center;text-align:center}", Html.Css(cover));
+        var pdf = cover.GeneratePdf();
+        Assert.Equal(1, PdfPages.Count(pdf));
+        var (top, bottom) = InkRows(pdf);
+        Assert.InRange((top + bottom) / 2.0, 95, 105);
+
+        // With a header and a footer the content is centred between them, still on one page.
+        var banded = Document.Create(d => d.Page(p =>
+        {
+            p.Size(300, 200);
+            p.Margin(20);
+            p.Header().Height(40).Background(Colors.Grey.Lighten2);
+            p.Content().AlignCenter().AlignBottom().Text("Bottom");
+            p.Footer().Height(20).Background(Colors.Grey.Lighten2);
+        })).GeneratePdf();
+        Assert.Equal(1, PdfPages.Count(banded));
+        Assert.InRange(InkRows(banded, fromX: 100, toX: 200).Bottom, 150, 160);
+
+        // Content longer than a page still flows on, over as many pages as without the alignment.
+        static byte[] Lines(bool aligned) => Document.Create(d => d.Page(p =>
+        {
+            p.Size(300, 200);
+            p.Margin(20);
+            var content = aligned ? p.Content().AlignMiddle() : p.Content();
+            content.Column(c => { for (int i = 0; i < 30; i++) c.Item().Text("Line " + i.ToString(CultureInfo.InvariantCulture)); });
+        })).GeneratePdf();
+        var flowing = Lines(aligned: true);
+        Assert.True(PdfPages.Count(flowing) > 1);
+        Assert.Equal(PdfPages.Count(Lines(aligned: false)), PdfPages.Count(flowing));
+        Assert.Contains("Line 29", Html.Text(flowing));
+
+        // A continuous page has no height to align in, and horizontal alignment alone is written as before.
+        var receipt = Document.Create(d => d.Page(p => { p.ContinuousSize(200); p.Content().AlignMiddle().Text("x"); }));
+        Assert.DoesNotContain("100vh", Html.Css(receipt));
+        Assert.Equal("<main><div class=\"c0\"><p>x</p></div></main>", Html.Of(c => c.AlignCenter().Text("x")));
+    }
+
+    [Fact]
+    public void Alignment_and_rows_fill_a_header_or_footer_of_a_fixed_height()
+    {
+        var document = Document.Create(d => d.Page(p =>
+        {
+            p.Size(300, 200);
+            p.Margin(0);
+            p.Header().Height(60).Row(r =>
+            {
+                r.RelativeItem().AlignMiddle().Text("Title");
+                r.ConstantItem(80).AlignBottom().Background(Colors.Black).Height(10);
+            });
+            p.Content().Text("");
+            p.Footer().Height(40).AlignMiddle().AlignCenter().Text("Footer");
+        }));
+        string html = document.GenerateHtml();
+        Assert.Contains("<footer class=\"", html, StringComparison.Ordinal);
+        string css = Html.Css(document);
+        Assert.Contains("{height:40pt;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}", css);
+        Assert.Contains("{height:100%;display:flex}", css);
+
+        var pdf = document.GeneratePdf();
+        // The title is centred in the 60 pt header, and the black box sits at its bottom.
+        var title = InkRows(pdf, toX: 200, toY: 60);
+        Assert.InRange((title.Top + title.Bottom) / 2.0, 25, 35);
+        Assert.Equal((50, 59), InkRows(pdf, fromX: 230, toX: 300, toY: 60));
+        // The footer text is centred in the bottom 40 pt.
+        var footer = InkRows(pdf, fromY: 160);
+        Assert.InRange((footer.Top + footer.Bottom) / 2.0, 175, 185);
+    }
+
+    [Fact]
+    public void A_row_fills_page_content_of_a_fixed_height()
+    {
+        var pdf = Document.Create(d => d.Page(p =>
+        {
+            p.Size(300, 200);
+            p.Margin(0);
+            p.Content().Height(120).Row(r =>
+            {
+                r.RelativeItem().Background(Colors.Black);
+                r.RelativeItem().AlignBottom().Text("bottom");
+            });
+        })).GeneratePdf();
+        Assert.Equal((0, 119), InkRows(pdf, toX: 150));
+        Assert.InRange(InkRows(pdf, fromX: 150).Bottom, 110, 119);
+    }
+
+    [Fact]
+    public void Border_calls_in_a_row_make_one_border()
+    {
+        // As in QuestPDF, BorderColor colours every side of the chain, and a later call sets a side again.
+        Assert.Equal("<p class=\"c1\">x</p>", Html.Item(c => c.BorderTop(1).BorderBottom(3).BorderColor(Colors.Red.Medium).Text("x")));
+        var css = Html.Css(Html.Page(c => c.Column(col => col.Item().BorderTop(1).BorderBottom(3).BorderColor(Colors.Red.Medium).Text("x"))));
+        Assert.Contains("border-top-width:1pt;border-top-style:solid;border-top-color:#f44336;border-bottom-width:3pt;border-bottom-style:solid;border-bottom-color:#f44336", css);
+
+        css = Html.Css(Html.Page(c => c.Column(col => col.Item().Border(1).BorderBottom(4).Text("x"))));
+        Assert.Contains("border-bottom-width:4pt;", css);
+        Assert.DoesNotContain("border-bottom-width:1pt", css);
+
+        Assert.Equal("<p class=\"c1\">x</p>", Html.Item(c => c.Border(2).BorderColor(Colors.Green.Medium).BorderLeft(6).Text("x")));
+        css = Html.Css(Html.Page(c => c.Column(col => col.Item().Border(2).BorderColor(Colors.Green.Medium).BorderLeft(6).Text("x"))));
+        Assert.Contains("border-left-width:6pt;border-left-style:solid;border-left-color:#4caf50", css);
+
+        // Border calls apart from one another are borders of their own.
+        Assert.Equal("<div class=\"c1\"><p class=\"c2\">x</p></div>", Html.Item(c => c.Border(1).Padding(2).BorderBottom(4).Text("x")));
+    }
+
     [Fact]
     public void Markdown_becomes_its_html_in_a_styled_block()
     {
@@ -902,6 +1034,21 @@ public sealed class LayoutTests
         Assert.Contains("id=\"fn-1-2\"", html);
         Assert.Contains("href=\"#fn-1-2\"", html);
         Assert.Contains("href=\"#notes-2\"", html);
+    }
+
+    [Fact]
+    public void Braces_in_markdown_in_a_band_stay_as_written()
+    {
+        var document = Document.Create(d => d.Page(p =>
+        {
+            p.Header().Markdown("Price {page} **{total-pages}**");
+            p.Content().Markdown("Body {page}");
+        }));
+        string html = document.GenerateHtml();
+        Assert.Contains("Price {<span></span>page} <strong>{<span></span>total-pages}</strong>", html, StringComparison.Ordinal);
+        Assert.Contains("Body {page}", html, StringComparison.Ordinal);
+        var text = Html.Text(document.GeneratePdf());
+        Assert.Contains("Price {page} {total-pages}", text, StringComparison.Ordinal);
     }
 
     [Fact]

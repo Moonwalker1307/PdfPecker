@@ -52,9 +52,41 @@ internal static class MarkdownHtml
 
     /// <summary>
     /// Appends the converter's HTML, wrapped in an element of class <see cref="ClassName"/>. <paramref name="ids"/>
-    /// holds the ids the Markdown written before has taken, and takes this call's.
+    /// holds the ids the Markdown written before has taken, and takes this call's. <paramref name="band"/> is true in a
+    /// header or footer.
     /// </summary>
-    public static void Write(StringBuilder sb, string html, HashSet<string> ids)
+    public static void Write(StringBuilder sb, string html, HashSet<string> ids, bool band = false)
+    {
+        int begin = sb.Length;
+        WriteHtml(sb, html, ids);
+        if (band) SplitBraces(sb, begin);
+    }
+
+    /// <summary>
+    /// Puts an empty element after each brace in the text from <paramref name="begin"/> on, as the writer does for text
+    /// in a header or footer: PdfPecker replaces page-number tokens such as {page} only within one text node, so the
+    /// caller's braces stay as written.
+    /// </summary>
+    private static void SplitBraces(StringBuilder sb, int begin)
+    {
+        var html = sb.ToString(begin, sb.Length - begin);
+        if (!html.Contains('{', StringComparison.Ordinal)) return;
+        sb.Length = begin;
+        bool inTag = false, quoted = false;
+        foreach (char c in html)
+        {
+            sb.Append(c);
+            if (inTag)
+            {
+                if (c == '"') quoted = !quoted;
+                else if (c == '>' && !quoted) inTag = false;
+            }
+            else if (c == '<') inTag = true;
+            else if (c == '{') sb.Append("<span></span>");
+        }
+    }
+
+    private static void WriteHtml(StringBuilder sb, string html, HashSet<string> ids)
     {
         Dictionary<string, string>? renamed = null;
         for (int i = html.IndexOf('<'); i >= 0; i = html.IndexOf('<', i + 1))
