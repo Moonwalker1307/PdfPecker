@@ -43,6 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      tool-platforms: ${{ steps.tool-platforms.outputs.platforms }}
     steps:
       # Actions are pinned to commits so a moved tag cannot change what runs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -96,6 +97,33 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Version: $version" >> "$GITHUB_STEP_SUMMARY"
+
+      # The tool-packages job packs the native tool on eight runners, which took longer than the build itself and held
+      # runners other pull requests waited for. A pull request packs it for linux-x64 only, unless it changes the tool
+      # or how it is packed; main, releases and manual runs pack every platform, so a release never ships a platform
+      # that was not checked. The checkout of a pull request is its merge commit, whose first parent is the base.
+      - name: Choose the tool platforms
+        id: tool-platforms
+        run: |
+          platforms='[
+            { "rid": "linux-x64", "os": "ubuntu-latest" },
+            { "rid": "linux-arm64", "os": "ubuntu-24.04-arm" },
+            { "rid": "linux-musl-x64", "os": "ubuntu-latest", "alpine": true },
+            { "rid": "linux-musl-arm64", "os": "ubuntu-24.04-arm", "alpine": true },
+            { "rid": "osx-arm64", "os": "macos-latest" },
+            { "rid": "osx-x64", "os": "macos-latest", "cross": true },
+            { "rid": "win-x64", "os": "windows-latest" },
+            { "rid": "win-arm64", "os": "windows-11-arm" }
+          ]'
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            changed=$(git diff --name-only HEAD^1 HEAD)
+            if ! grep -qE '^(src/PdfPecker\.Cli/|Directory\.Build\.props$|global\.json$|\.github/workflows/nuget\.yml$)' <<< "$changed"; then
+              platforms=$(jq -c '[.[] | select(.rid == "linux-x64")]' <<< "$platforms")
+            fi
+          fi
+          platforms=$(jq -c . <<< "$platforms")
+          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
+          echo "Tool platforms: $(jq -r 'map(.rid) | join(", ")' <<< "$platforms")" >> "$GITHUB_STEP_SUMMARY"
 
       - run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
       - run: dotnet test -c Release --no-build
@@ -268,21 +296,14 @@ jobs:
   # The pdfpecker tool's Native AOT packages, PdfPecker.Cli.<rid>. Native AOT compiles only for the operating system
   # it runs on, so each platform packs on its own runner (arm64 on arm64 runners; Alpine's musl ones in the SDK's
   # Alpine image), then installs the tool from the full set of packages and converts a document with it. osx-x64 is
-  # compiled on the arm64 Mac, which cannot run it.
+  # compiled on the arm64 Mac, which cannot run it. The platforms and their runners are listed in the build job's
+  # "Choose the tool platforms" step, which leaves all but linux-x64 out of most pull requests.
   tool-packages:
     needs: build
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { rid: linux-x64, os: ubuntu-latest }
-          - { rid: linux-arm64, os: ubuntu-24.04-arm }
-          - { rid: linux-musl-x64, os: ubuntu-latest, alpine: true }
-          - { rid: linux-musl-arm64, os: ubuntu-24.04-arm, alpine: true }
-          - { rid: osx-arm64, os: macos-latest }
-          - { rid: osx-x64, os: macos-latest, cross: true }
-          - { rid: win-x64, os: windows-latest }
-          - { rid: win-arm64, os: windows-11-arm }
+        include: ${{ fromJSON(needs.build.outputs.tool-platforms) }}
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.build.outputs.version }}
