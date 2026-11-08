@@ -671,7 +671,9 @@ internal sealed class FontChain : TextFont
     {
         var variants = LazyInitializer.EnsureInitialized(ref _variants, () => new());
         if (variants.TryGetValue(features, out var cached)) return cached;
-        // Bundled font chains live as long as the process, so ever new feature settings must not grow this forever.
+        // A chain belongs to one document's font resolver, so this caps what one stylesheet's feature settings can make
+        // of it, as DocumentFontVariants caps the fonts' own variants. Past the cap the chain is used as it is, the same
+        // way in every conversion of the document.
         if (variants.Count >= MaxVariants) return this;
         return variants.GetOrAdd(features, k => new FontChain(Variant(_primary, k), _metrics, (cp, accept) => _fallback(cp, accept) is { } f ? Variant(f, k) : null, _document));
     }

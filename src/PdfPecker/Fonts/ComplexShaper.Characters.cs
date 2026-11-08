@@ -16,6 +16,10 @@ internal static partial class ComplexShaper
     // front (see MoveModifierMarks).
     private const int CombiningClassBelow = 220, CombiningClassAbove = 230;
 
+    // A longer run of marks keeps the order it was written in, as HarfBuzz leaves it (HB_OT_SHAPE_MAX_COMBINING_MARKS).
+    // Only hostile text has such runs, and sorting them by insertion would take the square of their length.
+    private const int MaxReorderedMarks = 32;
+
     // Adds the glyphs of the text. Indic text is decomposed wherever the font has the parts (decomposeFirst), as
     // HarfBuzz normalizes it, so that split vowel signs and nukta letters reach the font in pieces; other text only
     // where the font lacks the character.
@@ -163,7 +167,8 @@ internal static partial class ComplexShaper
     private static int CombiningClass(GlyphRun run, int index) => UnicodeTables.ModifiedCombiningClass(run[index].CodePoint);
 
     // Sorts each run of combining marks by (modified) combining class, as normalization does; in Arabic, modifier
-    // combining marks such as hamza above then move to the front of their run, as HarfBuzz orders them.
+    // combining marks such as hamza above then move to the front of their run, as HarfBuzz orders them. Runs longer than
+    // MaxReorderedMarks stay as they are.
     private static void ReorderMarks(GlyphRun run, Script script)
     {
         int i = 0;
@@ -176,13 +181,13 @@ internal static partial class ComplexShaper
             }
             int start = i;
             while (i < run.Count && CombiningClass(run, i) != 0) i++;
-            if (i - start < 2) continue;
+            if (i - start is < 2 or > MaxReorderedMarks) continue;
             SortByCombiningClass(run, start, i);
             if (script == Script.Arabic) MoveModifierMarks(run, start, i);
         }
     }
 
-    // A stable insertion sort: runs of marks are short.
+    // A stable insertion sort: the runs it sorts are at most MaxReorderedMarks long.
     private static void SortByCombiningClass(GlyphRun run, int start, int end)
     {
         for (int k = start + 1; k < end; k++)
