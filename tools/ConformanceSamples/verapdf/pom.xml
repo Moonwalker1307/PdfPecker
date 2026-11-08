@@ -10,8 +10,8 @@
   <dependencies>
     <dependency>
       <groupId>org.verapdf.apps</groupId>
-      <artifactId>greenfield-apps</artifactId>
-      <version>1.28.2</version>
+      <artifactId>cli</artifactId>
+      <version>1.30.3</version>
     </dependency>
   </dependencies>
 </project>
