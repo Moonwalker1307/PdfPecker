@@ -37,7 +37,7 @@ internal sealed partial class PdfDocumentWriter
     /// watermark when it is behind, the flowing content, the running bands and margin texts, and the watermark when it
     /// is in front. Returns the page's links, which become annotations instead of content.
     /// </summary>
-    private List<(Placed Link, float Origin, float PageTop)> WritePageContent(WriteState doc, int p, ByteBuffer content)
+    private List<(Placed Link, float Origin, float PageTop, Matrix? Transform)> WritePageContent(WriteState doc, int p, ByteBuffer content)
     {
         float paperDy = _paperDy, pageTop = PageTop(p);
         if (Tagged) { _mc = doc.PageStreams[p] = new McStream(p); _mcOpen = null; }
@@ -70,7 +70,7 @@ internal sealed partial class PdfDocumentWriter
         _forceArtifact = false;
         var wm = doc.Watermark;
         if (wm is { Behind: true }) { Mark(content, null); content.Ascii(WatermarkDo(doc.FirstSetup)); }
-        var pageLinks = new List<(Placed Link, float Origin, float PageTop)>();
+        var pageLinks = new List<(Placed Link, float Origin, float PageTop, Matrix? Transform)>();
         _yOrigin = _page.MarginTop + _page.BandTop;
         (_flowTop, _flowBottom) = (pageTop, pageTop + _page.FlowHeight);
         _pageCanvas = (background, doc.Canvas[p], pageTop);
@@ -93,8 +93,8 @@ internal sealed partial class PdfDocumentWriter
                 (_yOrigin, _flowTop, _flowBottom) = (flowOrigin, flowTop, flowBottom);
                 continue;
             }
-            if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, pageTop)); continue; }
-            AddUntransformedLinks(placed, pageLinks, _yOrigin, pageTop);
+            if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, pageTop, null)); continue; }
+            AddNestedLinks(placed, pageLinks, _yOrigin, pageTop);
             WriteOp(content, placed, pageTop, doc.ImageIds);
         }
         _flowTop = _flowBottom = float.NaN;
@@ -117,13 +117,13 @@ internal sealed partial class PdfDocumentWriter
     }
 
     /// <summary>Writes band ops, such as running headers and fixed boxes, as artifacts placed from the top of the page area.</summary>
-    private void WriteBand(WriteState doc, ByteBuffer content, List<Placed> items, List<(Placed Link, float Origin, float PageTop)> pageLinks)
+    private void WriteBand(WriteState doc, ByteBuffer content, List<Placed> items, List<(Placed Link, float Origin, float PageTop, Matrix? Transform)> pageLinks)
     {
         _forceArtifact = true;
         foreach (var placed in items)
         {
-            if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, 0)); continue; }
-            AddUntransformedLinks(placed, pageLinks, _yOrigin, 0);
+            if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, 0, null)); continue; }
+            AddNestedLinks(placed, pageLinks, _yOrigin, 0);
             WriteOp(content, placed, 0, doc.ImageIds);
         }
         _forceArtifact = false;
@@ -133,14 +133,14 @@ internal sealed partial class PdfDocumentWriter
     /// Numbers the link annotations of page <paramref name="p"/> and lists them with its widgets. In a tagged file each
     /// annotation gets a parent tree key and joins its structure element. Returns the page's annotations.
     /// </summary>
-    private List<int> NumberPageAnnotations(WriteState doc, int p, List<(Placed Link, float Origin, float PageTop)> pageLinks)
+    private List<int> NumberPageAnnotations(WriteState doc, int p, List<(Placed Link, float Origin, float PageTop, Matrix? Transform)> pageLinks)
     {
         var annotIds = new List<int>();
-        foreach (var (lk, origin, linkTop) in pageLinks)
+        foreach (var (lk, origin, linkTop, transform) in pageLinks)
         {
             int id = doc.Next++;
             annotIds.Add(id);
-            doc.Annotations.Add((id, lk, origin, linkTop, p));
+            doc.Annotations.Add((id, lk, origin, linkTop, transform, p));
             if (Tagged)
             {
                 // A link annotation belongs to its Link element; one outside the structure (in a running header,
@@ -269,9 +269,9 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>
     /// Writes a link annotation: its rectangle on the page, and a jump to an anchor in the document or a URI action.
     /// </summary>
-    private void WriteLinkAnnotation(WriteState doc, in (int Id, Placed Link, float Origin, float PageTop, int Page) annotation)
+    private void WriteLinkAnnotation(WriteState doc, in (int Id, Placed Link, float Origin, float PageTop, Matrix? Transform, int Page) annotation)
     {
-        var (id, placed, origin, linkPageTop, linkPage) = annotation;
+        var (id, placed, origin, linkPageTop, transform, linkPage) = annotation;
         SetPage(linkPage, out _);
         float paperDy = _paperDy;
         var link = (LinkOp)placed.Op;
@@ -279,9 +279,29 @@ internal sealed partial class PdfDocumentWriter
         float yTop = _page.Height - origin - (placed.Y0 - linkPageTop);
         float yBottom = yTop - (placed.Y1 - placed.Y0);
         float k = _page.Scale;
+        Span<float> quad = stackalloc float[8];
+        bool turned = false;
+        if (transform is { } m)
+        {
+            // A link in a transformed layer: the rectangle is the bounding box of its corners where the layer draws
+            // them. Turned or skewed, the corners themselves go in /QuadPoints, top edge first as in text markup.
+            (quad[0], quad[1], quad[2], quad[3], quad[4], quad[5], quad[6], quad[7]) = (x1, yTop, x2, yTop, x1, yBottom, x2, yBottom);
+            for (int i = 0; i < 8; i += 2) m.Apply(ref quad[i], ref quad[i + 1]);
+            x1 = Math.Min(Math.Min(quad[0], quad[2]), Math.Min(quad[4], quad[6]));
+            x2 = Math.Max(Math.Max(quad[0], quad[2]), Math.Max(quad[4], quad[6]));
+            yBottom = Math.Min(Math.Min(quad[1], quad[3]), Math.Min(quad[5], quad[7]));
+            yTop = Math.Max(Math.Max(quad[1], quad[3]), Math.Max(quad[5], quad[7]));
+            turned = m.B != 0 || m.C != 0;
+        }
         x1 *= k; x2 *= k; yTop = yTop * k + paperDy; yBottom = yBottom * k + paperDy;
-        Begin(id).Ascii("<< /Type /Annot /Subtype /Link /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
-            .Ascii("] /F 4 /Border [0 0 0] ");
+        Begin(id).Ascii("<< /Type /Annot /Subtype /Link /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop).Ascii("] ");
+        if (turned)
+        {
+            _out.Ascii("/QuadPoints [");
+            for (int i = 0; i < 8; i += 2)
+                _out.Num(quad[i] * k).Sp().Num(quad[i + 1] * k + paperDy).Ascii(i < 6 ? " " : "] ");
+        }
+        _out.Ascii("/F 4 /Border [0 0 0] ");
         if (doc.AnnotKeys.TryGetValue(id, out int key))
         {
             // PDF/UA: a link's description, for assistive technology.
