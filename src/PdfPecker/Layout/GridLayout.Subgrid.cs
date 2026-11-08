@@ -105,10 +105,12 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// The items' contributions to the column tracks, in this grid's lines: an item's intrinsic widths with its
-    /// margins, or for a column subgrid its items' contributions mapped through its edges.
+    /// margins, or for a column subgrid its items' contributions mapped through its edges. <paramref name="minimums"/>
+    /// gets each contribution's minimum contribution, in the same order (see <see cref="MinimumContribution"/>).
     /// </summary>
     private void ColumnContributions(List<BoxItem> items, float basisW, float gap, Dictionary<string, List<int>>? colNames,
-        Dictionary<string, List<int>>? rowNames, List<(int, int, float, float)> max, List<(int, int, float, float)>? min, int depth)
+        Dictionary<string, List<int>>? rowNames, List<(int, int, float, float)> max, List<(int, int, float, float)>? min, int depth,
+        List<float>? minimums = null)
     {
         foreach (var it in items)
         {
@@ -118,14 +120,35 @@ internal sealed partial class LayoutEngine
                 var subMin = min != null ? new List<(int, int, float, float)>() : null;
                 float subGap = SubgridColumnContributions(it, basisW, gap, colNames, rowNames, subMax, subMin, depth + 1);
                 float insetL = SubgridInset(it, columns: true, start: true, basisW), insetR = SubgridInset(it, columns: true, start: false, basisW);
+                int mapped = max.Count;
                 MapSubgridContributions(subMax, max, it.Col, it.ColSpan, insetL, insetR, (subGap - gap) / 2);
                 if (min != null) MapSubgridContributions(subMin!, min, it.Col, it.ColSpan, insetL, insetR, (subGap - gap) / 2);
+                // A subgrid's items keep their min-content contributions.
+                if (minimums != null)
+                    for (int k = mapped; k < max.Count; k++) minimums.Add(max[k].Item3);
                 continue;
             }
             var (mn, mx) = ItemIntrinsic(it);
             max.Add((it.Col, it.ColSpan, mn + it.Ml + it.Mr, mx + it.Ml + it.Mr));
             min?.Add((it.Col, it.ColSpan, mn + it.Ml + it.Mr, mn + it.Ml + it.Mr));
+            minimums?.Add(MinimumContribution(it, mn) + it.Ml + it.Mr);
         }
+    }
+
+    /// <summary>
+    /// An item's minimum contribution to the tracks it spans, without its margins (CSS Grid §6.6 and §11.5): its
+    /// min-width when that is not auto, and otherwise its automatic minimum, which is nothing for a scroll container
+    /// and its min-content width <paramref name="minContent"/> for any other box. As for any intrinsic contribution, a
+    /// percentage min-width resolves against zero. A grid of auto minimums (a plain 1fr) so lets min-width: 0 and
+    /// overflow: hidden keep a long word or a wide child from widening its column, as in Chrome.
+    /// </summary>
+    private static float MinimumContribution(BoxItem it, float minContent)
+    {
+        if (it.El == null) return minContent;
+        var st = it.Style;
+        float frame = HorizontalFrame(st, 0);
+        if (!st.MinWidth.IsAuto) return Math.Max(frame, st.MinWidth.Resolve(0) + (st.BorderBox ? 0 : frame));
+        return st.IsScrollContainer && !it.IsReplaced ? frame : minContent;
     }
 
     /// <summary>

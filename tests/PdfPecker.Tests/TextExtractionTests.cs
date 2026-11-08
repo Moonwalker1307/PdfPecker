@@ -214,6 +214,42 @@ public class TextExtractionTests
     }
 
     [Fact]
+    public void Lines_of_a_skewed_scan_stay_in_order()
+    {
+        // A scanned page's text layer draws each line at its own skew of under a degree. Rounded to whole degrees,
+        // 0.45 and 0.55 fell into different groups, which were written one after the other: 1, 3, 5, 7, 2, 4, 6, 8, each
+        // line a paragraph. A label up the margin and a stamp at 30 degrees keep lines of their own, after the text.
+        static string Matrix(double degrees, double x, double y)
+        {
+            double r = degrees * Math.PI / 180;
+            return string.Join(' ', new[] { Math.Cos(r), Math.Sin(r), -Math.Sin(r), Math.Cos(r), x, y }
+                .Select(v => v.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture))) + " Tm";
+        }
+        double[] skews = { 0.3, 0.7, 0.4, 0.6, 0.45, 0.55, 0.3, 0.8 };
+        var lines = skews.Select((_, i) => $"Line number {i + 1} of the scanned page text.").ToArray();
+        var content = new StringBuilder();
+        for (int i = 0; i < skews.Length; i++) content.Append($"BT /F1 12 Tf {Matrix(skews[i], 72, 700 - 16 * i)} ({lines[i]}) Tj ET\n");
+        content.Append($"BT /F1 9 Tf {Matrix(90, 30, 300)} (Page 7 of the archive) Tj ET\n");
+        content.Append($"BT /F1 20 Tf {Matrix(30, 400, 450)} (RECEIVED) Tj ET\n");
+        var text = content.ToString();
+        var pdf = BuildPdf(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+            $"<< /Length {text.Length} >>\nstream\n{text}endstream");
+        foreach (var order in new[] { PdfTextOrder.Reading, PdfTextOrder.TopToBottom })
+        {
+            var page = PdfText.ExtractPage(pdf, 1, new PdfTextOptions { Order = order });
+            Assert.Equal(string.Join('\n', lines) + "\n\nPage 7 of the archive\n\nRECEIVED", page.Text);
+            // The skewed lines read as upright text; the others keep their angles.
+            Assert.All(page.Lines.Take(lines.Length), l => Assert.Equal(0, l.Angle));
+            Assert.Equal(new double[] { 90, 30 }, page.Lines.Skip(lines.Length).Select(l => l.Angle));
+        }
+        Assert.Equal(string.Join(' ', lines), PdfToMarkdown.Convert(pdf).Split("\n\n")[0]);
+    }
+
+    [Fact]
     public void Type3_font_drawn_at_its_own_scale_keeps_its_words_whole()
     {
         // As a real PDF does: FontMatrix [1 0 0 1 0 0] with glyphs about 72 units high, used at 0.24 points, and each
@@ -337,6 +373,51 @@ public class TextExtractionTests
         AssertStoryInOrder(markdown);
         var html = PdfToHtml.Convert(pdf, new PdfHtmlOptions { Mode = PdfHtmlMode.Structured });
         AssertStoryInOrder(System.Text.RegularExpressions.Regex.Replace(System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", " "), @"\s+", " "));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_column_that_starts_higher_than_the_first_is_read_after_it(bool boxes)
+    {
+        // The first column opens with a heading and the space above it, so the second column's first line, or its
+        // heading, sits higher than anything in the first; it used to be read first, before "1 Introduction".
+        string[] first =
+        {
+            "1 Introduction",
+            "The first paragraph opens the paper and runs long enough to fill several lines of the first column before it ends, so that the column holds real running text with many words.",
+            "The second paragraph keeps going in the first column and also wraps over several lines, adding more words so that the text will flow over into the next column of the page. It goes on a little longer to push the next section over.",
+        };
+        string[] second =
+        {
+            "2 Method", "The method section starts in the second column with a heading, and continues with enough words to wrap a few times in that column as well.",
+            "The closing paragraph of the method section adds a few more lines of ordinary text to the second column.",
+        };
+        const string style = "<style>body{font:10pt serif;margin:40px} h3{font-size:11pt;margin:12pt 0 4pt} p{margin:0 0 6pt;text-align:justify}</style>";
+        static string Column(string[] paragraphs, string top = "") =>
+            "<h3" + top + ">" + paragraphs[0] + "</h3>" + string.Concat(paragraphs.Skip(1).Select(p => "<p>" + p + "</p>"));
+        // CSS columns, where the end of the first column's last paragraph tops the second, or two boxes side by side,
+        // the second higher up and starting with its heading, as Chrome's columns can be.
+        string html = style + (boxes
+            ? "<div style='position:relative'><div style='position:absolute;left:0;top:14pt;width:250px'>" + Column(first, " style='margin-top:0'") +
+              "</div><div style='position:absolute;left:280px;top:0;width:250px'>" + Column(second, " style='margin-top:0'") + "</div></div>"
+            : "<div style='columns:2;column-gap:24pt'>" + Column(first) + Column(second) + "</div>");
+        var pdf = HtmlToPdf.Convert(html);
+        string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"[\s*]+", " ");
+        var text = Flat(PdfText.ExtractPage(pdf, 1).Text);
+        Assert.StartsWith("1 Introduction", text);
+        var markdown = Flat(PdfToMarkdown.Convert(pdf));
+        var structured = Flat(System.Text.RegularExpressions.Regex.Replace(PdfToHtml.Convert(pdf, new PdfHtmlOptions { Mode = PdfHtmlMode.Structured }), "<[^>]+>", " "));
+        foreach (var output in new[] { text, markdown, structured })
+        {
+            int at = -1;
+            foreach (var paragraph in first.Concat(second))
+            {
+                int next = output.IndexOf(paragraph, StringComparison.Ordinal);
+                Assert.True(next > at, $"Out of order or missing: {paragraph}\n{output}");
+                at = next;
+            }
+        }
     }
 
     [Theory]

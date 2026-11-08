@@ -288,19 +288,37 @@ internal static class TextReadingOrder
                         continue;
                     }
                 }
-                // Lines just above the group that sit in one of its columns are that column's start.
-                if (result[^1] is not GroupBlock && ColumnOf(g, result[^1], above: true) is int top)
+                // Lines just above the group that sit in one of its columns are that column's start. A later column can
+                // start higher than the first, as where the first opens with a heading and the space above it, so its
+                // heading and first lines can lie above the group, one block after the other.
+                GroupBlock? started = null;
+                if (result[^1] is not GroupBlock)
                 {
-                    var joined = Join(g, null);
-                    joined.Parts[top].Insert(0, result[^1]);
-                    joined.Top = Math.Min(g.Top, result[^1].Top);
-                    result[^1] = joined;
+                    // The parts' extents grow with each block that joins, rather than being measured again.
+                    var extents = g.Parts.Select(Extent).ToList();
+                    int first = g.Parts.IndexOf(Parts(g).First());
+                    while (result.Count > 0 && result[^1] is not GroupBlock && ColumnOf(extents, first, result[^1], above: true) is int top)
+                    {
+                        var start = result[^1];
+                        started ??= Join(g, null);
+                        started.Parts[top].Insert(0, start);
+                        started.Top = Math.Min(started.Top, start.Top);
+                        var e = Extent([start]);
+                        extents[top] = (Math.Min(extents[top].X0, e.X0), Math.Max(extents[top].X1, e.X1), Math.Min(extents[top].Top, e.Top),
+                            Math.Max(extents[top].Bottom, e.Bottom), Math.Max(extents[top].Size, e.Size));
+                        result.RemoveAt(result.Count - 1);
+                        if (top == first) break;
+                    }
+                }
+                if (started != null)
+                {
+                    result.Add(started);
                     continue;
                 }
             }
             // Lines just below a group that sit in one of its columns are that column's end.
             if (block is not GroupBlock && result.Count > 0 && result[^1] is GroupBlock group && SideBySide(group)
-                && ColumnOf(group, block, above: false) is int bottom)
+                && ColumnOf(group.Parts.Select(Extent).ToList(), group.Parts.IndexOf(Parts(group).First()), block, above: false) is int bottom)
             {
                 var joined = Join(group, null);
                 joined.Parts[bottom].Add(block);
@@ -345,25 +363,26 @@ internal static class TextReadingOrder
         // The column a block above or below the group belongs to: the one part it lies across, as wide as that part's
         // lines, as running text that goes on from the column is, and no further from the part's first or last line
         // than the space between two paragraphs. A heading or a label over one column is shorter and is left where it
-        // is. Lines above the group can only start the part that is read first, and a heading above it heads the group,
-        // as a section's title over a grid of cards does, rather than its first column.
-        static int? ColumnOf(GroupBlock group, FlowBlock block, bool above)
+        // is. A heading above the part that is read first heads the group, as a section's title over a grid of cards
+        // does, rather than its first column. Above a later part, where no title of the whole group can be, a heading
+        // or a short line starts that part when it is no further from it than a line's height.
+        static int? ColumnOf(List<(double X0, double X1, double Top, double Bottom, double Size)> parts, int first, FlowBlock block, bool above)
         {
-            if (above && block is TextBlock { Kind: TextKind.Heading }) return null;
             var words = Words(block);
             if (words.Count == 0) return null;
             double x0 = words.Min(w => w.X0), x1 = words.Max(w => w.X1), top = words.Min(w => w.Top), bottom = words.Max(w => w.Bottom);
             double size = words.Max(w => w.Size);
-            int first = group.Parts.IndexOf(Parts(group).First());
             int? found = null;
-            for (int i = 0; i < group.Parts.Count; i++)
+            for (int i = 0; i < parts.Count; i++)
             {
-                var e = Extent(group.Parts[i]);
+                var e = parts[i];
                 if (Math.Min(x1, e.X1) - Math.Max(x0, e.X0) <= 0) continue;
-                if (found != null || x0 < e.X0 - size || x1 > e.X1 + size || x1 - x0 < 0.8 * (e.X1 - e.X0)) return null;
-                if (above && i != first) return null;
+                if (found != null || x0 < e.X0 - size || x1 > e.X1 + size) return null;
                 double gap = above ? e.Top - bottom : top - e.Bottom;
-                if (gap < -size / 2 || gap > 1.5 * Math.Max(size, e.Size)) return null;
+                if (gap < -size / 2) return null;
+                bool wide = x1 - x0 >= 0.8 * (e.X1 - e.X0);
+                if (above && i != first ? gap > (wide ? 1.5 : 1) * Math.Max(size, e.Size)
+                    : !wide || gap > 1.5 * Math.Max(size, e.Size) || above && block is TextBlock { Kind: TextKind.Heading }) return null;
                 found = i;
             }
             return found;

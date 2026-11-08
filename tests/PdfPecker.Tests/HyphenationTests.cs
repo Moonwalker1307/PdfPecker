@@ -213,6 +213,23 @@ public class HyphenationTests
         Assert.Equal(new[] { 2 }, breaks);
     }
 
+    [Fact]
+    public void Deferred_patterns_are_read_only_for_their_language()
+    {
+        int reads = 0;
+        var options = new PdfOptions
+        {
+            Hyphenation = new Dictionary<string, HyphenationPatterns> { ["xx"] = HyphenationPatterns.Deferred(() => { reads++; return "c1d"; }) },
+        };
+        Layout("<div lang='en' style='width: 40px; font: 12px Arial; hyphens: auto'>abcdefgh abcdefgh</div>", options: options);
+        Assert.Equal(0, reads);
+        for (int i = 0; i < 2; i++)
+            Assert.Equal("abc-", Lines(Layout("<div lang='xx' style='width: 40px; font: 12px Arial; hyphens: auto'>abcdefgh abcdefgh</div>", options: options))[0]);
+        Assert.Equal(1, reads);
+        Assert.Throws<ArgumentNullException>(() => HyphenationPatterns.Deferred(null!));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HyphenationPatterns.Deferred(() => "", leftMin: 0));
+    }
+
     [Theory]
     [InlineData("auto", 0, 0, 0)]
     [InlineData("6", 6, 0, 0)]             // one value: the word length, the others auto

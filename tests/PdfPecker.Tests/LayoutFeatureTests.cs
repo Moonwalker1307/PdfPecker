@@ -173,6 +173,101 @@ public class LayoutFeatureTests
         Near(100, Box(ops, "#00ff00").W);
     }
 
+    [Theory]
+    [InlineData("<table style='border-spacing:0'><tr><td style='padding:0'><div style='min-width:150pt; height:10pt'></div></td>"
+                + "<td style='padding:0'><div style='width:20pt; height:10pt; background:#00ff00'></div></td></tr></table>")]
+    [InlineData("<div style='display:flex'><div><div style='min-width:150pt; height:10pt'></div></div>"
+                + "<div style='width:20pt; height:10pt; background:#00ff00'></div></div>")]
+    [InlineData("<div style='display:grid; grid-template-columns:auto 1fr; width:300pt'><div><div style='min-width:150pt; height:10pt'></div></div>"
+                + "<div style='height:10pt; background:#00ff00'></div></div>")]
+    [InlineData("<div style='float:left'><div style='min-width:110pt; padding-left:40pt; height:10pt'></div></div>"
+                + "<div style='float:left; width:20pt; height:10pt; background:#00ff00'></div>")]
+    [InlineData("<span style='display:inline-block'><span style='display:block; min-width:150pt; max-width:50pt; height:10pt'></span></span>"
+                + "<span style='display:inline-block; width:20pt; height:10pt; background:#00ff00'></span>")]
+    public void A_box_with_a_min_width_widens_the_column_or_box_its_intrinsic_width_sizes(string html)
+    {
+        // A table column, a flex item, an auto grid track, a float and an inline-block are as wide as their content's
+        // min-content and max-content widths, which a min-width (winning over a max-width) widens, as in Chrome: the
+        // box beside them starts 150 points in, rather than under the 150-point box.
+        Near(150, Box(Layout("<style>body { margin: 0; font-size: 0 }</style>" + html), "#00ff00").X);
+    }
+
+    [Theory]
+    [InlineData("repeat(3, 1fr)", "min-width:0", 100)]
+    [InlineData("1fr 1fr", "overflow:hidden", 150)]
+    [InlineData("1fr 1fr", "overflow-y:hidden", 150)]
+    [InlineData("1fr 1fr", "min-width:80pt", 150)]
+    [InlineData("1fr 1fr", "min-width:0; padding:0 20pt", 150)]
+    [InlineData("1fr 1fr", "", 400)]
+    [InlineData("1fr 1fr", "overflow:clip", 400)]
+    [InlineData("minmax(min-content, 1fr) 1fr", "min-width:0", 400)]
+    public void Grid_items_with_a_min_width_or_clipped_overflow_do_not_widen_a_flexible_column(string columns, string item, float second)
+    {
+        // A plain 1fr column has an auto minimum: the item's min-width when it has one, nothing when it is a scroll
+        // container, and only otherwise its content (CSS Grid §6.6), so min-width: 0 and overflow: hidden keep a wide
+        // child from widening the column, as in Chrome. overflow: clip makes no scroll container, and a min-content
+        // minimum still takes the content.
+        var ops = Layout($"""
+            <div style="display:grid; grid-template-columns:{columns}; width:300pt">
+              <div style="{item}"><div style="width:400pt; height:10pt"></div></div>
+              <div style="height:10pt; background:#00ff00"><div style="width:10pt"></div></div>
+            </div>
+            """);
+        Near(second, Box(ops, "#00ff00").X);
+    }
+
+    [Theory]
+    [InlineData("overflow:hidden", 150)]
+    [InlineData("overflow:clip", 400)]
+    public void A_flex_item_that_clips_its_overflow_shrinks_below_its_content(string item, float second)
+    {
+        // A scroll container's automatic minimum is zero (css-flexbox §4.5), as in Chrome; overflow: clip makes none.
+        var ops = Layout($"""
+            <div style="display:flex; width:300pt">
+              <div style="flex:1; {item}"><div style="width:400pt; height:10pt"></div></div>
+              <div style="flex:1; height:10pt; background:#00ff00"><div style="width:10pt"></div></div>
+            </div>
+            """);
+        Near(second, Box(ops, "#00ff00").X);
+    }
+
+    [Fact]
+    public void Flexible_columns_of_a_shrink_to_fit_grid_are_as_wide_as_the_widest_of_them_needs()
+    {
+        // Measured for its width, a grid gives each fr column the largest width per fr any of them needs (CSS Grid
+        // §12.7.1), so 1fr 1fr columns of a float come out equal, as in Chrome, and the wider item fits its column.
+        var ops = Layout("""
+            <div style="float:left; display:grid; grid-template-columns:1fr 1fr; background:#0000ff">
+              <div><div style="width:40pt; height:10pt"></div></div>
+              <div style="background:#00ff00"><div style="width:100pt; height:10pt"></div></div>
+            </div>
+            """);
+        Near(200, Box(ops, "#0000ff").W);
+        Near(100, Box(ops, "#00ff00").X);
+        Near(100, Box(ops, "#00ff00").W);
+    }
+
+    [Theory]
+    [InlineData("flex:0 1 100pt", 2, 100)]
+    [InlineData("flex:1 0 100pt", 1, 100)]
+    [InlineData("flex:0 0 100pt; min-width:150pt", 1, 150)]
+    [InlineData("flex:0 1 100pt; max-width:80pt", 2, 80)]
+    [InlineData("flex:0 1 100pt", 3, 100)]
+    [InlineData("flex:1 1 100pt", 2, 120)]
+    public void A_flex_item_that_cannot_grow_or_shrink_sizes_its_container_by_its_flex_basis(string item, int words, float width)
+    {
+        // An item that cannot grow contributes no more than its flex-basis to the container's width, and one that
+        // cannot shrink no less, within its min and max widths (css-flexbox §9.9.3), as in Chrome. Its words are 60
+        // points wide, so its content can wrap down to 60 points.
+        string content = string.Join(" ", Enumerable.Repeat("<span style='display:inline-block; width:60pt; height:10pt'></span>", words));
+        var ops = Layout($"""
+            <div style="float:left; font-size:0; background:#0000ff">
+              <div style="display:flex"><div style="{item}">{content}</div></div>
+            </div>
+            """);
+        Near(width, Box(ops, "#0000ff").W);
+    }
+
     [Fact]
     public void Wrapping_column_flex_box_starts_a_new_column_when_full()
     {

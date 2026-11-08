@@ -30,27 +30,20 @@ internal static class TextLayout
     public static PdfTextPage Build(List<TextGlyph> glyphs, int pageNumber, double width, double height, bool expandLigatures,
         CancellationToken cancellationToken = default)
     {
-        // Glyphs whose baselines point the same way are laid out together; rotated text gets its own lines.
-        var groups = new Dictionary<int, List<int>>();
-        for (int i = 0; i < glyphs.Count; i++)
-        {
-            var g = glyphs[i];
-            int angle = (int)Math.Round(Math.Atan2(g.DirY, g.DirX) * 180 / Math.PI);
-            if (angle < 0) angle += 360;
-            angle %= 360;
-            if (!groups.TryGetValue(angle, out var list)) groups[angle] = list = new List<int>();
-            list.Add(i);
-        }
+        // Glyphs whose baselines point the same way, give or take a scan's skew, are laid out together; rotated text gets
+        // its own lines.
+        var groups = AngleGroups(glyphs);
 
         var lines = new List<PdfTextLine>();
         var sb = new StringBuilder();
         var attached = new MarkTargets(glyphs);
         bool drawsSpaces = glyphs.Exists(g => g.Text.Length > 0 && IsSpace(g.Text));
         var scratch = new Scratch();
-        foreach (var angle in groups.Keys.OrderBy(a => a))
+        foreach (var group in groups)
         {
-            double rad = angle * Math.PI / 180, cx = Math.Cos(rad), cy = Math.Sin(rad);
-            var groupLines = BuildLines(glyphs, groups[angle], cx, cy, attached, cancellationToken);
+            int angle = group.Angle;
+            double rad = group.Frame * Math.PI / 180, cx = Math.Cos(rad), cy = Math.Sin(rad);
+            var groupLines = BuildLines(glyphs, group.Glyphs, cx, cy, attached, cancellationToken);
             Line? previous = null;
             foreach (var line in groupLines)
             {
@@ -69,6 +62,83 @@ internal static class TextLayout
             }
         }
         return new PdfTextPage(pageNumber, width, height, sb.ToString(), lines);
+    }
+
+    /// <summary>
+    /// How many whole degrees apart the baselines of glyphs laid out together may point. A scanned page's text layer draws
+    /// each line at the skew the scanner left, which differs by fractions of a degree from one line to the next.
+    /// </summary>
+    private const int AngleTolerance = 2;
+
+    /// <summary>The glyphs laid out together, the angle their lines are reported at and the one they are laid out in.</summary>
+    private sealed class AngleGroup
+    {
+        public readonly List<int> Glyphs = new();
+        public int Angle; // the whole degrees, clockwise on the page, that the lines report
+        public double Frame; // the degrees the lines are laid out along
+    }
+
+    /// <summary>
+    /// Groups glyphs whose baselines point the same way, give or take <see cref="AngleTolerance"/> degrees, so that rotated
+    /// text gets lines of its own while the lines of a skewed scan stay together. The most common direction takes the
+    /// directions near it first. A group of glyphs that all point along whole degrees is laid out along them; a skewed
+    /// one is laid out along the median direction of its glyphs, so its lines run straight, and reports the nearest
+    /// quarter turn when it is within the tolerance of one, so a skewed upright page reads as upright.
+    /// </summary>
+    private static List<AngleGroup> AngleGroups(List<TextGlyph> glyphs)
+    {
+        var whole = new int[glyphs.Count];
+        var counts = new int[360];
+        for (int i = 0; i < glyphs.Count; i++)
+        {
+            int angle = (int)Math.Round(Degrees(glyphs[i]));
+            if (angle < 0) angle += 360;
+            angle %= 360;
+            whole[i] = angle;
+            counts[angle]++;
+        }
+        var groupOf = new AngleGroup?[360];
+        var groups = new List<AngleGroup>();
+        // Most glyphs first; equal counts by angle, so the grouping does not depend on the order glyphs are drawn in.
+        foreach (int angle in Enumerable.Range(0, 360).Where(a => counts[a] > 0).OrderByDescending(a => counts[a]).ThenBy(a => a))
+        {
+            if (groupOf[angle] != null) continue;
+            var group = new AngleGroup { Angle = angle, Frame = angle };
+            groups.Add(group);
+            for (int d = -AngleTolerance; d <= AngleTolerance; d++)
+            {
+                int near = (angle + d + 360) % 360;
+                if (counts[near] > 0 && groupOf[near] == null) groupOf[near] = group;
+            }
+        }
+        for (int i = 0; i < glyphs.Count; i++) groupOf[whole[i]]!.Glyphs.Add(i);
+        foreach (var group in groups)
+        {
+            if (group.Glyphs.TrueForAll(i => Math.Abs(Turn(glyphs[i], group.Angle)) < 1e-6)) continue;
+            var turns = new double[group.Glyphs.Count];
+            for (int k = 0; k < turns.Length; k++) turns[k] = Turn(glyphs[group.Glyphs[k]], group.Angle);
+            Array.Sort(turns);
+            group.Frame = group.Angle + turns[turns.Length / 2];
+            int quarter = (int)Math.Round(group.Frame / 90) * 90;
+            int angle = Math.Abs(group.Frame - quarter) <= AngleTolerance ? quarter : (int)Math.Round(group.Frame);
+            group.Angle = (angle % 360 + 360) % 360;
+        }
+        groups.Sort((a, b) => a.Angle != b.Angle ? a.Angle.CompareTo(b.Angle) : a.Frame.CompareTo(b.Frame));
+        return groups;
+
+        // The direction of a glyph's baseline in degrees, clockwise on the page.
+        static double Degrees(in TextGlyph g)
+        {
+            double degrees = Math.Atan2(g.DirY, g.DirX) * 180 / Math.PI;
+            return double.IsFinite(degrees) ? degrees : 0;
+        }
+
+        // How far a glyph turns from a whole number of degrees, between -180 and 180.
+        static double Turn(in TextGlyph g, int angle)
+        {
+            double turn = Degrees(g) - angle;
+            return turn - 360 * Math.Round(turn / 360);
+        }
     }
 
     /// <summary>

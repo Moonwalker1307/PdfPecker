@@ -351,7 +351,7 @@ internal sealed partial class LayoutEngine
     /// space for spanning items, maximisation up to the growth limits, then fr tracks share what is left.
     /// </summary>
     private static void SizeTracks(GridTrack[] tracks, float avail, bool definite, float gap,
-        List<(int Start, int Span, float Min, float Max)> contributions, bool stretchAuto)
+        List<(int Start, int Span, float Min, float Max)> contributions, bool stretchAuto, List<float>? minimums = null)
     {
         int n = tracks.Length;
         foreach (var t in tracks)
@@ -364,14 +364,18 @@ internal sealed partial class LayoutEngine
 
         // Intrinsic sizes from single-span items.
         var hasLimit = new bool[n];
-        foreach (var (start, span, min, max) in contributions)
+        for (int i = 0; i < contributions.Count; i++)
         {
+            var (start, span, min, max) = contributions[i];
             if (span != 1 || start >= n) continue;
             var t = tracks[start];
             if (t.Collapsed) continue;
             switch (t.Def.Min.Kind)
             {
                 case TrackSizeKind.Auto:
+                    // In a grid of definite width, an auto minimum takes the item's minimum contribution.
+                    t.Base = Math.Max(t.Base, minimums?[i] ?? min);
+                    break;
                 case TrackSizeKind.MinContent:
                     t.Base = Math.Max(t.Base, min);
                     break;
@@ -409,8 +413,9 @@ internal sealed partial class LayoutEngine
         }
 
         // Spanning items: grow intrinsic tracks they cross so that the item fits.
-        foreach (var (start, span, min, max) in contributions)
+        for (int c = 0; c < contributions.Count; c++)
         {
+            var (start, span, min, max) = contributions[c];
             if (span <= 1 || start >= n) continue;
             int end = Math.Min(n, start + span);
             float current = gap * (end - start - 1), currentLimit = current;
@@ -422,6 +427,10 @@ internal sealed partial class LayoutEngine
                 if (tracks[i].Def.Min.IsIntrinsic || tracks[i].IsFlexible) growable.Add(tracks[i]);
             }
             if (growable.Count == 0) continue;
+            // Tracks of auto minimums take the item's minimum contribution, as a single track does; a min-content or
+            // max-content minimum still takes its min-content contribution.
+            if (minimums != null && !growable.Exists(t => t.Def.Min.Kind is TrackSizeKind.MinContent or TrackSizeKind.MaxContent))
+                min = minimums[c];
             if (min > current)
                 foreach (var t in growable) t.Base += (min - current) / growable.Count;
             if (max > currentLimit)
@@ -679,8 +688,9 @@ internal sealed partial class LayoutEngine
 
         // Column sizes from the items' intrinsic widths.
         var contributions = new List<(int, int, float, float)>(items.Count);
-        ColumnContributions(items, g.W, colGap, g.ColNames, g.RowNames, contributions, null, 0);
-        SizeTracks(cols, g.W, definite: true, colGap, contributions, s.JustifyContent is BoxAlign.Normal or BoxAlign.Stretch);
+        var minimums = new List<float>(items.Count);
+        ColumnContributions(items, g.W, colGap, g.ColNames, g.RowNames, contributions, null, 0, minimums);
+        SizeTracks(cols, g.W, definite: true, colGap, contributions, s.JustifyContent is BoxAlign.Normal or BoxAlign.Stretch, minimums);
 
         // Column positions, with justify-content.
         float used = 0;
@@ -1025,6 +1035,40 @@ internal sealed partial class LayoutEngine
     private static float SubgridBottomInset(ComputedStyle s, float basis)
         => (s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(basis)) + s.BorderBottom + s.PaddingBottom.Resolve(basis);
 
+    /// <summary>
+    /// Sizes the flexible columns of a grid that is measured for its min-content or max-content width by the used flex
+    /// fraction (CSS Grid §12.7.1): the largest width per fr that a column or an item spanning flexible columns needs,
+    /// times each column's fr. So 1fr 1fr columns come out equal, as in Chrome, and the grid is wide enough for the
+    /// widest of them once its width is shared out again.
+    /// </summary>
+    private static void ShareFlexibleTracks(GridTrack[] tracks, float gap, List<(int Start, int Span, float Min, float Max)> contributions)
+    {
+        float fraction = 0, total = 0;
+        foreach (var t in tracks)
+        {
+            if (!t.IsFlexible) continue;
+            total += t.Def.Max.Value;
+            fraction = Math.Max(fraction, t.Base / Math.Max(1, t.Def.Max.Value));
+        }
+        // Columns whose fr add up to less than 1 keep their content widths, which is nearer to what Chrome gives them.
+        if (total < 1) return;
+        foreach (var (start, span, _, max) in contributions)
+        {
+            if (span <= 1 || start >= tracks.Length) continue;
+            int end = Math.Min(tracks.Length, start + span);
+            float rest = max - gap * (end - start - 1), factors = 0;
+            bool flexible = false;
+            for (int i = start; i < end; i++)
+            {
+                if (tracks[i].IsFlexible) { flexible = true; factors += tracks[i].Def.Max.Value; }
+                else rest -= tracks[i].Base;
+            }
+            if (flexible) fraction = Math.Max(fraction, rest / Math.Max(1, factors));
+        }
+        foreach (var t in tracks)
+            if (t.IsFlexible) t.Base = Math.Max(t.Base, fraction * t.Def.Max.Value);
+    }
+
     /// <summary>Min-content and max-content widths of a grid container's content box.</summary>
     private (float Min, float Max) GridIntrinsic(Element e)
     {
@@ -1051,6 +1095,7 @@ internal sealed partial class LayoutEngine
         {
             var tracks = MakeTracks(colDefs, s.GridAutoColumns, colCount);
             SizeTracks(tracks, 0, definite: false, gap, contrib, stretchAuto: false);
+            ShareFlexibleTracks(tracks, gap, contrib);
             float total = gap * Math.Max(0, colCount - 1);
             foreach (var t in tracks) total += t.Base;
             return total;

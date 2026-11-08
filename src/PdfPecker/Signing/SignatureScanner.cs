@@ -7,6 +7,9 @@ internal sealed class FoundSignature
 {
     public string FieldName = "";
     public PdfDict Dict = null!;
+
+    /// <summary>How the file names the field and its signature: the field's reference and its /V as written, either of which may be null or direct.</summary>
+    public PdfObject? Field, Value;
     public long[] ByteRange = Array.Empty<long>();
 
     /// <summary>Whether the byte range is well formed: it starts at 0, leaves exactly one hex string out, and stays in the file.</summary>
@@ -56,7 +59,13 @@ internal static class SignatureScanner
             var type = file.GetName(field, "FT") ?? inherited;
             if (type == "Sig" && file.Resolve(field["V"]) is PdfDict sig && file.GetArray(sig, "ByteRange") != null)
             {
-                if (signatures.Add(sig)) result.Add(Locate(file, sig, name));
+                if (signatures.Add(sig))
+                {
+                    var found = Locate(file, sig, name);
+                    found.Field = o;
+                    found.Value = field["V"];
+                    result.Add(found);
+                }
                 continue;
             }
             if (file.GetArray(field, "Kids") is { } kids)

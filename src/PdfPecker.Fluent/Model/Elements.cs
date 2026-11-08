@@ -122,11 +122,12 @@ internal sealed class Decorator : Element
     public int Rank { get; init; } = Fluent.Model.Rank.Any;
     public (string Property, string Value)[] Declarations { get; init; } = [];
 
-    // Border: widths per side (NaN where the side has none) and a colour that BorderColor may change later.
-    public float Top { get; init; } = float.NaN;
-    public float Right { get; init; } = float.NaN;
-    public float Bottom { get; init; } = float.NaN;
-    public float Left { get; init; } = float.NaN;
+    // Border: widths per side (NaN where the side has none), which a border call straight after may set again, and a
+    // colour that BorderColor may change later.
+    public float Top { get; set; } = float.NaN;
+    public float Right { get; set; } = float.NaN;
+    public float Bottom { get; set; } = float.NaN;
+    public float Left { get; set; } = float.NaN;
     public Color BorderColor { get; set; } = Colors.Black;
 
     // Align
