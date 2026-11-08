@@ -18,7 +18,8 @@ A .NET 10 SDK installs the tool as a Native AOT executable from a package for it
 command in a few milliseconds, where the framework-dependent tool spends about a third of a second starting the runtime
 and compiling. On other platforms a .NET 10 SDK installs `PdfPecker.Cli.any`, the framework-dependent tool, and .NET 8 and
 9 SDKs install the framework-dependent tool from the package itself, as they always have. The commands and their output
-are the same in every case.
+are the same in every case. On Windows the SDK starts the native tool through a `pdfpecker.cmd` file, which Command Prompt
+and PowerShell run as `pdfpecker`; Git Bash needs the full name, `pdfpecker.cmd`.
 
 ## Commands
 
