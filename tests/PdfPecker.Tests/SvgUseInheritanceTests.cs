@@ -119,4 +119,37 @@ public class SvgUseInheritanceTests
         Color(0, 170, 0, At(html, 50, 50));
         Color(0, 0, 255, At(html, 200, 50));
     }
+
+    [Fact]
+    public void Text_drawn_by_use_inherits_colour_paint_and_font_from_the_use_element()
+    {
+        // Text and its tspans go through the use element's inheritance as shapes do. Chrome draws the four lines blue,
+        // green, orange and bold purple at 40px.
+        var pdf = Svg("<defs><g id='t'><text x='10' y='40' font-size='30' fill='currentColor'>Hello<tspan>World</tspan></text></g>"
+            + "<symbol id='sy'><text x='10' y='40' font-size='30' fill='currentColor'>Sym<tspan fill='currentColor'>bol</tspan></text></symbol>"
+            + "<text id='plain' x='10' y='40' font-size='30'>Plain</text><g id='fs'><text x='10' y='40'>Font</text></g></defs>"
+            + "<use href='#t' style='color:#00f'/><use href='#sy' y='60' color='#080'/><use href='#plain' y='120' fill='#f80'/>"
+            + "<use href='#fs' y='200' fill='#808' font-size='40' font-weight='bold'/>", "color:#f00");
+        var content = System.Text.Encoding.Latin1.GetString(pdf);
+        Assert.DoesNotContain("1 0 0 rg", content);
+        Assert.Matches(@"0 0 1 rg\s+BT /F\d+ 30 Tf[^\n]*\(Hello\) Tj ET\s+BT[^\n]*orld", content);
+        Assert.Matches(@"0 0\.533 0 rg\s+BT[^\n]*\(Sym\) Tj ET\s+BT[^\n]*\(bol\) Tj", content);
+        Assert.Matches(@"1 0\.533 0 rg\s+BT[^\n]*\(Plain\)", content);
+        Assert.Matches(@"0\.533 0 0\.533 rg\s+BT /F\d+ 40 Tf[^\n]*\(Font\)", content);
+        // The bold word is in a font of its own.
+        var regular = System.Text.RegularExpressions.Regex.Match(content, @"/(F\d+) 30 Tf[^\n]*\(Plain\)").Groups[1].Value;
+        var bold = System.Text.RegularExpressions.Regex.Match(content, @"/(F\d+) 40 Tf[^\n]*\(Font\)").Groups[1].Value;
+        Assert.NotEqual(regular, bold);
+    }
+
+    [Fact]
+    public void Text_drawn_by_use_keeps_what_it_sets_itself()
+    {
+        var pdf = Svg("<defs><text id='t' x='10' y='40' font-size='20' fill='#0a0'>Own<tspan font-size='30' fill='#00f'>Span</tspan></text></defs>"
+            + "<use href='#t' fill='#f00' font-size='50'/>");
+        var content = System.Text.Encoding.Latin1.GetString(pdf);
+        Assert.DoesNotContain("1 0 0 rg", content);
+        Assert.Matches(@"0 0\.667 0 rg\s+BT /F\d+ 20 Tf[^\n]*\(Own\)", content);
+        Assert.Matches(@"0 0 1 rg\s+BT /F\d+ 30 Tf[^\n]*\(Span\)", content);
+    }
 }
