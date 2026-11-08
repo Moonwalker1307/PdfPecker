@@ -303,6 +303,35 @@ public class RedactionTests
         Assert.Contains("Classified", pages[1].Text);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("/Resources << >>")]
+    public void Text_in_a_form_that_sets_no_font_loses_only_the_redacted_glyphs(string formResources)
+    {
+        // The form draws with the font, size and spacing set before Do. The walk into the form started without them,
+        // so the text counted as fontless and went whole, and "Public" was lost with "SECRET".
+        const string formContent = "BT 0 10 Td (Public SECRET) Tj ET";
+        var pdf = Build(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /Font << /F1 6 0 R >> /XObject << /X1 5 0 R >> >> /Contents 4 0 R >>",
+            Stream("/F1 12 Tf 2 Tc q 1 0 0 1 20 200 cm /X1 Do Q"),
+            $"<< /Type /XObject /Subtype /Form /BBox [0 0 300 50] {formResources} /Length {formContent.Length} >>\nstream\n{formContent}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        var secret = Word(pdf, "SECRET");
+        var publicWord = Word(pdf, "Public");
+
+        var redacted = PdfRedactor.Redact(pdf, new[] { PdfRedactionArea.Of(1, secret) }, new PdfRedactOptions { FillColor = null });
+
+        var text = PdfText.Extract(redacted);
+        Assert.DoesNotContain("SECRET", text);
+        Assert.DoesNotContain("SECRET", AllBytes(redacted));
+        var kept = Word(redacted, "Public");
+        Assert.Equal(publicWord.X, kept.X, 3);
+        Assert.Equal(publicWord.Width, kept.Width, 3);
+        PdfTestHelpers.AssertStructurallyValid(redacted);
+    }
+
     [Fact]
     public void Replacement_text_of_marked_content_that_lost_glyphs_goes_too()
     {

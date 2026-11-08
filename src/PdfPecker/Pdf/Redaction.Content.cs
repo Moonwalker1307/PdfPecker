@@ -132,12 +132,13 @@ internal sealed partial class Redaction
 
     /// <summary>
     /// Walks a content stream drawn with the transform <paramref name="ctm"/>, and returns it rewritten, or null when it
-    /// draws nothing in the areas.
+    /// draws nothing in the areas. A form starts from the state it is painted with, <paramref name="inherited"/>.
     /// </summary>
-    private byte[]? Walk(byte[] data, Context context, Matrix ctm, int depth)
+    private byte[]? Walk(byte[] data, Context context, Matrix ctm, int depth, State? inherited = null)
     {
         var output = new Output();
-        var gs = new State { Ctm = ctm };
+        var gs = inherited ?? new State();
+        gs.Ctm = ctm;
         var saved = new Stack<State>();
         var marks = new List<Mark>();
         var path = new PathBuffer();
@@ -245,7 +246,7 @@ internal sealed partial class Redaction
                     break;
                 }
                 case "Do":
-                    if (DrawXObject(o.Count > 0 ? o[0].Name : null, gs.Ctm, context, output, depth)) Removed();
+                    if (DrawXObject(o.Count > 0 ? o[0].Name : null, gs, context, output, depth)) Removed();
                     else output.Copy(data, p.Start, p.End);
                     break;
                 case "BI":
@@ -546,8 +547,9 @@ internal sealed partial class Redaction
     /// Draws an XObject: an image or form that touches an area is dropped or replaced by a redacted copy, and true is
     /// returned; otherwise nothing is written.
     /// </summary>
-    private bool DrawXObject(string? name, Matrix ctm, Context context, Output output, int depth)
+    private bool DrawXObject(string? name, State gs, Context context, Output output, int depth)
     {
+        var ctm = gs.Ctm;
         if (name == null || _file.GetDict(_file.GetDict(context.Resources, "XObject"), name) is not PdfStream xObject) return false;
         switch (_file.GetName(xObject, "Subtype"))
         {
@@ -578,7 +580,7 @@ internal sealed partial class Redaction
                 else content = shown;
                 var own = _file.GetDict(xObject, "Resources");
                 var inner = new Context(PdfDict.CopyOf(own ?? context.Resources), _file.GetInt(xObject, "StructParents", -1));
-                if (Walk(content, inner, m, depth + 1) is not { } redacted) return false;
+                if (Walk(content, inner, m, depth + 1, FormState(gs, context.Resources, inner.Resources)) is not { } redacted) return false;
                 var entries = new Dictionary<string, PdfObject>(xObject.Entries, StringComparer.Ordinal);
                 entries.Remove("Length");
                 entries.Remove("DecodeParms");
@@ -595,6 +597,20 @@ internal sealed partial class Redaction
                 return false;
         }
     }
+
+    /// <summary>
+    /// The state a form starts from: the text state in force where it is painted, as a form inherits it, so that text in
+    /// a form that sets no font of its own loses only the glyphs in an area. The font itself carries over; its name is
+    /// kept only when the form's resources give it the same font, as it is written again only by that name.
+    /// </summary>
+    private State FormState(State gs, PdfDict? outer, PdfDict? inner)
+    {
+        var state = gs.Clone();
+        if (state.FontName != null && !ReferenceEquals(FontDict(outer, state.FontName), FontDict(inner, state.FontName))) state.FontName = null;
+        return state;
+    }
+
+    private PdfDict? FontDict(PdfDict? resources, string name) => _file.GetDict(_file.GetDict(resources, "Font"), name);
 
     /// <summary>An inline image that touches an area is dropped, or replaced by a redacted image XObject.</summary>
     private bool InlineImage(PdfDict dict, byte[] data, Matrix ctm, Context context, Output output)
