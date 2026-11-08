@@ -24,6 +24,7 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 | `PDFPECKER_UPDATE_GOLDEN=1` | `GoldenPdfTests`, `RendererGoldenTests` | Rewrites the golden baselines instead of comparing. |
 | `PDFPECKER_UPDATE_COMMONMARK=1` | `MarkdownSpecTests` | Records newly passing CommonMark examples in `Fixtures/commonmark-passing.txt`. |
 | `PDFPECKER_COMMONMARK_SPEC` | `MarkdownSpecTests` | Path to a local `spec.txt`, for running the spec tests offline. |
+| `PDFPECKER_NORMALIZATION_TEST` | `UnicodeNormalizationTests` | Path to a local `NormalizationTest.txt` of the Unicode version in `UnicodeTables.g.cs`, for running the conformance test offline. |
 | `PDFPECKER_BENCH_WARMUP` | `bench/compare-versions.sh` | Seconds of warm-up before timing (3 by default); 12 to 15 lets JIT tiering finish. |
 | `SOURCE_DATE_EPOCH` | The library at run time | When no `CreationDate` is set, fixes the dates and file identifier, so the same input gives a byte-identical PDF. |
 
@@ -31,7 +32,7 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 
 | Workflow | When | What |
 | --- | --- | --- |
-| `nuget.yml` | Every PR, pushes to main, published releases | Builds and tests net8.0, net9.0 and net10.0 on Linux and net10.0 on Windows, publishes the samples with Native AOT, packs the command-line tool's Native AOT package of each platform on a runner of that platform (Linux, Alpine, macOS and Windows, x64 and Arm64) and installs and runs it there, reports coverage (main only) and packs PdfPecker, PdfPecker.Fluent, PdfPecker.Testing, the `PdfPecker.Cli` dotnet tool and PdfPecker.Razor with the same version. On a release it attaches the packages and publishes them to nuget.org. |
+| `nuget.yml` | Every PR, pushes to main, published releases | Builds and tests net8.0, net9.0 and net10.0 on Linux and net10.0 on Windows, runs the normalization, shaping, hyphenation and encryption tests again with invariant globalization (no ICU), publishes the samples with Native AOT, packs the command-line tool's Native AOT package of each platform on a runner of that platform (Linux, Alpine, macOS and Windows, x64 and Arm64) and installs and runs it there, reports coverage (main only) and packs PdfPecker, PdfPecker.Fluent, PdfPecker.Testing, the `PdfPecker.Cli` dotnet tool and PdfPecker.Razor with the same version. On a release it attaches the packages and publishes them to nuget.org. |
 | `dotnet-preview.yml` | Pushes to main, published releases, Mondays | Builds and tests on the latest .NET 11 preview SDK with an extra `net11.0` target. Never blocks: the job is `continue-on-error`, and it packs and publishes nothing. |
 | `conformance.yml` | PRs and pushes touching `src`, `tests` or the samples | veraPDF validation of the PDF/A and PDF/UA samples. |
 | `codeql.yml` | PRs, pushes and a schedule | CodeQL analysis. |

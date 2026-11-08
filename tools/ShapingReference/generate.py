@@ -4,7 +4,8 @@
 # Usage (from the repository root): pip install uharfbuzz fonttools brotli, then
 #   python3 tools/ShapingReference/generate.py
 #
-# The fonts are the WOFF2 subsets in tests/PdfPecker.Tests/Fixtures/fonts; HarfBuzz is given the same font as TrueType.
+# The fonts are the subsets in tests/PdfPecker.Tests/Fixtures/fonts, WOFF2 or else TrueType; HarfBuzz is given each
+# font as TrueType.
 # Each output line is the font, the text (as in the corpus) and the glyphs: glyph id, then the advance and the x and
 # y offsets in font units.
 import io, os, re, sys
@@ -22,7 +23,8 @@ def text_of(field):
 cache = {}
 def font_of(name):
     if name not in cache:
-        tt = TTFont(os.path.join(fonts, name + ".woff2"))
+        path = os.path.join(fonts, name + ".woff2")
+        tt = TTFont(path if os.path.exists(path) else os.path.join(fonts, name + ".ttf"))
         tt.flavor = None
         data = io.BytesIO()
         tt.save(data)

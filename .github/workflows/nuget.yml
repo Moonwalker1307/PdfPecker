@@ -100,6 +100,16 @@ jobs:
       - run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
       - run: dotnet test -c Release --no-build
 
+      # The command-line tool, the website and the Native AOT library of the Python, Node and Rust packages run with
+      # invariant globalization, where .NET has no ICU and string.Normalize changes nothing. Shaping, hyphenation and
+      # AES-256 passwords use the library's own normalization instead, so their tests run once more without ICU.
+      - name: Test text normalization without ICU
+        env:
+          DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: true
+        run: >-
+          dotnet test tests/PdfPecker.Tests -c Release --no-build
+          --filter "FullyQualifiedName~UnicodeNormalizationTests|FullyQualifiedName~HarfBuzzShapingTests|FullyQualifiedName~BidiAndShapingTests|FullyQualifiedName~HyphenationTests|FullyQualifiedName~ProtectorTests|FullyQualifiedName~SecurityAndArchiveTests"
+
       # PdfPecker.Fluent, PdfPecker.Testing and PdfPecker.Razor are released with every PdfPecker release, with the same
       # version, and depend on that version.
       - run: dotnet pack src/PdfPecker -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts

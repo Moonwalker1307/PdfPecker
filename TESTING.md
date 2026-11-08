@@ -74,6 +74,16 @@ the spec text, which is CC-BY-SA.
 `HarfBuzzShapingTests` compare PdfPecker's Arabic, Hebrew, Indic, Thai and Lao shaping with HarfBuzz's output in
 `Fixtures/shaping/harfbuzz.txt`, which `tools/ShapingReference/generate.py` regenerates from `corpus.txt`.
 
+## Unicode normalization
+
+Shaping, hyphenation and AES-256 passwords normalize text with the library's own tables (`Text/UnicodeNormalization.cs`),
+not `string.Normalize`, which needs ICU and does nothing with invariant globalization. `UnicodeNormalizationTests`
+compare it with the host's normalization across the Basic Multilingual Plane and run Unicode's `NormalizationTest.txt`
+for the version the tables come from, downloaded once into the temp folder like the CommonMark spec (or read from
+`PDFPECKER_NORMALIZATION_TEST`; skipped offline). `nuget.yml` runs the normalization, shaping, hyphenation and
+encryption tests a second time with `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=true`, as the command-line tool and the
+Native AOT packages run.
+
 ## PDF/A and PDF/UA conformance
 
 `.github/workflows/conformance.yml` generates samples with `tools/ConformanceSamples` and validates them with veraPDF
