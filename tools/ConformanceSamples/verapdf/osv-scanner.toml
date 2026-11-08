@@ -1,0 +1,29 @@
+# Advisories the daily vulnerability scan leaves out, for the veraPDF validator only. They are in veraPDF's own parser
+# and validation model 1.28.2 and fixed in 1.30.2, but no release of org.verapdf.apps:greenfield-apps uses 1.30 yet,
+# so there is nothing to update to. The validator runs only in the conformance workflow on PdfPecker's own sample
+# PDFs, and nothing here ships. Each entry expires, so the scan reports it again if veraPDF still has no fix by then.
+
+[[IgnoredVulns]]
+id = "GHSA-7c26-995w-6f47"
+ignoreUntil = 2027-01-07
+reason = "Fixed in veraPDF 1.30.2, which no greenfield-apps release uses yet; CI-only validator of our own PDFs."
+
+[[IgnoredVulns]]
+id = "GHSA-jrmc-qg6p-94fp"
+ignoreUntil = 2027-01-07
+reason = "Fixed in veraPDF 1.30.2, which no greenfield-apps release uses yet; CI-only validator of our own PDFs."
+
+[[IgnoredVulns]]
+id = "GHSA-36mm-w85j-3q2j"
+ignoreUntil = 2027-01-07
+reason = "Fixed in veraPDF 1.30.2, which no greenfield-apps release uses yet; CI-only validator of our own PDFs."
+
+[[IgnoredVulns]]
+id = "GHSA-3jh7-wm29-q568"
+ignoreUntil = 2027-01-07
+reason = "Fixed in veraPDF 1.30.2, which no greenfield-apps release uses yet; CI-only validator of our own PDFs."
+
+[[IgnoredVulns]]
+id = "GHSA-cg9x-g3gm-h5h6"
+ignoreUntil = 2027-01-07
+reason = "Fixed in veraPDF 1.30.2, which no greenfield-apps release uses yet; CI-only validator of our own PDFs."
