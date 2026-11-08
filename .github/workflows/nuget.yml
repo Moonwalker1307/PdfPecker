@@ -313,6 +313,7 @@ jobs:
         run: |
           cp tool-packages/*.nupkg tool-feed/
           dotnet tool install PdfPecker.Cli --tool-path tool-check --add-source tool-feed --version "$VERSION"
+          ls -la tool-check
           echo '<h1>Tool check</h1>' | ./tool-check/pdfpecker convert - tool-check/check.pdf
           ./tool-check/pdfpecker text tool-check/check.pdf | grep -q 'Tool check'
           # The command must come from this platform's native package, not from the framework-dependent fallback.
