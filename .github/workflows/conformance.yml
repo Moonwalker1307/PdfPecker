@@ -57,7 +57,7 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # The veraPDF version is pinned in the pom (org.verapdf.apps:greenfield-apps), and the jars come from Maven Central.
+      # The veraPDF version is pinned in the pom (org.verapdf.apps:cli), and the jars come from Maven Central.
       - name: Fetch veraPDF
         run: >
           mvn -B -q -f tools/ConformanceSamples/verapdf/pom.xml dependency:copy-dependencies
