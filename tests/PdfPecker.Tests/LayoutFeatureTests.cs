@@ -268,6 +268,95 @@ public class LayoutFeatureTests
         Near(width, Box(ops, "#0000ff").W);
     }
 
+    [Theory]
+    [InlineData("flex:0 1 50%", 180, 90)]
+    [InlineData("flex:0 0 50%; width:100pt", 100, 60)]
+    [InlineData("flex:0 0 50%; max-width:70pt", 70, 60)]
+    [InlineData("flex:0 0 50%; min-width:150pt", 180, 150)]
+    public void A_percentage_flex_basis_counts_as_the_content_in_its_containers_width(string item, float width, float itemWidth)
+    {
+        // Measured for its own width, a flex container has no width for a percentage flex-basis to resolve against, so
+        // the item contributes its width or content within its min and max widths, as in Chrome. Laid out, the basis
+        // then takes its share of that width, no less than the item's automatic minimum of one 60-point word.
+        string content = string.Join(" ", Enumerable.Repeat("<span style='display:inline-block; width:60pt; height:10pt'></span>", 3));
+        var ops = Layout($"""
+            <div style="float:left; font-size:0; background:#0000ff">
+              <div style="display:flex"><div style="background:#ff0000; {item}">{content}</div></div>
+            </div>
+            """);
+        Near(width, Box(ops, "#0000ff").W);
+        Near(itemWidth, Box(ops, "#ff0000").W);
+    }
+
+    [Theory]
+    [InlineData("grid-template-rows:1fr 2fr", 30, 30, 30, 60)]
+    [InlineData("grid-template-rows:1fr 1fr", 20, 50, 50, 50)]
+    [InlineData("grid-template-rows:auto 1fr", 20, 30, 20, 30)]
+    [InlineData("grid-template-rows:minmax(50pt, 1fr) 1fr", 10, 10, 50, 50)]
+    [InlineData("grid-template-rows:minmax(auto, 1fr) 3fr", 30, 30, 30, 90)]
+    [InlineData("grid-template-rows:1fr 3fr; row-gap:10pt", 30, 30, 30, 90)]
+    [InlineData("grid-auto-rows:1fr", 20, 50, 50, 50)]
+    [InlineData("grid-template-rows:1fr 2fr; height:120pt", 10, 10, 40, 80)]
+    [InlineData("grid-template-rows:0.5fr 0.5fr", 10, 40, 10, 40)]
+    public void Flexible_rows_of_a_grid_of_indefinite_height_share_the_size_of_one_fr(string grid, float first, float second, float firstRow, float secondRow)
+    {
+        // Without a height, 1fr is the largest content height per fr of the flexible rows (CSS Grid §12.7.1), so 1fr 2fr
+        // rows come out 1:2 and 1fr 1fr rows equal, as in Chrome, and a fixed minimum still counts. Rows of less than
+        // 1fr keep their content heights, which matches Chrome in this case.
+        var ops = Layout($"""
+            <div style="display:grid; width:200pt; {grid}">
+              <div style="background:#ff0000"><div style="height:{first}pt"></div></div>
+              <div style="background:#00ff00"><div style="height:{second}pt"></div></div>
+            </div>
+            """);
+        var a = Box(ops, "#ff0000");
+        var b = Box(ops, "#00ff00");
+        Near(firstRow, a.H);
+        Near(secondRow, b.H);
+        Near(b.Y - a.Y - a.H, grid.Contains("row-gap", StringComparison.Ordinal) ? 10 : 0);
+    }
+
+    [Theory]
+    [InlineData("1fr 2fr; min-height:300pt", "", 100, 200, 0)]
+    [InlineData("auto 1fr auto; min-height:200pt", "<div style='height:20pt; background:#0000ff'></div>", 20, 160, 20)]
+    [InlineData("1fr 1fr; min-height:100pt; padding:10pt; box-sizing:border-box", "", 40, 40, 0)]
+    [InlineData("1fr 2fr; min-height:30pt", "", 20, 40, 0)]
+    public void Flexible_rows_fill_the_min_height_of_a_grid_of_indefinite_height(string rows, string third, float firstRow, float secondRow, float thirdRow)
+    {
+        // The fr rows share what a min-height leaves (CSS Grid §12.7.1), as in Chrome, rather than every auto-sized
+        // row growing alike; a min-height the rows already exceed changes nothing.
+        var ops = Layout($"""
+            <div style="display:grid; width:200pt; grid-template-rows:{rows}">
+              <div style="background:#ff0000"><div style="height:20pt"></div></div>
+              <div style="background:#00ff00"><div style="height:20pt"></div></div>
+              {third}
+            </div>
+            """);
+        Near(firstRow, Box(ops, "#ff0000").H);
+        Near(secondRow, Box(ops, "#00ff00").H);
+        if (thirdRow > 0) Near(firstRow + secondRow, Box(ops, "#0000ff").Y - Box(ops, "#ff0000").Y);
+    }
+
+    [Theory]
+    [InlineData("grid-template-rows:1fr 2fr", 1, 30, 60)]
+    [InlineData("grid-template-rows:1fr 2fr", 50, 50, 100)]
+    [InlineData("grid-template-rows:auto 1fr", 10, 10, 80)]
+    [InlineData("grid-template-rows:1fr 2fr; height:60pt", 1, 20, 40)]
+    public void An_item_spanning_flexible_rows_shares_its_height_by_their_fr(string grid, float first, float firstRow, float secondRow)
+    {
+        // An item that spans fr rows has no automatic minimum (CSS Grid §6.6): its height goes to the rows by their fr
+        // once the other items are placed (§12.7.1), as in Chrome, rather than growing every row alike.
+        var ops = Layout($"""
+            <div style="display:grid; width:200pt; grid-template-columns:1fr 1fr; {grid}">
+              <div style="grid-row:span 2"><div style="height:90pt"></div></div>
+              <div style="background:#ff0000"><div style="height:{first}pt"></div></div>
+              <div style="background:#00ff00"><div style="height:1pt"></div></div>
+            </div>
+            """);
+        Near(firstRow, Box(ops, "#ff0000").H);
+        Near(secondRow, Box(ops, "#00ff00").H);
+    }
+
     [Fact]
     public void Wrapping_column_flex_box_starts_a_new_column_when_full()
     {

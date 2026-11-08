@@ -349,9 +349,12 @@ internal sealed partial class LayoutEngine
     /// <summary>
     /// Sizes tracks from item contributions (§11.5 simplified): fixed sizes, intrinsic sizes from single-span items, extra
     /// space for spanning items, maximisation up to the growth limits, then fr tracks share what is left.
+    /// <paramref name="minimums"/> holds the items' minimum contributions and <paramref name="flexMinimums"/> those of
+    /// items that span a flexible track; without them, items give their min-content sizes.
     /// </summary>
     private static void SizeTracks(GridTrack[] tracks, float avail, bool definite, float gap,
-        List<(int Start, int Span, float Min, float Max)> contributions, bool stretchAuto, List<float>? minimums = null)
+        List<(int Start, int Span, float Min, float Max)> contributions, bool stretchAuto, List<float>? minimums = null,
+        List<float>? flexMinimums = null)
     {
         int n = tracks.Length;
         foreach (var t in tracks)
@@ -412,12 +415,19 @@ internal sealed partial class LayoutEngine
             if (t.Limit < t.Base) t.Limit = t.Base;
         }
 
-        // Spanning items: grow intrinsic tracks they cross so that the item fits.
+        // Spanning items: grow intrinsic tracks they cross so that the item fits. Given their minimum contributions,
+        // items that cross a flexible track come after the others, and grow only the flexible tracks.
+        List<int>? flexibleSpans = null;
         for (int c = 0; c < contributions.Count; c++)
         {
             var (start, span, min, max) = contributions[c];
             if (span <= 1 || start >= n) continue;
             int end = Math.Min(n, start + span);
+            if (flexMinimums != null && CrossesFlexibleTrack(tracks, start, end))
+            {
+                (flexibleSpans ??= new List<int>()).Add(c);
+                continue;
+            }
             float current = gap * (end - start - 1), currentLimit = current;
             var growable = new List<GridTrack>();
             for (int i = start; i < end; i++)
@@ -437,6 +447,8 @@ internal sealed partial class LayoutEngine
                 foreach (var t in growable) if (!t.IsFlexible) t.Limit += (max - currentLimit) / growable.Count;
             foreach (var t in growable) if (t.Limit < t.Base) t.Limit = t.Base;
         }
+        if (flexibleSpans != null)
+            foreach (int c in flexibleSpans) FitFlexibleSpan(tracks, gap, contributions[c], flexMinimums?[c]);
 
         if (!definite)
         {
@@ -504,6 +516,47 @@ internal sealed partial class LayoutEngine
         {
             var autos = tracks.Where(t => !t.Collapsed && t.Def.Max.Kind == TrackSizeKind.Auto).ToList();
             if (autos.Count > 0) foreach (var t in autos) t.Base += free / autos.Count;
+        }
+    }
+
+    /// <summary>Whether any of the tracks from <paramref name="start"/> up to <paramref name="end"/> is flexible.</summary>
+    private static bool CrossesFlexibleTrack(GridTrack[] tracks, int start, int end)
+    {
+        for (int i = start; i < end; i++)
+            if (tracks[i].IsFlexible && !tracks[i].Collapsed) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Grows the flexible tracks that a spanning item crosses until the item's minimum contribution fits, in proportion
+    /// to their fr when these add up to 1 or more and equally otherwise (CSS Grid §11.5, step 4). Such an item has no
+    /// automatic minimum (§6.6), so where <paramref name="flexMinimum"/> is known it is only the item's own min-width or
+    /// min-height, and an item without one leaves the tracks to the fr step, as in Chrome. A min-content or max-content
+    /// minimum takes the item's min-content contribution.
+    /// </summary>
+    private static void FitFlexibleSpan(GridTrack[] tracks, float gap, (int Start, int Span, float Min, float Max) item, float? flexMinimum)
+    {
+        int end = Math.Min(tracks.Length, item.Start + item.Span);
+        float current = gap * (end - item.Start - 1), factors = 0;
+        int count = 0;
+        bool contentMinimum = false;
+        for (int i = item.Start; i < end; i++)
+        {
+            var t = tracks[i];
+            current += t.Collapsed ? 0 : t.Base;
+            if (!t.IsFlexible || t.Collapsed || !t.Def.Min.IsIntrinsic) continue;
+            factors += t.Def.Max.Value;
+            count++;
+            contentMinimum |= t.Def.Min.Kind is TrackSizeKind.MinContent or TrackSizeKind.MaxContent;
+        }
+        float need = contentMinimum || flexMinimum is not { } own ? item.Min : own;
+        if (count == 0 || need <= current) return;
+        for (int i = item.Start; i < end; i++)
+        {
+            var t = tracks[i];
+            if (!t.IsFlexible || t.Collapsed || !t.Def.Min.IsIntrinsic) continue;
+            t.Base += (need - current) * (factors >= 1 ? t.Def.Max.Value / factors : 1f / count);
+            if (t.Limit < t.Base) t.Limit = t.Base;
         }
     }
 
@@ -580,7 +633,7 @@ internal sealed partial class LayoutEngine
         }
         else
         {
-            var rowContrib = SizeGridRows(ref g, rowDefs, out float rowsTotal);
+            var rowContrib = SizeGridRows(ref g, rowDefs, minH, out float rowsTotal);
             if (g.MeasuringRows)
             {
                 // The parent sizes the rows and lays the subgrid out again at them; the boxes wait for that pass.
@@ -768,34 +821,69 @@ internal sealed partial class LayoutEngine
     /// Sizes the rows from the items' heights; a row subgrid is measured with auto rows and reports the heights to its
     /// parent. Returns the rows' contributions, and their total height with the gaps.
     /// </summary>
-    private List<(int, int, float, float)> SizeGridRows(ref GridPass g, List<Track> rowDefs, out float rowsTotal)
+    private List<(int, int, float, float)> SizeGridRows(ref GridPass g, List<Track> rowDefs, float minH, out float rowsTotal)
     {
         var items = g.Items;
         int rowCount = g.RowCount;
         float rowGap = g.RowGap;
         var rows = g.Rows = g.MeasuringRows ? MakeTracks(new List<Track>(), null, rowCount) : MakeTracks(rowDefs, g.S.GridAutoRows, rowCount);
         var rowContrib = new List<(int, int, float, float)>(items.Count);
+        var flexMinimums = new List<float>(items.Count);
         foreach (var it in items)
         {
             if (g.HasSubgrids && IsSubgrid(it, columns: false) && _subgrids[it.El!].Rows is { Contributions: { } subRows } axis)
             {
                 float subGap = it.Style.RowGap == null ? rowGap : GapOf(it.Style.RowGap, 0);
+                int mapped = rowContrib.Count;
                 MapSubgridContributions(subRows, rowContrib, it.Row, axis.Count, SubgridInset(it, false, true, g.W), SubgridInset(it, false, false, g.W), (subGap - rowGap) / 2);
+                for (int k = mapped; k < rowContrib.Count; k++) flexMinimums.Add(rowContrib[k].Item3);
                 continue;
             }
             rowContrib.Add((it.Row, it.RowSpan, it.Box!.Height, it.Box.Height));
+            flexMinimums.Add(it.El == null ? 0 : FlexibleSpanMinimum(it, it.Style.MinHeight, VerticalFrame(it.Style, 0)) + it.Mt + it.Mb);
         }
         bool rowsDefinite = g.DefiniteH.HasValue && !g.MeasuringRows;
-        foreach (var r in rows)
+        if (rowsDefinite)
+            SizeTracks(rows, g.DefiniteH!.Value, definite: true, rowGap, rowContrib, stretchAuto: false, flexMinimums: flexMinimums);
+        else if (!FlexibleRowsOfIndefiniteHeight(rows, rowGap, rowContrib, flexMinimums, minH))
         {
-            // fr rows only flex when the height is known; otherwise they size to their content.
-            if (!rowsDefinite && r.IsFlexible) r.Def = AutoTrack;
+            // Rows of less than 1fr size to their content, as they did before. Chrome sizes them in no way that follows
+            // the specification or another rule we could find, and their content sizes match it as often as the rule does.
+            foreach (var r in rows)
+                if (r.IsFlexible) r.Def = AutoTrack;
+            SizeTracks(rows, 0, definite: false, rowGap, rowContrib, stretchAuto: false);
         }
-        SizeTracks(rows, g.DefiniteH ?? 0, rowsDefinite, rowGap, rowContrib, stretchAuto: false);
 
         rowsTotal = rowGap * Math.Max(0, rowCount - 1);
         foreach (var r in rows) rowsTotal += r.Base;
         return rowContrib;
+    }
+
+    /// <summary>
+    /// Sizes rows that include fr rows in a grid of indefinite height (CSS Grid §12.7.1): each fr row is its content's
+    /// height divided by its fr at the most, and the largest of these, or of what an item spanning fr rows needs, is
+    /// the size of 1fr. So 1fr 2fr rows come out 1:2, as in Chrome. When that leaves the grid shorter than its
+    /// <paramref name="minH"/>, the fr rows share the min-height instead. Returns false, sizing nothing, when a row has
+    /// less than 1fr.
+    /// </summary>
+    private static bool FlexibleRowsOfIndefiniteHeight(GridTrack[] rows, float rowGap, List<(int, int, float, float)> rowContrib,
+        List<float> flexMinimums, float minH)
+    {
+        bool flexible = false;
+        foreach (var r in rows)
+        {
+            if (!r.IsFlexible) continue;
+            if (r.Def.Max.Value < 1) return false;
+            flexible = true;
+        }
+        if (!flexible) return false;
+        SizeTracks(rows, 0, definite: false, rowGap, rowContrib, stretchAuto: false, flexMinimums: flexMinimums);
+        ShareFlexibleTracks(rows, rowGap, rowContrib);
+        float total = rowGap * Math.Max(0, rows.Length - 1);
+        foreach (var r in rows) total += r.Base;
+        if (minH > total + Eps)
+            SizeTracks(rows, minH, definite: true, rowGap, rowContrib, stretchAuto: false, flexMinimums: flexMinimums);
+        return true;
     }
 
     /// <summary>Grows the auto rows to the container's height, or distributes the free space with align-content.</summary>
