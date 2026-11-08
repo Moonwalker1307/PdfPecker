@@ -42,11 +42,13 @@ internal static class SignatureScanner
         // Fields that share one signature dictionary are one signature: verifying it again would only repeat the work.
         var signatures = new HashSet<PdfDict>(ReferenceEqualityComparer.Instance);
         long nameChars = 0;
-        var stack = new Stack<(PdfObject Field, string Prefix, string? InheritedType, int Depth)>();
-        for (int i = fields.Count - 1; i >= 0; i--) stack.Push((fields[i], "", null, 0));
+        // Each field travels with the number of the object it is written in (-1 when not known), which an encrypted file
+        // decrypts its strings with.
+        var stack = new Stack<(PdfObject Field, string Prefix, string? InheritedType, int Depth, int Container)>();
+        for (int i = fields.Count - 1; i >= 0; i--) stack.Push((fields[i], "", null, 0, fields[i] is PdfRef r ? r.Num : -1));
         while (stack.Count > 0 && seen.Count < MaxFields && result.Count < MaxSignatures)
         {
-            var (o, prefix, inherited, depth) = stack.Pop();
+            var (o, prefix, inherited, depth, container) = stack.Pop();
             if (depth > 32 || file.Resolve(o) is not PdfDict field || !seen.Add(field)) continue;
             string name = prefix;
             if (file.Resolve(field["T"]) is PdfString t)
@@ -61,7 +63,7 @@ internal static class SignatureScanner
             {
                 if (signatures.Add(sig))
                 {
-                    var found = Locate(file, sig, name);
+                    var found = Locate(file, sig, name, field["V"] is PdfRef v ? v.Num : container);
                     found.Field = o;
                     found.Value = field["V"];
                     result.Add(found);
@@ -69,7 +71,7 @@ internal static class SignatureScanner
                 continue;
             }
             if (file.GetArray(field, "Kids") is { } kids)
-                for (int i = kids.Count - 1; i >= 0; i--) stack.Push((kids[i], name, type, depth + 1));
+                for (int i = kids.Count - 1; i >= 0; i--) stack.Push((kids[i], name, type, depth + 1, kids[i] is PdfRef k ? k.Num : container));
         }
         // Oldest first: the order in which the signatures were applied.
         result.Sort((a, b) => End(a).CompareTo(End(b)));
@@ -78,7 +80,7 @@ internal static class SignatureScanner
 
     private static long End(FoundSignature s) => s.ByteRange.Length == 4 ? s.ByteRange[2] + s.ByteRange[3] : long.MaxValue;
 
-    private static FoundSignature Locate(PdfFile file, PdfDict sig, string name)
+    private static FoundSignature Locate(PdfFile file, PdfDict sig, string name, int container)
     {
         var found = new FoundSignature { FieldName = name, Dict = sig, SubFilter = file.GetName(sig, "SubFilter") };
         var range = file.GetArray(sig, "ByteRange");
@@ -99,9 +101,10 @@ internal static class SignatureScanner
         found.Contents = hex;
 
         // The gap must be this dictionary's own /Contents. A byte range that skips some other string would let a signature
-        // from elsewhere vouch for this one. Encrypted files store /Contents unencrypted, which the parser cannot
-        // compare, so there the gap only has to be a hex string.
-        if (file.Decryptor == null && (file.Resolve(sig["Contents"]) is not PdfString c || !c.Bytes.AsSpan().SequenceEqual(hex))) return found;
+        // from elsewhere vouch for this one. Encrypted files store /Contents unencrypted, but the parser decrypted it with
+        // the other strings of its object, so there the gap is read the same way before the two are compared.
+        var expected = file.Decryptor == null ? hex : container < 0 ? null : file.StringAsReadFrom(container, hex);
+        if (expected == null || file.Resolve(sig["Contents"]) is not PdfString c || !c.Bytes.AsSpan().SequenceEqual(expected)) return found;
         found.ByteRangeValid = true;
         return found;
     }
