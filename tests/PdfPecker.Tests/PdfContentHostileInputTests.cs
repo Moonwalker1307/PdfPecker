@@ -208,6 +208,48 @@ public class PdfContentHostileInputTests
         Assert.Null(map.ToUnicode(1));
     }
 
+    [Fact]
+    public void ToUnicode_map_with_many_full_ranges_stops_at_its_budget()
+    {
+        // Each bfrange is bounded to 65,536 codes, but 40,000 of them, a few kilobytes once compressed, asked for 2.6
+        // billion mappings: text extraction ran for minutes and filled memory. The whole map now has a budget.
+        var cmap = new StringBuilder("begincmap 1 begincodespacerange <0000> <FFFF> endcodespacerange\n1 beginbfchar <0001> <0048> <0002> <0069> endbfchar\n");
+        for (int i = 0; i < 40_000; i++)
+        {
+            if (i % 100 == 0) cmap.Append("100 beginbfrange\n");
+            cmap.Append(CultureInfo.InvariantCulture, $"<{i + 1:X4}0000> <{i + 1:X4}FFFF> <0041>\n");
+            if (i % 100 == 99) cmap.Append("endbfrange\n");
+        }
+        cmap.Append("endcmap");
+        var compressed = new MemoryStream();
+        using (var z = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true)) z.Write(Encoding.Latin1.GetBytes(cmap.ToString()));
+        var data = Encoding.Latin1.GetString(compressed.ToArray());
+        var pdf = Page("<< /Font << /F1 5 0 R >> >>", "BT /F1 12 Tf 10 10 Td (\x01\x02) Tj ET", new[]
+        {
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>",
+            $"<< /Length {data.Length} /Filter /FlateDecode >>\nstream\n{data}\nendstream",
+        });
+        Assert.Contains("Hi", Bounded(() => PdfText.Extract(pdf)), StringComparison.Ordinal);
+        ReadsEverywhere(pdf);
+
+        // The mappings read before the budget ran out are kept, and nothing after it is mapped.
+        var map = Bounded(() => CMap.Parse(Encoding.Latin1.GetBytes(cmap.ToString())))!;
+        Assert.Equal("H", map.ToUnicode(1));
+        Assert.Equal("A", map.ToUnicode(0x0001_0000));
+        Assert.Equal("B", map.ToUnicode(0x0001_0001));
+        Assert.Null(map.ToUnicode(0x9C40_0000));
+    }
+
+    [Fact]
+    public void ToUnicode_map_with_long_destination_strings_stops_at_its_budget()
+    {
+        // A range of 65,536 codes whose destination is a 32 KB string asked for 4 GB of text.
+        var cmap = $"begincmap 1 beginbfrange <0000> <FFFF> <{Repeat("0041", 16_384)}> endbfrange 1 beginbfchar <0001> <0042> endbfchar endcmap";
+        var map = Bounded(() => CMap.Parse(Encoding.Latin1.GetBytes(cmap)))!;
+        Assert.Equal(16_384, map.ToUnicode(0)!.Length);
+        Assert.Null(map.ToUnicode(0xFFFF));
+    }
+
     [Theory]
     [InlineData("/W 2147483640 /H 8 /BPC 1 /CS /G")]
     [InlineData("/W 2147483647 /H 2147483647 /BPC 16 /CS /CMYK")]

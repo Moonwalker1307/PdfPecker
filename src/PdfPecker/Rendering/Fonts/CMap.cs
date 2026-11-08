@@ -17,10 +17,20 @@ internal sealed class CMap
     /// <summary>A bfrange longer than this is read as its first code only, so a damaged range cannot fill memory.</summary>
     private const uint MaxBfRangeLength = 65535;
 
+    /// <summary>
+    /// The Unicode mappings one CMap may write in all. Each bfrange is bounded on its own, but many of them would still
+    /// fill memory; a font has at most 65,535 glyphs, and a CJK font maps a few tens of thousands of codes.
+    /// </summary>
+    private const int MaxUnicodeEntries = 1 << 18;
+
+    /// <summary>The UTF-16 units those mappings may hold in all, so that long destination strings cannot fill memory either.</summary>
+    private const int MaxUnicodeChars = 1 << 20;
+
     private readonly List<CodespaceRange> _codespace = new();
     private readonly Dictionary<uint, int> _single = new();
     private readonly List<CidRange> _ranges = new();
     private readonly Dictionary<uint, string> _unicode = new();
+    private int _unicodeEntries, _unicodeChars;
 
     private readonly record struct CodespaceRange(int Bytes, uint Low, uint High);
 
@@ -254,12 +264,15 @@ internal sealed class CMap
             var destination = lexer.Next();
             if (IsString(destination))
             {
+                if (!Reserve(Utf16Length(lexer.StringValue!))) return;
                 _unicode[Code(source)] = Utf16(lexer.StringValue!);
             }
             else if (destination == TokenKind.Name)
             {
                 int u = Encodings.NameToUnicode(lexer.NameValue);
-                if (u >= 0) _unicode[Code(source)] = char.ConvertFromUtf32(u);
+                if (u < 0) continue;
+                if (!Reserve(2)) return;
+                _unicode[Code(source)] = char.ConvertFromUtf32(u);
             }
             else break;
         }
@@ -285,8 +298,10 @@ internal sealed class CMap
             if (IsString(destination))
             {
                 var text = (byte[])lexer.StringValue!.Clone();
+                int length = Utf16Length(text);
                 for (uint i = 0; i < count; i++)
                 {
+                    if (!Reserve(length)) return;
                     _unicode[l + i] = Utf16(text);
                     Increment(text);
                 }
@@ -298,11 +313,23 @@ internal sealed class CMap
                 {
                     var item = lexer.Next();
                     if (item is TokenKind.ArrayEnd or TokenKind.Eof) break;
-                    if (IsString(item) && i < count) _unicode[l + i++] = Utf16(lexer.StringValue!);
+                    if (!IsString(item) || i >= count) continue;
+                    if (!Reserve(Utf16Length(lexer.StringValue!))) return;
+                    _unicode[l + i++] = Utf16(lexer.StringValue!);
                 }
             }
             else break;
         }
+    }
+
+    // Counts a mapping of the given length against the budget before it is made; false once the budget is spent, which
+    // ends the section, and the mappings read so far are kept. Overwritten codes count too, so the work is bounded as well.
+    private bool Reserve(int length)
+    {
+        if (_unicodeEntries >= MaxUnicodeEntries || length > MaxUnicodeChars - _unicodeChars) return false;
+        _unicodeEntries++;
+        _unicodeChars += length;
+        return true;
     }
 
     // Adds one to the string as a big-endian number, carrying into the earlier bytes; an overflow past the first
@@ -314,6 +341,8 @@ internal sealed class CMap
             if (++text[i] != 0) return;
         }
     }
+
+    private static int Utf16Length(byte[] b) => b.Length == 1 ? 1 : b.Length / 2;
 
     private static string Utf16(byte[] b)
     {
