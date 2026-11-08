@@ -245,6 +245,18 @@ public class FontTests
     }
 
     [Fact]
+    public void DeferredFacesOfOneArrayShareTheirFont()
+    {
+        int reads = 0;
+        var options = new PdfOptions { Compress = false };
+        var file = new Lazy<byte[]>(() => { reads++; return Regular; });
+        options.Fonts.AddDeferred("First name", () => file.Value).AddDeferred("Second name", () => file.Value);
+        var text = Latin1(ConvertUncompressed("<p style='font-family: \"First name\"'>One</p><p style='font-family: \"Second name\"'>Two</p>", options));
+        Assert.Equal(1, reads);
+        Assert.Single(Regex.Matches(text, "/FontFile2"));
+    }
+
+    [Fact]
     public void DeferredFontThatCannotBeReadIsLeftOut()
     {
         var options = new PdfOptions { Compress = false };

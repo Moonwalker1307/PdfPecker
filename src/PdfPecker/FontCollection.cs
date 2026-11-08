@@ -17,6 +17,8 @@ public sealed class FontCollection
     private readonly object _lock = new();
     private readonly List<FontFace> _faces = new();
     private volatile Snapshot? _snapshot;
+    // The fonts parsed from each array a deferred face's loader returned, so that faces sharing a file share its fonts.
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], List<FontProgram>> _deferredFiles = new();
 
     /// <summary>Number of font faces registered.</summary>
     public int Count
@@ -104,7 +106,8 @@ public sealed class FontCollection
     /// <param name="familyName">The family name that CSS <c>font-family</c> refers to.</param>
     /// <param name="fontData">
     /// Returns the font file (.ttf, .otf, .ttc, WOFF or WOFF2). It is called at most once for the face, by the first
-    /// conversion that needs it, and may return the same array for several faces of one collection file. When it throws
+    /// conversion that needs it. Faces whose loaders return the same array share the fonts parsed from it, so a
+    /// collection file registered face by face, or a face registered under two names, is parsed and embedded once. When it throws
     /// an <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/>, or returns data that is not a font,
     /// the face is left out as if it had not been registered.
     /// </param>
@@ -136,7 +139,16 @@ public sealed class FontCollection
         {
             try
             {
-                var programs = FontProgram.Load(fontData() ?? throw new FormatException("The font data is null."));
+                var data = fontData() ?? throw new FormatException("The font data is null.");
+                List<FontProgram> programs;
+                lock (_deferredFiles)
+                {
+                    if (!_deferredFiles.TryGetValue(data, out programs!))
+                    {
+                        programs = FontProgram.Load(data);
+                        _deferredFiles.Add(data, programs);
+                    }
+                }
                 return faceIndex < programs.Count ? programs[faceIndex] : null;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException || FontProgram.IsFormatError(ex))
