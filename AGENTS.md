@@ -254,6 +254,7 @@ are in `BUILD.md` and `TESTING.md`.
   `@layout` and `LayoutView` warn in the caller's project, so the sample's layout is a component with `ChildContent`.
 - The tool's per-platform packages are a .NET 10 SDK feature: .NET 8 and 9 SDKs refuse a package whose settings file
   names platform packages, so only the package's net10.0 folder does, and its net8.0 and net9.0 folders keep the
-  framework-dependent tool. Alpine needs the musl packages: without them the SDK picks `linux-x64`, whose executable
+  framework-dependent tool. SDK 10.0.4xx writes that file to `tools/any/any`, where a .NET 10 SDK would prefer the net9.0
+  folder, so a target in the project moves it to `tools/net10.0/any`. Alpine needs the musl packages: without them the SDK picks `linux-x64`, whose executable
   does not run there. The native tool writes slightly larger PDFs than a Linux distribution's own .NET build, because
   Native AOT links zlib-ng as Microsoft's runtime builds do; the inflated content is identical.
