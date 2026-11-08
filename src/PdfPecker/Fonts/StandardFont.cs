@@ -74,6 +74,13 @@ internal sealed class StandardFont : TextFont
         int total = 0, prev = -1;
         for (int i = start, end = start + length; i < end; i++)
         {
+            // A default ignorable character is not drawn (see PdfDocumentWriter.WriteStandardText), and the letters
+            // around it kern as a pair.
+            if (s[i] > 0xAD && Hidden(s, i, end, out int units))
+            {
+                i += units - 1;
+                continue;
+            }
             int c = WinAnsi.Encode(s[i]);
             total += w[c];
             if (_kerning != null)
@@ -83,6 +90,22 @@ internal sealed class StandardFont : TextFont
             }
         }
         return total;
+    }
+
+    /// <summary>
+    /// Whether the text at <paramref name="i"/> is a default ignorable character, which is never drawn, and how many
+    /// UTF-16 units it takes: the variation selectors of ideographs are surrogate pairs.
+    /// </summary>
+    public static bool Hidden(string s, int i, int end, out int units)
+    {
+        int cp = s[i];
+        units = 1;
+        if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1]))
+        {
+            cp = char.ConvertToUtf32(s[i], s[i + 1]);
+            units = 2;
+        }
+        return IsHidden(cp);
     }
 
     public override bool HasKerning => _kerning != null;
@@ -116,7 +139,7 @@ internal sealed class StandardFont : TextFont
         => _kerning != null && (uint)left < 0x10000 && (uint)right < 0x10000
            && _kerning[WinAnsi.Encode((char)left)] is { } row ? row[WinAnsi.Encode((char)right)] : 0;
 
-    public int CharUnits(char c) => _widths[WinAnsi.Encode(c)];
+    public int CharUnits(char c) => IsHidden(c) ? 0 : _widths[WinAnsi.Encode(c)];
 
-    public override float CharWidth(char c, float size) => _widths[WinAnsi.Encode(c)] * size / 1000f;
+    public override float CharWidth(char c, float size) => CharUnits(c) * size / 1000f;
 }
