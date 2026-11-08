@@ -628,13 +628,18 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Ends the span <see cref="BeginActualText"/> started and goes on showing text.</summary>
     private static void EndActualText(ByteBuffer b, bool array) => b.Ascii(array ? ">] TJ EMC [<" : "> Tj EMC <");
 
-    /// <summary>Horizontal advance of a run, including letter and word spacing.</summary>
+    /// <summary>Horizontal advance of a run, including letter and word spacing, which hidden characters do not get.</summary>
     private static float RunAdvance(TextFont font, TextOp t, int start, int length)
     {
         float w = font.MeasureUnits(t.Text, start, length) * t.Size / 1000f;
         string text = t.Text;
         for (int i = start, end = start + length; i < end; i++)
         {
+            if (text[i] > 0xAD && StandardFont.Hidden(text, i, end, out int units))
+            {
+                i += units - 1;
+                continue;
+            }
             if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) i++;
             w += t.CharSpacing;
             if (text[i] == ' ') w += t.WordSpacing;

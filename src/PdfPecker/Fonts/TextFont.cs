@@ -90,6 +90,32 @@ internal abstract class TextFont
     /// </summary>
     public static bool IsHidden(int cp) => cp > 0xAD && Text.UnicodeTables.IsDefaultIgnorable(cp);
 
+    /// <summary>
+    /// How many characters of the text letter spacing goes after: each code point once, a surrogate pair included,
+    /// and none of the hidden ones (see <see cref="IsHidden"/>), which are not drawn and which Chrome spaces neither.
+    /// </summary>
+    public static int SpacedCharacters(string text, int start, int length)
+    {
+        int count = 0;
+        for (int i = start, end = start + length; i < end; i++)
+        {
+            char c = text[i];
+            if (c <= 0xAD) count++;
+            else if (char.IsHighSurrogate(c) && i + 1 < end && char.IsLowSurrogate(text[i + 1]))
+            {
+                if (!IsHidden(char.ConvertToUtf32(c, text[++i]))) count++;
+            }
+            else if (!IsHidden(c)) count++;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Whether letter spacing goes after a character measured on its own: not after a hidden one, nor after the second
+    /// half of a surrogate pair, whose first half takes it. Plane 14, whose high surrogate is U+DB40, is all hidden.
+    /// </summary>
+    public static bool Spaced(char c) => c <= 0xAD || !(char.IsLowSurrogate(c) || c == '\uDB40' || IsHidden(c));
+
     /// <summary>Splits text into runs that each use one concrete font. Most fonts are a single run.</summary>
     public virtual void Split(string text, List<FontRun> runs) => runs.Add(new FontRun(this, 0, text.Length));
 }

@@ -157,7 +157,7 @@ internal sealed partial class InlineLayout
                 int to = from + 1;
                 while (to < u1 && levels[to] == levels[from]) to++;
                 int offset = from - u0, length = to - from;
-                float w = font.MeasureUnits(it.Source, it.Start + offset, length) * size / 1000f + ls * length;
+                float w = TextWidth(font, it.Source, it.Start + offset, length, size, ls);
                 var piece = it.Slice(offset, length, w);
                 piece.Level = levels[from];
                 // Only the end of the word keeps its break opportunity.

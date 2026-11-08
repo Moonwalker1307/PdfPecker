@@ -677,6 +677,45 @@ public class FontTests
         static int Units(TextFont font, string text) => font.MeasureUnits(text, 0, text.Length);
     }
 
+    [Theory]
+    [InlineData("‍")] // zero width joiner
+    [InlineData("‌")] // zero width non-joiner
+    [InlineData("‎")] // left-to-right mark
+    [InlineData("⁠")] // word joiner
+    [InlineData("﻿")] // byte order mark
+    [InlineData("️")] // emoji presentation selector
+    [InlineData("\U000E0100")] // ideographic variation selector, a surrogate pair
+    [InlineData("‍‍")]
+    public void LetterSpacingSkipsDefaultIgnorableCharacters(string hidden)
+    {
+        // Chrome gives a hidden character no letter spacing, and the drawing shows no glyph for it, so the layout
+        // measures the text as if it were not there: right-aligned text starts where it would without it, and so does
+        // what follows it on the line. The Thai letter, which Work Sans lacks, is drawn in a fallback font after the run.
+        foreach (var (family, after) in new[] { ("serif", ""), ("W", ""), ("W, T", "\u0E01") })
+        {
+            string Html(string text) => "<style>@page{margin:0} body{margin:0} @font-face{font-family:W;src:url(" + DataUri(Regular) + ")}"
+                + "@font-face{font-family:T;src:url(" + DataUri(Font("NotoSansThai-Subset.woff2")) + ")}"
+                + "div{width:400px;font:20px " + family + ";text-align:right;white-space:pre}</style>"
+                + "<div><span style='letter-spacing:10px'>" + text + after + "</span>|</div>";
+            Assert.Equal(TextX(Html("ab")), TextX(Html("a" + hidden + "b")));
+        }
+
+        static string TextX(string html) => string.Join(" ", Regex.Matches(AllContent(ConvertUncompressed(html)), @"1 0 0 1 (-?[\d.]+) -?[\d.]+ Tm")
+            .Select(m => m.Groups[1].Value));
+    }
+
+    [Fact]
+    public void LetterSpacingGoesOnceAfterACharacterOutsideTheBasicPlane()
+    {
+        // A surrogate pair is one character and one glyph, which the drawing spaces once, as Chrome does.
+        string Html(string text) => "<style>@page{margin:0} body{margin:0} @font-face{font-family:W;src:url(" + DataUri(Regular) + ")}"
+            + "div{width:400px;font:20px W;text-align:right}</style><div style='letter-spacing:10px'>" + text + "</div>";
+        float X(string text) => float.Parse(Regex.Match(AllContent(ConvertUncompressed(Html(text))), @"1 0 0 1 (-?[\d.]+) -?[\d.]+ Tm").Groups[1].Value,
+            CultureInfo.InvariantCulture);
+        // U+1D400, which Work Sans lacks, and U+E000, which it lacks too, have the same .notdef width.
+        Assert.Equal(X("ab"), X("a\U0001D400b"), 2);
+    }
+
     [Fact]
     public void ZeroWidthNonJoinerStillPreventsALigature()
     {
