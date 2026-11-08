@@ -112,7 +112,9 @@ page count:
 - `PdfCommandTests` – merge, split, extract, remove, rotate, stamp, compact, linearize, sanitize, encrypt, decrypt,
   sign and verify (with a throwaway self-signed certificate), to-image, to-html, text and info.
 
-`nuget.yml` also installs the packed tool and runs it, and publishes it with Native AOT.
+`nuget.yml` also installs the packed tool with the .NET 8 and 9 SDKs, which take its framework-dependent build, and
+runs it; its `tool-packages` job packs the Native AOT package of each platform on that platform, installs the tool from
+the full set of packages and checks that the native executable runs.
 
 ## PdfPecker.Fluent
 

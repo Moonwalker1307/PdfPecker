@@ -8,7 +8,10 @@ and PdfPecker.Razor, always with the same version. PdfPecker.Fluent, PdfPecker.T
 the PdfPecker package of their own version, as a minimum; PdfPecker.Razor also depends on Microsoft's
 `Microsoft.AspNetCore.Components.Web`, the release of each target framework's .NET version. PdfPecker.Cli is the
 `pdfpecker` dotnet tool: it carries the PdfPecker assembly of its own version inside the package, so it has no
-dependencies.
+dependencies. A .NET 10 SDK installs it from one of nine more packages with the same version, `PdfPecker.Cli.<rid>`: a
+Native AOT executable for each of eight platforms, which `nuget.yml` packs on a runner of that platform, and
+`PdfPecker.Cli.any`, the framework-dependent fallback. The publish job pushes PdfPecker.Cli itself last, after the packages
+it names.
 
 ## Versions
 
@@ -20,7 +23,7 @@ dependencies.
 - PdfPecker.Cli has no public assembly API to validate: its contract is the command line. Before 2.0 a command or option
   is not removed or renamed and the exit codes (0 success, 1 the work failed, 2 a wrong command line) do not change; add a
   new option instead. The `PdfPecker.Cli.Tests` run the commands and the `nuget.yml` build installs the packed tool and
-  runs it, so a package that does not work fails the build.
+  runs it, with the .NET 8 and 9 SDKs and natively on each platform, so a package that does not work fails the build.
 - Local builds pack as `<next patch>-dev` (the `Version` in `Directory.Build.props`, which all five packages share). CI builds of main and pull requests
   are `<next patch>-preview.<run number>`, computed from the latest `v*` tag, so they sort between two releases.
 

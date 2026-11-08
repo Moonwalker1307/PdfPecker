@@ -31,7 +31,7 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 
 | Workflow | When | What |
 | --- | --- | --- |
-| `nuget.yml` | Every PR, pushes to main, published releases | Builds and tests net8.0, net9.0 and net10.0 on Linux and net10.0 on Windows, publishes the samples and the command-line tool with Native AOT, reports coverage (main only) and packs PdfPecker, PdfPecker.Fluent, PdfPecker.Testing, the `PdfPecker.Cli` dotnet tool and PdfPecker.Razor with the same version. On a release it attaches the packages and publishes them to nuget.org. |
+| `nuget.yml` | Every PR, pushes to main, published releases | Builds and tests net8.0, net9.0 and net10.0 on Linux and net10.0 on Windows, publishes the samples with Native AOT, packs the command-line tool's Native AOT package of each platform on a runner of that platform (Linux, Alpine, macOS and Windows, x64 and Arm64) and installs and runs it there, reports coverage (main only) and packs PdfPecker, PdfPecker.Fluent, PdfPecker.Testing, the `PdfPecker.Cli` dotnet tool and PdfPecker.Razor with the same version. On a release it attaches the packages and publishes them to nuget.org. |
 | `dotnet-preview.yml` | Pushes to main, published releases, Mondays | Builds and tests on the latest .NET 11 preview SDK with an extra `net11.0` target. Never blocks: the job is `continue-on-error`, and it packs and publishes nothing. |
 | `conformance.yml` | PRs and pushes touching `src`, `tests` or the samples | veraPDF validation of the PDF/A and PDF/UA samples. |
 | `codeql.yml` | PRs, pushes and a schedule | CodeQL analysis. |
@@ -47,9 +47,9 @@ attach files, and the publish job may request an OIDC token.
 
 Every job that restores packages caches `~/.nuget/packages` through `setup-dotnet`, keyed on the project files and
 `Directory.Build.props`. Package validation makes each restore of `src/PdfPecker` fetch the API baseline release, so
-without the cache every job counted as a download of that release on nuget.org. The build of a published release is
-the exception: it restores from nuget.org without the cache, so the packages it publishes never depend on a cache an
-earlier run saved.
+without the cache every job counted as a download of that release on nuget.org. The builds of a published release are
+the exception: the build job and the command-line tool's per-platform packs restore from nuget.org without the cache,
+so the packages it publishes never depend on a cache an earlier run saved.
 
 Repository settings Dependabot auto-merge relies on: "Allow auto-merge" under Settings → General, and a branch
 ruleset (or branch protection) on `main` that requires the status checks `build`, `windows`, `native-aot` and

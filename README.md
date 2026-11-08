@@ -151,6 +151,10 @@ pdfpecker sign all.pdf signed.pdf --cert me.pfx      # also verify, encrypt, dec
 pdfpecker to-image all.pdf pages --format webp       # also to-html, text, info
 ```
 
+On a .NET 10 SDK the tool installs as a Native AOT executable for Windows, macOS and Linux (x64 and Arm64, glibc and
+musl), so a command starts in milliseconds instead of the third of a second the JIT needs: converting the sample invoice took
+17 ms in all instead of 355 ms on a 4-core Linux VM. Other platforms and .NET 8 and 9 SDKs get the framework-dependent tool, as before.
+
 A call without a command word is read like wkhtmltopdf's, so a script can switch by changing the program name:
 `pdfpecker -s A4 -T 15mm --footer-center "[page] / [topage]" in.html out.pdf`. Page size, orientation, margins, headers and
 footers with their tokens, zoom, style sheets and quiet mode work as they do there; options that exist because

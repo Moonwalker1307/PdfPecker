@@ -108,16 +108,26 @@ jobs:
       - run: dotnet pack src/PdfPecker.Razor -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
       # PdfPecker.Cli is the `pdfpecker` dotnet tool. It carries PdfPecker's assembly inside the package, so it has no
-      # dependencies, and it gets the same version as the other packages.
+      # dependencies, and it gets the same version as the other packages. This job writes the package itself, whose
+      # net10.0 folder names the Native AOT package of each platform, and PdfPecker.Cli.any, the framework-dependent
+      # tool a .NET 10 SDK installs on other platforms; the tool-packages job writes the native ones.
       - run: dotnet pack src/PdfPecker.Cli -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
+      - run: dotnet pack src/PdfPecker.Cli -c Release -r any -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
-      # The packed tool must install and run, which a successful pack does not show: install it from the artifacts
-      # folder into a throwaway tool path and convert a document.
-      - name: Install the tool from the package and use it
+      # .NET 8 and 9 SDKs reject the per-platform layout and install the framework-dependent tool from the package's
+      # folder of their own version instead. A successful pack does not show that, so each of them installs the package
+      # into a throwaway tool path and converts a document; global.json picks the SDK.
+      - name: Install the tool with the .NET 8 and 9 SDKs and use it
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          dotnet tool install PdfPecker.Cli --tool-path tool-check --add-source artifacts --version ${{ steps.version.outputs.version }}
-          echo '<h1>Tool check</h1>' | ./tool-check/pdfpecker convert - tool-check/check.pdf
-          ./tool-check/pdfpecker text tool-check/check.pdf | grep -q 'Tool check'
+          for sdk in 8.0 9.0; do
+            mkdir -p "tool-check-$sdk"
+            echo "{\"sdk\":{\"version\":\"$sdk.100\",\"rollForward\":\"latestFeature\"}}" > "tool-check-$sdk/global.json"
+            (cd "tool-check-$sdk" && dotnet --version && dotnet tool install PdfPecker.Cli --tool-path tool --add-source ../artifacts --version "$VERSION")
+            echo '<h1>Tool check</h1>' | "./tool-check-$sdk/tool/pdfpecker" convert - "tool-check-$sdk/check.pdf"
+            "./tool-check-$sdk/tool/pdfpecker" text "tool-check-$sdk/check.pdf" | grep -q 'Tool check'
+          done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -235,15 +245,6 @@ jobs:
           ./aot-fluent/PdfPecker.Fluent.Sample aot-fluent-output
           test "$(ls aot-fluent-output/*.pdf | wc -l)" -ge 5
 
-      - name: Publish the command-line tool with native AOT
-        run: dotnet publish src/PdfPecker.Cli -c Release -f net10.0 -p:PublishAot=true -p:TreatWarningsAsErrors=true -o aot-cli
-
-      - name: Convert and read a document with the native tool
-        run: |
-          printf '# Native tool\n\nWorks without a runtime.\n' > aot-cli/check.md
-          ./aot-cli/PdfPecker.Cli convert aot-cli/check.md aot-cli/check.pdf
-          ./aot-cli/PdfPecker.Cli text aot-cli/check.pdf | grep -q 'Works without a runtime'
-
       # Warnings stay errors here; the sample's project file lets through only Microsoft.AspNetCore.Components' own.
       - name: Publish the Razor sample with native AOT
         run: dotnet publish samples/PdfPecker.Razor.Sample -c Release -p:PublishAot=true -p:TreatWarningsAsErrors=true -o aot-razor
@@ -254,9 +255,108 @@ jobs:
           test "$(head -c 5 aot-razor-output/invoice.pdf)" = "%PDF-"
           grep -q "Template design &lt;draft &amp; final&gt;" aot-razor-output/invoice.html
 
+  # The pdfpecker tool's Native AOT packages, PdfPecker.Cli.<rid>. Native AOT compiles only for the operating system
+  # it runs on, so each platform packs on its own runner (arm64 on arm64 runners; Alpine's musl ones in the SDK's
+  # Alpine image), then installs the tool from the full set of packages and converts a document with it. osx-x64 is
+  # compiled on the arm64 Mac, which cannot run it.
+  tool-packages:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: linux-x64, os: ubuntu-latest }
+          - { rid: linux-arm64, os: ubuntu-24.04-arm }
+          - { rid: linux-musl-x64, os: ubuntu-latest, alpine: true }
+          - { rid: linux-musl-arm64, os: ubuntu-24.04-arm, alpine: true }
+          - { rid: osx-arm64, os: macos-latest }
+          - { rid: osx-x64, os: macos-latest, cross: true }
+          - { rid: win-x64, os: windows-latest }
+          - { rid: win-arm64, os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        if: ${{ !matrix.alpine }}
+        with:
+          dotnet-version: 10.0.x
+          # These packages are published too, so a release packs them from a fresh restore, as the build job does.
+          cache: ${{ github.event_name != 'release' }}
+          cache-dependency-path: |
+            **/*.csproj
+            Directory.Build.props
+
+      - name: Pack the native tool
+        if: ${{ !matrix.alpine }}
+        run: dotnet pack src/PdfPecker.Cli -c Release -r ${{ matrix.rid }} -p:Version="$VERSION" -o tool-packages
+
+      # JavaScript actions do not run in Alpine job containers, so the pack and the check run in the SDK's Alpine images
+      # directly. A pull from mcr.microsoft.com sometimes times out, so it is tried three times before the job fails.
+      - name: Pull the Alpine SDK images
+        if: ${{ matrix.alpine }}
+        run: |
+          for image in sdk:10.0-alpine-aot sdk:10.0-alpine; do
+            for attempt in 1 2 3; do
+              docker pull -q "mcr.microsoft.com/dotnet/$image" && break
+              if [ "$attempt" = 3 ]; then exit 1; fi
+              sleep 15
+            done
+          done
+
+      - name: Pack the native tool for Alpine
+        if: ${{ matrix.alpine }}
+        run: >
+          docker run --rm -v "$PWD:/src" -w /src -e GITHUB_ACTIONS mcr.microsoft.com/dotnet/sdk:10.0-alpine-aot
+          dotnet pack src/PdfPecker.Cli -c Release -r ${{ matrix.rid }} -p:Version="$VERSION" -o tool-packages
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: ${{ !matrix.cross }}
+        with:
+          name: packages-${{ needs.build.outputs.version }}
+          path: tool-feed
+
+      - name: Install the tool from the packages and use it
+        if: ${{ !matrix.cross && !matrix.alpine }}
+        run: |
+          cp tool-packages/*.nupkg tool-feed/
+          dotnet tool install PdfPecker.Cli --tool-path tool-check --add-source tool-feed --version "$VERSION"
+          # On Windows the SDK starts a native tool through a pdfpecker.cmd shim, which cmd and PowerShell find on their
+          # own but bash only by its full name.
+          pdfpecker=./tool-check/pdfpecker
+          if [ "$RUNNER_OS" = Windows ]; then pdfpecker=./tool-check/pdfpecker.cmd; fi
+          echo '<h1>Tool check</h1>' | "$pdfpecker" convert - tool-check/check.pdf
+          "$pdfpecker" text tool-check/check.pdf | grep -q 'Tool check'
+          # The command must come from this platform's native package, not from the framework-dependent fallback.
+          test -n "$(find tool-check/.store -type d -name 'pdfpecker.cli.${{ matrix.rid }}')"
+
+      - name: Install the tool from the packages on Alpine and use it
+        if: ${{ matrix.alpine }}
+        run: |
+          cp tool-packages/*.nupkg tool-feed/
+          docker run --rm -v "$PWD:/src" -w /src -e VERSION mcr.microsoft.com/dotnet/sdk:10.0-alpine sh -ec '
+            dotnet tool install PdfPecker.Cli --tool-path /tmp/tool --add-source tool-feed --version "$VERSION"
+            echo "<h1>Tool check</h1>" | /tmp/tool/pdfpecker convert - /tmp/check.pdf
+            /tmp/tool/pdfpecker text /tmp/check.pdf | grep -q "Tool check"
+            test -n "$(find /tmp/tool/.store -type d -name pdfpecker.cli.${{ matrix.rid }})"'
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tool-${{ matrix.rid }}-${{ needs.build.outputs.version }}
+          path: tool-packages/*.nupkg
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'release' && 90 || 7 }}
+
   release:
     if: github.event_name == 'release'
-    needs: build
+    needs: [build, tool-packages]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -266,6 +366,12 @@ jobs:
           name: packages-${{ needs.build.outputs.version }}
           path: artifacts
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: tool-*-${{ needs.build.outputs.version }}
+          merge-multiple: true
+          path: artifacts
+
       - name: Attach the packages to the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -273,11 +379,11 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$TAG" artifacts/*.nupkg --clobber
 
-  # Pushes the release packages, PdfPecker, PdfPecker.Fluent, PdfPecker.Testing, PdfPecker.Cli and PdfPecker.Razor, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
+  # Pushes the release packages, PdfPecker, PdfPecker.Fluent, PdfPecker.Testing, PdfPecker.Cli (with its platform packages) and PdfPecker.Razor, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
   # for a short-lived API key, so no long-lived key is stored in the repository. Runs only for published releases.
   publish:
     if: github.event_name == 'release'
-    needs: build
+    needs: [build, tool-packages]
     runs-on: ubuntu-latest
     environment: nuget
     permissions:
@@ -286,6 +392,12 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packages-${{ needs.build.outputs.version }}
+          path: artifacts
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: tool-*-${{ needs.build.outputs.version }}
+          merge-multiple: true
           path: artifacts
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -307,7 +419,18 @@ jobs:
         with:
           user: ${{ vars.NUGET_USER }}
 
+      # PdfPecker.Cli goes last: a .NET 10 SDK that finds it looks for the platform package it names, so those must be
+      # there first.
       - name: Push to nuget.org
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
-        run: dotnet nuget push "artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          tool="artifacts/PdfPecker.Cli.$VERSION.nupkg"
+          test -f "$tool"
+          for package in artifacts/*.nupkg; do
+            if [ "$package" != "$tool" ]; then
+              dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+            fi
+          done
+          dotnet nuget push "$tool" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
