@@ -126,7 +126,7 @@ packages' READMEs and nuget.org pages.
 - `tools/` – generators for checked-in data (see "Change-specific guidance"), the veraPDF conformance samples, the
   HarfBuzz shaping reference and the third-party PDF fixtures.
 - `.github/workflows/` – `nuget.yml`, `dotnet-preview.yml`, `conformance.yml`, `codeql.yml`, `perf.yml`, `fuzz.yml`,
-  `dependabot-auto-merge.yml`; see `CONFIG.md`.
+  `vulnerability-scan.yml`, `dependabot-auto-merge.yml`; see `CONFIG.md`.
 - The user manual at pdfpecker.net/docs is not here: it is generated from `docs/*.md` in the PdfPecker.Web repository.
 
 ## Build and verify
