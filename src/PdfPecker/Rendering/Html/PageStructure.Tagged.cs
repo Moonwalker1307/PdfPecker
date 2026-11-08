@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using System.Text;
+
 namespace PdfPecker.Rendering.Html;
 
 internal static partial class PageStructure
@@ -51,18 +54,56 @@ internal static partial class PageStructure
         reader.Container(tree.Root);
         if (reader.OverBudget) return null;
         int taken = 0, left = 0;
-        var rest = new List<TextGlyph>();
-        // Artifacts that copy the text read at nearly the same place, such as a text shadow, are left out.
-        var read = new HashSet<(string, int, int)>();
-        for (int i = 0; i < glyphs.Count; i++)
+        var all = CollectionsMarshal.AsSpan(glyphs);
+        int readCount = 0, others = 0, artifacts = 0;
+        for (int i = 0; i < all.Length; i++)
         {
-            if (!reader.Taken[i] || string.IsNullOrWhiteSpace(glyphs[i].Text)) continue;
-            taken += glyphs[i].Text.Length;
-            read.Add((glyphs[i].Text, (int)Math.Floor(glyphs[i].X / CopyCell), (int)Math.Floor(glyphs[i].Y / CopyCell)));
+            ref readonly var g = ref all[i];
+            if (string.IsNullOrWhiteSpace(g.Text)) continue;
+            if (reader.Taken[i])
+            {
+                taken += g.Text.Length;
+                readCount++;
+            }
+            else
+            {
+                others++;
+                if (g.Mcid == -2) artifacts++;
+            }
         }
-        for (int i = 0; i < glyphs.Count; i++)
+        var rest = new List<TextGlyph>(others);
+        // Artifacts that copy the text read at nearly the same place, such as a text shadow, are left out. Only the
+        // glyphs read within a cell of an artifact can be what it copies. Where artifacts are few, as running headers
+        // are, the cells around them are listed first, so that only the text of the glyphs read there is hashed; where
+        // they are many, the nine cells around each would outnumber the glyphs read, which are all hashed instead.
+        HashSet<(string, int, int)>? read = null;
+        if (artifacts > 0)
         {
-            var g = glyphs[i];
+            HashSet<(int, int)>? near = null;
+            if (9L * artifacts < readCount)
+            {
+                near = new HashSet<(int, int)>();
+                for (int i = 0; i < all.Length; i++)
+                {
+                    ref readonly var g = ref all[i];
+                    if (reader.Taken[i] || g.Mcid != -2 || string.IsNullOrWhiteSpace(g.Text)) continue;
+                    int x = (int)Math.Floor(g.X / CopyCell), y = (int)Math.Floor(g.Y / CopyCell);
+                    for (int dx = -1; dx <= 1; dx++)
+                        for (int dy = -1; dy <= 1; dy++) near.Add((x + dx, y + dy));
+                }
+            }
+            read = new HashSet<(string, int, int)>();
+            for (int i = 0; i < all.Length; i++)
+            {
+                ref readonly var g = ref all[i];
+                if (!reader.Taken[i] || string.IsNullOrWhiteSpace(g.Text)) continue;
+                int x = (int)Math.Floor(g.X / CopyCell), y = (int)Math.Floor(g.Y / CopyCell);
+                if (near == null || near.Contains((x, y))) read.Add((g.Text, x, y));
+            }
+        }
+        for (int i = 0; i < all.Length; i++)
+        {
+            ref readonly var g = ref all[i];
             if (reader.Taken[i] || string.IsNullOrWhiteSpace(g.Text)) continue;
             if (g.Mcid == -2 && IsCopy(g)) continue;
             rest.Add(g);
@@ -84,7 +125,7 @@ internal static partial class PageStructure
             int x = (int)Math.Floor(g.X / CopyCell), y = (int)Math.Floor(g.Y / CopyCell);
             for (int dx = -1; dx <= 1; dx++)
                 for (int dy = -1; dy <= 1; dy++)
-                    if (read.Contains((g.Text, x + dx, y + dy))) return true;
+                    if (read!.Contains((g.Text, x + dx, y + dy))) return true;
             return false;
         }
     }
@@ -100,17 +141,15 @@ internal static partial class PageStructure
             var words = table.Cells.SelectMany(c => c.Lines).SelectMany(l => l.Words).ToList();
             if (words.Count == 0) continue;
             double x0 = words.Min(w => w.X0) - 1, x1 = words.Max(w => w.X1) + 1, y0 = words.Min(w => w.Top) - 1, y1 = words.Max(w => w.Bottom) + 1;
-            bool Inside(FlowWord w) => w.CenterX > x0 && w.CenterX < x1 && w.CenterY > y0 && w.CenterY < y1;
             // The paragraphs the table's text is in must hold no other text, and no tagged table may share the area.
             var inside = new List<int>();
             bool clash = false;
             int count = 0;
             for (int i = 0; i < tagged.Count && !clash; i++)
             {
-                var blockWords = Words(tagged[i]).ToList();
-                int within = blockWords.Count(Inside);
+                var (total, within) = Count(tagged[i], (x0, y0, x1, y1));
                 if (within == 0) continue;
-                if (within < blockWords.Count || tagged[i] is not TextBlock) clash = true;
+                if (within < total || tagged[i] is not TextBlock) clash = true;
                 inside.Add(i);
                 count += within;
             }
@@ -127,13 +166,41 @@ internal static partial class PageStructure
             _ => Enumerable.Empty<TableBlock>(),
         };
 
-        static IEnumerable<FlowWord> Words(FlowBlock block) => block switch
+        // The words a block holds, and how many of them have their centre inside the box. They are counted in place
+        // rather than copied into a list, as each table counts the page's blocks again.
+        static (int Total, int Within) Count(FlowBlock block, (double X0, double Y0, double X1, double Y1) box)
         {
-            TextBlock t => t.Lines.SelectMany(l => l.Words),
-            TableBlock t => t.Cells.SelectMany(c => c.Lines).SelectMany(l => l.Words),
-            GroupBlock g => g.Parts.SelectMany(p => p).SelectMany(Words),
-            _ => Enumerable.Empty<FlowWord>(),
-        };
+            int total = 0, within = 0;
+            switch (block)
+            {
+                case TextBlock t:
+                    Add(t.Lines);
+                    break;
+                case TableBlock t:
+                    foreach (var cell in t.Cells) Add(cell.Lines);
+                    break;
+                case GroupBlock g:
+                    foreach (var part in g.Parts)
+                        foreach (var b in part)
+                        {
+                            var (n, m) = Count(b, box);
+                            total += n;
+                            within += m;
+                        }
+                    break;
+            }
+            return (total, within);
+
+            void Add(List<FlowLine> lines)
+            {
+                foreach (var line in lines)
+                    foreach (var w in line.Words)
+                    {
+                        total++;
+                        if (w.CenterX > box.X0 && w.CenterX < box.X1 && w.CenterY > box.Y0 && w.CenterY < box.Y1) within++;
+                    }
+            }
+        }
     }
 
     /// <summary>Reads one page's part of a structure tree into blocks, taking each glyph it places.</summary>
@@ -147,6 +214,10 @@ internal static partial class PageStructure
         private readonly int _page;
         private readonly List<TextGlyph> _glyphs;
         private readonly Dictionary<int, List<int>> _byMcid = new();
+        /// <summary>The glyphs of each marked content id, in the order the page first draws them.</summary>
+        private readonly List<List<int>> _contents = new();
+        /// <summary>The glyphs one element's lines are laid out from, kept for the next element so it is allocated once.</summary>
+        private readonly List<TextGlyph> _subset = new();
         private readonly double _width, _height;
         private readonly List<PageLink> _links;
         private readonly CancellationToken _cancel;
@@ -161,10 +232,23 @@ internal static partial class PageStructure
             _links = links;
             _cancel = cancel;
             Taken = new bool[glyphs.Count];
-            for (int i = 0; i < glyphs.Count; i++)
+            // A page draws the glyphs of one marked content together, so the list of the glyph before is usually the one.
+            var all = CollectionsMarshal.AsSpan(glyphs);
+            List<int>? list = null;
+            int current = -1;
+            for (int i = 0; i < all.Length; i++)
             {
-                if (glyphs[i].Mcid < 0) continue;
-                if (!_byMcid.TryGetValue(glyphs[i].Mcid, out var list)) _byMcid[glyphs[i].Mcid] = list = new List<int>();
+                int mcid = all[i].Mcid;
+                if (mcid < 0) continue;
+                if (list == null || mcid != current)
+                {
+                    current = mcid;
+                    if (!_byMcid.TryGetValue(mcid, out list))
+                    {
+                        _byMcid[mcid] = list = new List<int>();
+                        _contents.Add(list);
+                    }
+                }
                 list.Add(i);
             }
             DropCopies();
@@ -177,14 +261,35 @@ internal static partial class PageStructure
         private void DropCopies()
         {
             var seen = new Dictionary<string, List<(double X, double Y, double Size)>>(StringComparer.Ordinal);
-            foreach (var (_, list) in _byMcid.OrderBy(e => e.Value[0]))
+            var all = CollectionsMarshal.AsSpan(_glyphs);
+            StringBuilder? sb = null;
+            foreach (var list in _contents)
             {
-                var first = _glyphs[list[0]];
-                var text = string.Concat(list.Select(i => _glyphs[i].Text));
-                if (string.IsNullOrWhiteSpace(text)) continue;
+                // Content of spaces only has no text to repeat, and is told apart without joining its glyphs' text.
+                bool blank = true;
+                foreach (int i in list)
+                    if (!string.IsNullOrWhiteSpace(all[i].Text)) { blank = false; break; }
+                if (blank) continue;
+                string text;
+                if (list.Count == 1) text = all[list[0]].Text;
+                else
+                {
+                    sb ??= new StringBuilder();
+                    sb.Clear();
+                    foreach (int i in list) sb.Append(all[i].Text);
+                    text = sb.ToString();
+                }
                 if (!seen.TryGetValue(text, out var places)) seen[text] = places = new List<(double, double, double)>();
+                ref readonly var first = ref all[list[0]];
                 double reach = 0.3 * first.Size;
-                if (places.Exists(p => Math.Abs(p.X - first.X) <= reach && Math.Abs(p.Y - first.Y) <= reach && Math.Abs(p.Size - first.Size) <= 0.01 * first.Size))
+                bool copy = false;
+                foreach (var p in places)
+                    if (Math.Abs(p.X - first.X) <= reach && Math.Abs(p.Y - first.Y) <= reach && Math.Abs(p.Size - first.Size) <= 0.01 * first.Size)
+                    {
+                        copy = true;
+                        break;
+                    }
+                if (copy)
                 {
                     foreach (int i in list) Taken[i] = true;
                     continue;
@@ -376,7 +481,7 @@ internal static partial class PageStructure
             }
             var table = new TableBlock { Rows = rows.Count };
             var covered = new HashSet<(int, int)>();
-            int header = 0, next = 0;
+            int header = 0, next = 0, columns = 0;
             bool leading = true;
             for (int r = 0; r < rows.Count; r++)
             {
@@ -393,13 +498,14 @@ internal static partial class PageStructure
                     for (int y = r; y < r + rowSpan; y++)
                         for (int x = column; x < column + columnSpan; x++) covered.Add((y, x));
                     column += columnSpan;
+                    columns = Math.Max(columns, column);
                     allHeader &= cellNode.Type == "TH";
                     any = true;
                 }
                 leading &= rows[r].Head || (any && allHeader);
                 if (leading) header = r + 1;
             }
-            table.Columns = covered.Count == 0 ? 0 : covered.Max(c => c.Item2) + 1;
+            table.Columns = columns;
             var lines = table.Cells.SelectMany(c => c.Lines).ToList();
             if (lines.Count == 0 || table.Columns == 0) return;
             PlaceShortRows(table, covered);
@@ -483,10 +589,12 @@ internal static partial class PageStructure
         /// </summary>
         private static void PlaceShortRows(TableBlock table, HashSet<(int, int)> covered)
         {
+            if (table.Columns > MaxPlacedColumns || table.Cells.Exists(c => c.RowSpan > 1)) return;
             var byRow = table.Cells.GroupBy(c => c.Row).ToDictionary(g => g.Key, g => g.OrderBy(c => c.Column).ToList());
             var full = byRow.Values.Where(r => r.Count == table.Columns && r.TrueForAll(c => c.RowSpan == 1 && c.ColumnSpan == 1)).ToList();
+            if (full.Count == 0) return;
             var shortRows = byRow.Values.Where(r => !Enumerable.Range(0, table.Columns).All(x => covered.Contains((r[0].Row, x)))).ToList();
-            if (table.Columns > MaxPlacedColumns || full.Count == 0 || shortRows.Count == 0 || table.Cells.Exists(c => c.RowSpan > 1)) return;
+            if (shortRows.Count == 0) return;
             var sides = new (double X0, double X1)[table.Columns];
             Array.Fill(sides, (double.MaxValue, double.MinValue));
             foreach (var c in full.SelectMany(r => r).Where(c => c.Lines.Count > 0))
@@ -551,35 +659,55 @@ internal static partial class PageStructure
         private List<FlowLine> Lines(List<int> glyphs)
         {
             if (glyphs.Count == 0) return new List<FlowLine>();
-            glyphs.Sort();
-            var subset = new List<TextGlyph>(glyphs.Count);
-            int previous = -1;
-            foreach (int i in glyphs)
-                if (i != previous) subset.Add(_glyphs[previous = i]);
+            // Elements are mostly gathered in the order the page draws their glyphs, which needs no sorting.
+            if (!Ascending(glyphs)) glyphs.Sort();
+            var all = CollectionsMarshal.AsSpan(_glyphs);
+            var subset = _subset;
+            subset.Clear();
+            // Grown to the size asked, not doubled, so no element allocates more than a list of its own glyphs would.
+            if (subset.Capacity < glyphs.Count) subset.Capacity = glyphs.Count;
+            // Glyphs drawn one after the other are copied together, which is several times faster than one by one
+            // for a struct this size; a glyph named twice is copied once.
+            for (int k = 0; k < glyphs.Count;)
+            {
+                int from = k++;
+                while (k < glyphs.Count && glyphs[k] == glyphs[k - 1] + 1) k++;
+                subset.AddRange(all.Slice(glyphs[from], k - from));
+                while (k < glyphs.Count && glyphs[k] == glyphs[k - 1]) k++;
+            }
             // An element that runs from the foot of one text column on to the top of the next, as a paragraph does,
             // is drawn in that order; its lines are read column by column rather than across the page.
-            var lines = new List<FlowLine>();
+            var drawn = CollectionsMarshal.AsSpan(subset);
+            List<FlowLine>? lines = null;
             int start = 0;
             double right = double.MinValue;
-            for (int k = 0; k < subset.Count; k++)
+            for (int k = 0; k < drawn.Length; k++)
             {
-                var g = subset[k];
-                if (k > start && ColumnStart(subset[k - 1], g, right))
+                ref readonly var g = ref drawn[k];
+                if (k > start && ColumnStart(drawn[k - 1], g, right))
                 {
+                    lines ??= new List<FlowLine>();
                     lines.AddRange(PageStructure.Lines(TextLayout.Build(subset.GetRange(start, k - start), _page + 1, _width, _height, true, _cancel), _links));
                     start = k;
                     right = double.MinValue;
                 }
                 right = Math.Max(right, Math.Max(g.X, g.EndX));
             }
-            if (start == 0) return PageStructure.Lines(TextLayout.Build(subset, _page + 1, _width, _height, true, _cancel), _links);
+            if (lines == null) return PageStructure.Lines(TextLayout.Build(subset, _page + 1, _width, _height, true, _cancel), _links);
             lines.AddRange(PageStructure.Lines(TextLayout.Build(subset.GetRange(start, subset.Count - start), _page + 1, _width, _height, true, _cancel), _links));
             return lines;
 
             // Upright text that goes back up the page by more than a couple of lines, to the right of everything drawn
             // since the last column started.
-            static bool ColumnStart(TextGlyph before, TextGlyph g, double right) =>
+            static bool ColumnStart(in TextGlyph before, in TextGlyph g, double right) =>
                 g.DirX > 0.99 && before.DirX > 0.99 && before.Y - g.Y > 2 * Math.Max(g.Size, before.Size) && g.X >= right;
+
+            static bool Ascending(List<int> list)
+            {
+                for (int k = 1; k < list.Count; k++)
+                    if (list[k] < list[k - 1]) return false;
+                return true;
+            }
         }
 
         private List<int> Gather(StructureTree.Node node)
