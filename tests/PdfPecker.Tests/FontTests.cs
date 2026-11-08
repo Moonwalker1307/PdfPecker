@@ -189,6 +189,38 @@ public class FontTests
         Assert.True(unused == null || unused.IsEmpty);
     }
 
+    [Fact]
+    public void CffSubsetLeavesOutDataBetweenAPrivateDictAndItsSubroutines()
+    {
+        // The Noto CJK fonts put hundreds of kilobytes between each Private DICT and its local subroutines. Rebuild the
+        // fixture's CFF that way: its Private DICT (34 bytes, ending with "Subrs 34") and subroutines end the table.
+        var program = Assert.Single(FontProgram.Load(InterCff));
+        var table = program.Table("CFF ")!.Value;
+        var cff = InterCff.AsSpan(table.Offset, table.Length).ToArray();
+        const int privateSize = 34, privateAt = 51754, gap = 1000;
+        Assert.Equal(new byte[] { 139 + privateSize, 19 }, cff[(privateAt + privateSize - 2)..(privateAt + privateSize)]);
+        byte[] topEntry = { 29, 0, 0, 0, privateSize, 29, 0, 0, 0xCA, 0x2A, 18 }; // Private 34 51754, five-byte integers
+        int topAt = cff.AsSpan().IndexOf(topEntry);
+        Assert.True(topAt > 0);
+
+        // The DICT's last entry becomes a three-byte "Subrs 36 + gap", which makes it 36 bytes long.
+        const int newSize = privateSize + 2;
+        var dict = cff[privateAt..(privateAt + privateSize - 2)].Concat(new byte[] { 28, (newSize + gap) >> 8, (newSize + gap) & 0xFF, 19 });
+        var gapped = cff[..privateAt].Concat(dict).Concat(new byte[gap]).Concat(cff[(privateAt + privateSize)..]).ToArray();
+        gapped[topAt + 4] = newSize;
+
+        var subset = new GlyphSubset(program);
+        foreach (char c in "Hamburgefonstiv") subset.Cid(c);
+        var plain = CffSubsetter.Subset(cff, subset.Glyphs)!;
+        var fromGapped = CffSubsetter.Subset(gapped, subset.Glyphs);
+        Assert.NotNull(fromGapped);
+        Assert.True(fromGapped!.Length < plain.Length + 16, $"{fromGapped.Length} bytes against {plain.Length}");
+
+        var a = CffFont.Parse(gapped)!;
+        var b = CffFont.Parse(fromGapped)!;
+        foreach (char c in "Hamburgefonstiv") AssertSamePath(a.GetGlyph(program.GlyphId(c)), b.GetGlyph(program.GlyphId(c)));
+    }
+
     private static void AssertSamePath(PathData? expected, PathData? actual)
     {
         Assert.NotNull(expected);
