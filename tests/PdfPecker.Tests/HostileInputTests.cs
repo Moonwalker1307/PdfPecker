@@ -281,6 +281,23 @@ public class HostileInputTests
         Assert.Equal(0xFF00FF00u, ById(doc, "n").Style.Color);
     }
 
+    // revert-layer in every one of many layers rolls back through all of them to the first. A revert that meets another
+    // goes on from there instead of recursing, so the cost is one look back per element and the stack stays flat.
+    [Fact]
+    public void Revert_layer_in_many_layers_stays_linear()
+    {
+        var sb = new StringBuilder("<style>@layer base { p { margin-top: 3px; color: red } }");
+        for (int i = 0; i < 400; i++) sb.Append($"@layer l{i} {{ p {{ margin-top: revert-layer; color: revert-layer; font-size: revert-layer }} }}");
+        sb.Append("p { margin-top: revert-layer; color: revert-layer; font-size: revert-layer }</style>");
+        for (int i = 0; i < 2000; i++) sb.Append($"<p style='--i:{i}'>x</p>");
+        var html = sb.ToString();
+        var doc = Bounded(() => Styled(html));
+        var p = doc.FindFirst("p")!.Style;
+        Assert.Equal(2.25f, p.MarginTop.Resolve(0));
+        Assert.Equal(0xFFFF0000u, p.Color);
+        AssertStructurallyValid(Bounded(html));
+    }
+
     // Fuzz finding (css, timeout-d0d017cf): a variable that names itself in its reference and again in each nested
     // fallback was resolved twice per level down to the depth limit, about 2^32 substitutions.
     [Fact]
@@ -849,6 +866,21 @@ public class HostileInputTests
             new PdfOptions { Compress = false });
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"Took {sw.Elapsed}");
         Assert.Contains("0 0 1 rg", System.Text.Encoding.Latin1.GetString(pdf)); // the second drawing is still there
+    }
+
+    [Fact]
+    public void Nested_svg_viewports_and_huge_unit_lengths_stay_bounded()
+    {
+        // Each nested svg clips to its viewport, but only the first levels write a clip, so the PDF's save and restore
+        // depth stays small; a length whose unit overflows a float is invalid, not infinite.
+        const int depth = 400;
+        string nested = Repeat("<svg x='1mm' width='99%' height='99%' viewBox='0 0 100 100' preserveAspectRatio='xMaxYMax slice'>", depth)
+            + "<rect width='1e38in' height='3.4e38pc' fill='red'/><circle cx='1e38cm' r='1e38em' fill='red'/>" + Repeat("</svg>", depth);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var pdf = Bounded($"<svg width='100' height='100'>{nested}</svg><svg width='20' height='20'><rect width='20' height='20' fill='blue'/></svg>",
+            new PdfOptions { Compress = false });
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"Took {sw.Elapsed}");
+        Assert.Contains("0 0 1 rg", System.Text.Encoding.Latin1.GetString(pdf));
     }
 
     [Fact]
