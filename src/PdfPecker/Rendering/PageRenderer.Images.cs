@@ -136,6 +136,11 @@ internal sealed class ImageShader : IShader
             }
             return;
         }
+        if (dv == 0)
+        {
+            ShadeRow(px, w, h, u, v, du, colors);
+            return;
+        }
         for (int i = 0; i < n; i++, u += du, v += dv)
         {
             double su = u - 0.5, sv = v - 0.5;
@@ -145,6 +150,58 @@ internal sealed class ImageShader : IShader
             int v0 = Math.Clamp(iv, 0, h - 1), v1 = Math.Clamp(iv + 1, 0, h - 1);
             uint a = px[v0 * w + u0], b = px[v0 * w + u1], c = px[v1 * w + u0], d = px[v1 * w + u1];
             if (a == b && c == d && a == c) { colors[i] = a; continue; }
+            colors[i] = Lerp(Lerp(a, b, wu), Lerp(c, d, wu), wv);
+        }
+    }
+
+    // The image columns and horizontal weight of each canvas pixel of the last row shaded without rotation or skew,
+    // which every row of an upright image shares: the same row start gives the same steps.
+    private int[] _left = Array.Empty<int>(), _right = Array.Empty<int>(), _weight = Array.Empty<int>();
+    private double _columnsStart = double.NaN;
+    private int _columnsCount;
+
+    /// <summary>
+    /// The bilinear loop for an image that is not rotated or skewed, where a row of the canvas stays on one pair of
+    /// image rows: the same samples and weights, with the vertical ones found once per row and the horizontal ones once
+    /// per image.
+    /// </summary>
+    private void ShadeRow(uint[] px, int w, int h, double u, double v, double du, Span<uint> colors)
+    {
+        int n = colors.Length;
+        if (BitConverter.DoubleToInt64Bits(u) != BitConverter.DoubleToInt64Bits(_columnsStart) || n != _columnsCount)
+        {
+            if (_left.Length < n)
+            {
+                _left = new int[n];
+                _right = new int[n];
+                _weight = new int[n];
+            }
+            _columnsStart = u;
+            _columnsCount = n;
+            for (int i = 0; i < n; i++, u += du)
+            {
+                double su = u - 0.5;
+                int iu = (int)Math.Floor(su);
+                _weight[i] = (int)((su - iu) * 256);
+                _left[i] = Math.Clamp(iu, 0, w - 1);
+                _right[i] = Math.Clamp(iu + 1, 0, w - 1);
+            }
+        }
+        double sv = v - 0.5;
+        int iv = (int)Math.Floor(sv);
+        int wv = (int)((sv - iv) * 256);
+        int v0 = Math.Clamp(iv, 0, h - 1), v1 = Math.Clamp(iv + 1, 0, h - 1);
+        var top = px.AsSpan(v0 * w, w);
+        var bottom = px.AsSpan(v1 * w, w);
+        var left = _left.AsSpan(0, n);
+        var right = _right.AsSpan(0, n);
+        var weight = _weight.AsSpan(0, n);
+        for (int i = 0; i < colors.Length; i++)
+        {
+            int u0 = left[i], u1 = right[i];
+            uint a = top[u0], b = top[u1], c = bottom[u0], d = bottom[u1];
+            if (a == b && c == d && a == c) { colors[i] = a; continue; }
+            int wu = weight[i];
             colors[i] = Lerp(Lerp(a, b, wu), Lerp(c, d, wu), wv);
         }
     }

@@ -95,18 +95,9 @@ internal static partial class PdfImageDecoder
         for (int y = 0; y < h; y++)
         {
             int s = y * rowBytes, o = y * w;
-            for (int x = 0; x < w; x++, s += 4)
-            {
-                if (s + 3 >= data.Length)
-                {
-                    pixels[o + x] = OpaqueAlpha;
-                    continue;
-                }
-                float c = data[s] / 255f, m = data[s + 1] / 255f, yy = data[s + 2] / 255f, k = data[s + 3] / 255f;
-                if (inverted) { c = 1 - c; m = 1 - m; yy = 1 - yy; k = 1 - k; }
-                var (r, g, b) = DeviceCmyk.Convert(c, m, yy, k);
-                pixels[o + x] = Rgb(r, g, b);
-            }
+            int complete = Math.Min(w, Math.Max(0, (data.Length - s) / 4));
+            if (complete > 0) DeviceCmyk.ConvertSamples(data.AsSpan(s, 4 * complete), inverted, pixels.AsSpan(o, complete));
+            pixels.AsSpan(o + complete, w - complete).Fill(OpaqueAlpha);
         }
     }
 

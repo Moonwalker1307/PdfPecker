@@ -351,6 +351,28 @@ public class RendererColorTests
         Assert.True(Math.Abs(result.R - 255) < 12 && Math.Abs(result.G - 255) < 12 && Math.Abs(result.B - 255) < 12, $"Index 1 should be about white, got {result}");
     }
 
+    [Fact]
+    public void Cmyk_image_samples_convert_like_single_colours()
+    {
+        // Image rows are converted several pixels at a time; each pixel must match the conversion of a single colour,
+        // in rows of every length around the vector width.
+        var random = new Random(7);
+        foreach (bool inverted in new[] { false, true })
+            for (int count = 0; count <= 70; count++)
+            {
+                var samples = new byte[4 * count];
+                random.NextBytes(samples);
+                var pixels = new uint[count];
+                PdfPecker.Rendering.Content.DeviceCmyk.ConvertSamples(samples, inverted, pixels);
+                for (int i = 0; i < count; i++)
+                {
+                    float Ink(int j) => inverted ? 1 - samples[4 * i + j] / 255f : samples[4 * i + j] / 255f;
+                    var (r, g, b) = PdfPecker.Rendering.Content.DeviceCmyk.Convert(Ink(0), Ink(1), Ink(2), Ink(3));
+                    Assert.Equal((uint)(r | g << 8 | b << 16) | 0xFF000000, pixels[i]);
+                }
+            }
+    }
+
     // ---------------------------------------------------------------- axial and radial shadings
 
     private static RenderedImage Shade(string shadingEntries, Action<FixturePdf>? setup = null, byte[]? meshData = null)

@@ -12,6 +12,10 @@ internal sealed partial class JpegDecoder
         public const int FastBits = 9;
 
         public readonly ushort[] Fast = new ushort[1 << FastBits];
+
+        // For an AC table: the codes whose extra bits also fit in the next nine bits, decoded whole as
+        // (value << 9 | run << 5 | bits taken), or 0 when the code and its extra bits are longer or the symbol has none.
+        public readonly int[] FastAc = new int[1 << FastBits];
         public readonly int[] MaxCode = new int[MaxCodeLength + 1];
         public readonly int[] ValueOffset = new int[MaxCodeLength + 1];
         public readonly byte[] Values;
@@ -33,6 +37,15 @@ internal sealed partial class JpegDecoder
                 }
                 MaxCode[length] = counts[length] > 0 ? code - 1 : -1;
                 code <<= 1;
+            }
+            for (int bits = 0; bits < Fast.Length; bits++)
+            {
+                int fast = Fast[bits];
+                if (fast == 0) continue;
+                int length = fast >> 8, run = (fast & 0xFF) >> 4, size = fast & 15;
+                if (size == 0 || length + size > FastBits) continue;
+                int extra = bits >> (FastBits - length - size) & ((1 << size) - 1);
+                FastAc[bits] = Extend(extra, size) << 9 | run << 5 | (length + size);
             }
         }
     }
@@ -97,6 +110,23 @@ internal sealed partial class JpegDecoder
         }
 
         public bool ReadBit() => ReadBits(1) != 0;
+
+        /// <summary>
+        /// The <see cref="HuffmanTable.FastAc"/> entry of the next bits, which most AC coefficients have: taking its
+        /// bits takes the same ones as <see cref="Decode"/> and then <see cref="ReadBits"/> would.
+        /// </summary>
+        public int PeekFastAc(HuffmanTable table)
+        {
+            if (_count < HuffmanTable.MaxCodeLength) Fill();
+            return table.FastAc[_bits >> (32 - HuffmanTable.FastBits)];
+        }
+
+        /// <summary>Takes <paramref name="n"/> bits that a peek has already made sure are there.</summary>
+        public void Skip(int n)
+        {
+            _bits <<= n;
+            _count -= n;
+        }
 
         /// <summary>Decodes one symbol; a code the table does not have decodes to zero.</summary>
         public int Decode(HuffmanTable table)
