@@ -696,22 +696,28 @@ internal sealed class UnicodeRange
     }
 
     /// <summary>Parses "U+0000-00FF, U+0131, U+4??". Returns null for an empty or invalid list.</summary>
+    /// <remarks>
+    /// Parsed without substrings, since a font package registers dozens of faces whose ranges have thousands of parts.
+    /// </remarks>
     public static UnicodeRange? Parse(string value)
     {
         var list = new List<(int, int)>();
-        foreach (var raw in value.Split(','))
+        var rest = value.AsSpan();
+        while (rest.Length > 0)
         {
-            var part = raw.Trim();
+            int comma = rest.IndexOf(',');
+            var part = (comma < 0 ? rest : rest[..comma]).Trim();
+            rest = comma < 0 ? default : rest[(comma + 1)..];
             if (part.Length < 3 || (part[0] != 'U' && part[0] != 'u') || part[1] != '+') continue;
-            part = part.Substring(2);
+            part = part[2..];
             int dash = part.IndexOf('-');
             if (dash >= 0)
             {
-                if (TryHex(part.Substring(0, dash), out int lo) && TryHex(part.Substring(dash + 1), out int hi) && lo <= hi) list.Add((lo, hi));
+                if (TryHex(part[..dash], out int lo) && TryHex(part[(dash + 1)..], out int hi) && lo <= hi) list.Add((lo, hi));
             }
             else if (part.IndexOf('?') >= 0)
             {
-                if (TryHex(part.Replace('?', '0'), out int lo) && TryHex(part.Replace('?', 'F'), out int hi)) list.Add((lo, hi));
+                if (TryWildcard(part, '0', out int lo) && TryWildcard(part, 'F', out int hi)) list.Add((lo, hi));
             }
             else if (TryHex(part, out int cp)) list.Add((cp, cp));
         }
@@ -728,7 +734,17 @@ internal sealed class UnicodeRange
         return new UnicodeRange(merged.ToArray());
     }
 
-    private static bool TryHex(string s, out int value)
+    // "4??" with each ? read as the given digit.
+    private static bool TryWildcard(ReadOnlySpan<char> part, char digit, out int value)
+    {
+        value = 0;
+        if (part.Length > 8) return false;
+        Span<char> digits = stackalloc char[part.Length];
+        for (int i = 0; i < part.Length; i++) digits[i] = part[i] == '?' ? digit : part[i];
+        return TryHex(digits, out value);
+    }
+
+    private static bool TryHex(ReadOnlySpan<char> s, out int value)
         => int.TryParse(s, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out value)
            && value >= 0 && value <= 0x10FFFF;
 }
