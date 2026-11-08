@@ -101,6 +101,12 @@ internal static partial class PageStructure
     private static List<Segment> Breaks(List<PageRule> rules, List<Segment> h, List<Segment> v, (double X0, double Y0, double X1, double Y1) box,
         List<FlowWord> words)
     {
+        var breaks = new List<Segment>();
+        // Only a grid with no vertical line inside it that runs down most of it, such as one only in the header: where
+        // there are such lines, the breaks are where rows meet them. Checked first, as most grids have such lines and
+        // finding the ends compares every row line with every other.
+        if (h.Count < 3 || v.Exists(s => s.Pos > box.X0 + Close && s.Pos < box.X1 - Close && s.End - s.Start >= 0.5 * (box.Y1 - box.Y0)))
+            return breaks;
         var inBox = rules.FindAll(r => r.Horizontal && !r.Edge && r.Position >= box.Y0 - Reach && r.Position <= box.Y1 + Reach);
         // A line is broken at a place no piece of it, or of a line drawn over it, runs across.
         bool Broken(double x, double y) => !inBox.Exists(r => Math.Abs(r.Position - y) <= SameLine && r.Start < x - Join && r.End > x + Join);
@@ -110,11 +116,7 @@ internal static partial class PageStructure
             if (r.Start > box.X0 + Close && r.Start < box.X1 - Close && Broken(r.Start, r.Position)) ends.Add((r.Start, r.Position));
             if (r.End > box.X0 + Close && r.End < box.X1 - Close && Broken(r.End, r.Position)) ends.Add((r.End, r.Position));
         }
-        var breaks = new List<Segment>();
-        // Only a grid with no vertical line inside it that runs down most of it, such as one only in the header: where
-        // there are such lines, the breaks are where rows meet them.
-        if (ends.Count == 0 || h.Count < 3
-            || v.Exists(s => s.Pos > box.X0 + Close && s.Pos < box.X1 - Close && s.End - s.Start >= 0.5 * (box.Y1 - box.Y0))) return breaks;
+        if (ends.Count == 0) return breaks;
         ends.Sort((a, b) => a.X.CompareTo(b.X));
         // Row lines that cross the whole grid, which a column boundary must break.
         int across = h.Count(s => s.Start <= box.X0 + Close && s.End >= box.X1 - Close);
@@ -171,12 +173,15 @@ internal static partial class PageStructure
         {
             int j = i + 1;
             while (j < list.Count && list[j].Pos - list[j - 1].Pos <= SameLine) j++;
-            var cluster = list.GetRange(i, j - i);
-            double pos = cluster.Average(s => s.Pos);
-            cluster.Sort((a, b) => a.Start.CompareTo(b.Start));
-            double start = cluster[0].Start, end = cluster[0].End;
-            foreach (var s in cluster)
+            // Sorting the cluster in place leaves the clusters after it as they are.
+            double sum = 0;
+            for (int k = i; k < j; k++) sum += list[k].Pos;
+            double pos = sum / (j - i);
+            list.Sort(i, j - i, StartOrder.Instance);
+            double start = list[i].Start, end = list[i].End;
+            for (int k = i; k < j; k++)
             {
+                var s = list[k];
                 if (s.Start <= end + Join) { end = Math.Max(end, s.End); continue; }
                 result.Add(new Segment(pos, start, end));
                 (start, end) = (s.Start, s.End);
@@ -185,6 +190,12 @@ internal static partial class PageStructure
             i = j;
         }
         return result;
+    }
+
+    private sealed class StartOrder : IComparer<Segment>
+    {
+        public static readonly StartOrder Instance = new();
+        public int Compare(Segment a, Segment b) => a.Start.CompareTo(b.Start);
     }
 
     /// <summary>One boundary of a grid: where it lies and the rules that draw it.</summary>
@@ -268,14 +279,16 @@ internal static partial class PageStructure
                 if (c + 1 < columns && !Drawn(xs[c + 1], ys[r].Pos, ys[r + 1].Pos)) Union(r * columns + c, r * columns + c + 1);
                 if (r + 1 < rows && !Drawn(ys[r + 1], xs[c].Pos, xs[c + 1].Pos)) Union(r * columns + c, (r + 1) * columns + c);
             }
-        var cells = new Dictionary<int, TableCell>();
-        var area = new Dictionary<int, int>();
+        // Each cell under its root, the first of its places from the top left, which is also where the scan meets it
+        // first, so the cells are in the order the scan finds them.
+        var cells = new TableCell?[rows * columns];
+        var area = new int[rows * columns];
         for (int r = 0; r < rows; r++)
             for (int c = 0; c < columns; c++)
             {
                 int root = Find(r * columns + c);
-                area[root] = area.GetValueOrDefault(root) + 1;
-                if (!cells.TryGetValue(root, out var tc))
+                area[root]++;
+                if (cells[root] is not { } tc)
                 {
                     cells[root] = new TableCell { Row = r, Column = c, X0 = xs[c].Pos, X1 = xs[c + 1].Pos };
                     continue;
@@ -285,8 +298,8 @@ internal static partial class PageStructure
                 tc.X1 = Math.Max(tc.X1, xs[c + 1].Pos);
             }
         // A cell that is not a rectangle means the lines are a drawing, not a table.
-        foreach (var (root, tc) in cells)
-            if (area[root] != tc.RowSpan * tc.ColumnSpan) return null;
+        for (int i = 0; i < cells.Length; i++)
+            if (cells[i] is { } tc && area[i] != tc.RowSpan * tc.ColumnSpan) return null;
 
         if (columns == 1 || rows == 1)
         {
@@ -300,16 +313,22 @@ internal static partial class PageStructure
             return ColumnsTable(xs, box, words, body);
         }
 
-        var texts = new Dictionary<int, List<FlowWord>>();
+        var texts = new List<FlowWord>?[cells.Length];
+        int filled = 0;
         foreach (var w in words)
         {
             int c = Index(xs, w.CenterX), r = Index(ys, w.CenterY);
             int root = Find(r * columns + c);
-            if (!texts.TryGetValue(root, out var list)) texts[root] = list = new List<FlowWord>();
+            if (texts[root] is not { } list) { texts[root] = list = new List<FlowWord>(); filled++; }
             list.Add(w);
         }
-        if (texts.Count < 2) return null;
-        if (UnderRuled(texts.Values))
+        if (filled < 2) return null;
+        // Each cell's lines, worked out once for the check below and the table.
+        var cellLines = new List<FlowLine>?[cells.Length];
+        var withText = new List<List<FlowLine>>(filled);
+        for (int i = 0; i < texts.Length; i++)
+            if (texts[i] is { } list) withText.Add(cellLines[i] = CellLines(list));
+        if (UnderRuled(withText))
         {
             // The rules outline groups of rows and columns rather than cells, so the rows come from the lines and the
             // columns from the text, as in a table with rules only between some of its rows.
@@ -319,9 +338,10 @@ internal static partial class PageStructure
             return found.Count == 1 ? found[0] : null;
         }
         var table = new TableBlock { Rows = rows, Columns = columns, Top = box.Y0, Left = box.X0 };
-        foreach (var (root, tc) in cells)
+        for (int i = 0; i < cells.Length; i++)
         {
-            if (texts.TryGetValue(root, out var list)) tc.Lines.AddRange(CellLines(list));
+            if (cells[i] is not { } tc) continue;
+            if (cellLines[i] is { } lines) tc.Lines.AddRange(lines);
             table.Cells.Add(tc);
         }
         return Finish(table);
@@ -332,9 +352,9 @@ internal static partial class PageStructure
     /// one of them a column of numbers, as when a table draws lines only around groups of columns. Wrapped text in
     /// neighbouring cells shares baselines too, which is why a column of numbers must show the lines are rows.
     /// </summary>
-    private static bool UnderRuled(IEnumerable<List<FlowWord>> cells)
+    private static bool UnderRuled(List<List<FlowLine>> cells)
     {
-        var tall = cells.Select(CellLines).Where(l => l.Count >= 4).ToList();
+        var tall = cells.Where(l => l.Count >= 4).ToList();
         if (tall.Count < 2) return false;
         foreach (var lines in tall)
         {
@@ -360,9 +380,14 @@ internal static partial class PageStructure
     /// <summary>The index of the band between two boundaries that <paramref name="pos"/> falls in.</summary>
     private static int Index(List<GridLine> lines, double pos)
     {
-        int i = 0;
-        while (i < lines.Count - 2 && pos >= lines[i + 1].Pos) i++;
-        return i;
+        // The last band whose start pos reaches, found by halving: the boundaries are sorted.
+        int lo = 0, hi = lines.Count - 2;
+        while (lo < hi)
+        {
+            int mid = (lo + hi + 1) >> 1;
+            if (pos >= lines[mid].Pos) lo = mid; else hi = mid - 1;
+        }
+        return lo;
     }
 
     /// <summary>
@@ -434,14 +459,40 @@ internal static partial class PageStructure
     /// <summary>A cell's words as lines, from the top, each in reading order.</summary>
     private static List<FlowLine> CellLines(List<FlowWord> words)
     {
-        var lines = new List<FlowLine>();
-        foreach (var g in words.GroupBy(w => w.Line))
+        // The words of each text line, the lines in the order their first words come. Words mostly come line by line,
+        // so the last line is tried first, and the others are found through a dictionary.
+        var groups = new List<(int Line, List<FlowWord> Words)>();
+        Dictionary<int, int>? index = null;
+        foreach (var w in words)
         {
-            var list = g.OrderBy(w => w.Order).ToList();
+            int g = groups.Count - 1;
+            if (g >= 0 && groups[g].Line != w.Line)
+            {
+                if (index == null)
+                {
+                    index = new Dictionary<int, int>();
+                    for (int k = 0; k < groups.Count; k++) index[groups[k].Line] = k;
+                }
+                if (!index.TryGetValue(w.Line, out g)) g = -1;
+            }
+            if (g >= 0) { groups[g].Words.Add(w); continue; }
+            index?.Add(w.Line, groups.Count);
+            groups.Add((w.Line, new List<FlowWord> { w }));
+        }
+        var lines = new List<FlowLine>(groups.Count);
+        foreach (var (line, inLine) in groups)
+        {
+            // In reading order; the words mostly are already, and a stable sort keeps words with the same place as
+            // they came.
+            var list = inLine;
+            for (int i = 1; i < list.Count; i++)
+                if (list[i - 1].Order > list[i].Order) { list = list.OrderBy(w => w.Order).ToList(); break; }
+            int rightToLeft = 0;
+            foreach (var w in list) if (IsRightToLeft(w.Text)) rightToLeft++;
             // Words of one text line that a cell boundary does not split but that lie far apart, as when two columns
             // share a baseline, stay in one line; the line keeps their reading order. A line cut from a wider one is
             // right to left when most of its own words are, as a column of Hebrew beside another is.
-            lines.Add(new FlowLine(list, g.Key, list.Count(w => IsRightToLeft(w.Text)) * 2 > list.Count));
+            lines.Add(new FlowLine(list, line, rightToLeft * 2 > list.Count));
         }
         lines.Sort((a, b) => a.Top != b.Top ? a.Top.CompareTo(b.Top) : a.X0.CompareTo(b.X0));
         return lines;
@@ -719,15 +770,28 @@ internal static partial class PageStructure
         // A header cell spanning rows, as over a header split into levels, takes the rows it spans into the header.
         for (bool grew = true; grew;)
         {
-            int reach = table.Cells.Where(c => c.Row < rows).Select(c => c.Row + c.RowSpan).DefaultIfEmpty(rows).Max();
+            int reach = rows;
+            bool any = false;
+            foreach (var c in table.Cells)
+                if (c.Row < rows) { reach = any ? Math.Max(reach, c.Row + c.RowSpan) : c.Row + c.RowSpan; any = true; }
             grew = reach > rows;
             rows = Math.Max(rows, reach);
         }
-        var head = table.Cells.Where(c => c.Row < rows && c.Lines.Count > 0).ToList();
-        var rest = table.Cells.Where(c => c.Row >= rows).SelectMany(c => c.Lines).SelectMany(l => l.Words).ToList();
-        bool header = head.Count > 0 && table.Rows > rows && head.TrueForAll(c => c.Lines.TrueForAll(l => l.Words.TrueForAll(w => w.Bold)))
-            && rest.Exists(w => !w.Bold) && !table.Cells.Exists(c => c.Row < rows && c.Row + c.RowSpan > rows);
-        table.HeaderRows = header ? rows : 0;
+        // The header is bold where the rest of the table is not all bold, and no cell spans out of it.
+        bool headText = false, headBold = true, restPlain = false, spansOut = false;
+        foreach (var c in table.Cells)
+        {
+            if (c.Row < rows)
+            {
+                if (c.Row + c.RowSpan > rows) spansOut = true;
+                if (c.Lines.Count == 0) continue;
+                headText = true;
+                foreach (var l in c.Lines) if (!l.Words.TrueForAll(w => w.Bold)) headBold = false;
+            }
+            else if (!restPlain)
+                foreach (var l in c.Lines) if (l.Words.Exists(w => !w.Bold)) { restPlain = true; break; }
+        }
+        table.HeaderRows = headText && table.Rows > rows && headBold && restPlain && !spansOut ? rows : 0;
         SetDirection(table);
         return table;
     }
@@ -735,8 +799,14 @@ internal static partial class PageStructure
     /// <summary>Sets a table right-to-left when most of its lines are, and its lines with it.</summary>
     private static void SetDirection(TableBlock table)
     {
-        var all = table.Cells.SelectMany(c => c.Lines).ToList();
-        table.RightToLeft = all.Count > 0 && all.Count(l => l.Words.Exists(w => IsRightToLeft(w.Text))) > all.Count / 2;
+        int lines = 0, rightToLeft = 0;
+        foreach (var c in table.Cells)
+            foreach (var l in c.Lines)
+            {
+                lines++;
+                if (l.Words.Exists(w => IsRightToLeft(w.Text))) rightToLeft++;
+            }
+        table.RightToLeft = lines > 0 && rightToLeft > lines / 2;
         if (table.RightToLeft)
             foreach (var c in table.Cells)
                 for (int i = 0; i < c.Lines.Count; i++) c.Lines[i] = new FlowLine(c.Lines[i].Words, c.Lines[i].Id, true);
