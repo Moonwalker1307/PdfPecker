@@ -5,7 +5,8 @@ namespace PdfPecker.Tests;
 
 /// <summary>
 /// Shaping compared glyph for glyph with HarfBuzz on subsets of the Noto fonts of each script (SIL Open Font License
-/// 1.1, see Fixtures/fonts): Indic, Thai, Lao and Thaana, and Latin, Greek and Cyrillic with combining marks. The texts
+/// 1.1, see Fixtures/fonts): Indic, Thai, Lao and Thaana, Latin, Greek and Cyrillic with combining marks, and Arabic
+/// letters with marks that compose with them. CI also runs it with invariant globalization, without ICU. The texts
 /// are in tools/ShapingReference/corpus.txt and HarfBuzz's glyphs in Fixtures/shaping/harfbuzz.txt, which
 /// tools/ShapingReference/generate.py writes.
 /// </summary>
@@ -18,7 +19,11 @@ public class HarfBuzzShapingTests
         lock (Fonts)
         {
             if (!Fonts.TryGetValue(name, out var font))
-                Fonts[name] = font = Assert.Single(FontProgram.Load(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", name + ".woff2"))));
+            {
+                string path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", name + ".woff2");
+                if (!File.Exists(path)) path = Path.ChangeExtension(path, ".ttf");
+                Fonts[name] = font = Assert.Single(FontProgram.Load(File.ReadAllBytes(path)));
+            }
             return font;
         }
     }

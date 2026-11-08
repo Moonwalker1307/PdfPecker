@@ -9,8 +9,8 @@ internal static partial class ComplexShaper
     // A character the font lacks is decomposed this many times at most, which is deeper than any decomposition goes.
     private const int MaxDecompositionDepth = 4;
 
-    // The characters a letter and its mark compose to are Arabic to Arabic Extended-A, which is also where the letters are.
-    private const int ComposedFirst = 0x0600, ComposedLast = 0x08FF;
+    // No character below this is a combining mark.
+    private const int FirstMark = 0x0300;
 
     // The combining classes of the marks below and above, among which the Arabic modifier combining marks move to the
     // front (see MoveModifierMarks).
@@ -94,69 +94,70 @@ internal static partial class ComplexShaper
         return true;
     }
 
-    // A letter and the mark right after it become the precomposed letter when the font has it, as HarfBuzz composes
-    // them (waw and hamza above, alef and madda, ...).
-    private static void Compose(FontProgram font, OpenTypeLayout? layout, GlyphRun run)
+    /// <summary>
+    /// Composes each combining mark with the letter before it where the font has the character they make (e with acute,
+    /// alef with madda, Vietnamese and polytonic Greek letters with a further accent, ...), as HarfBuzz recomposes text.
+    /// The letter is the last character of combining class 0 before the mark, and the mark joins it when the marks
+    /// between them have lower classes; a letter that is a mark itself, such as a split vowel sign, takes none. Two
+    /// characters compose when Unicode normalization composes them, from the generated tables rather than the host's
+    /// ICU, so the glyphs are the same on every host.
+    /// </summary>
+    private static void Compose(FontProgram font, OpenTypeLayout? layout, GlyphRun run, Script script)
     {
-        for (int i = 0; i + 1 < run.Count; i++)
+        if (run.Count < 2) return;
+        bool arabic = script == Script.Arabic;
+        int phase = CombiningClassBelow;
+        int starter = 0, previousClass = CompositionClass(run[0].CodePoint, arabic, ref phase);
+        for (int i = 1; i < run.Count;)
         {
-            var letter = run[i];
-            if (letter.CodePoint < ComposedFirst && UnicodeTables.CombiningClass(letter.CodePoint) == 0)
-            {
-                ComposeCanonically(font, layout, run, i);
-                continue;
-            }
-            if (letter.CodePoint is < ComposedFirst or > ComposedLast || IsMark(letter.Props)) continue;
-            while (i + 1 < run.Count && UnicodeTables.Compose(letter.CodePoint, run[i + 1].CodePoint) is var composed and not 0
+            var mark = run[i];
+            int combiningClass = CompositionClass(mark.CodePoint, arabic, ref phase);
+            var letter = run[starter];
+            if ((starter == i - 1 || previousClass < combiningClass) && mark.CodePoint >= FirstMark && IsUnicodeMark(mark.CodePoint)
+                && !IsUnicodeMark(letter.CodePoint) && UnicodeNormalization.ComposePair(letter.CodePoint, mark.CodePoint) is var composed and not 0
                 && font.GlyphId(composed) is var gid and not 0)
             {
-                var mark = run[i + 1];
                 letter.CodePoint = composed;
                 letter.Gid = gid;
                 letter.Props = layout is { HasGlyphClasses: true } ? layout.GlyphProps(gid) : OpenTypeLayout.Base;
                 letter.Length = Math.Max(letter.Cluster + letter.Length, mark.Cluster + mark.Length) - letter.Cluster;
-                run[i] = letter;
-                run.RemoveAt(i + 1);
+                run[starter] = letter;
+                run.RemoveAt(i);
+                continue;
             }
+            previousClass = combiningClass;
+            if (combiningClass == 0) starter = i;
+            i++;
         }
     }
 
     /// <summary>
-    /// Composes a letter before the Arabic block (Latin, Greek, Cyrillic, ...) with the combining marks after it, as
-    /// Unicode normalization composes them and HarfBuzz does when the font has the precomposed letter: each mark in
-    /// turn, unless a mark of the same or a higher class that stays separate comes between them.
+    /// The combining class that decides whether a mark can reach the letter before it: the modified class, except that
+    /// in Arabic the modifier marks that <see cref="MoveModifierMarks"/> put at the front of their run count as 22 (below)
+    /// and 26 (above), lower than the harakat, as HarfBuzz renumbers them so that the run stays sorted.
+    /// <paramref name="phase"/> follows the front of the run: the class of the modifier marks that may come next there,
+    /// or 0 once they are past.
     /// </summary>
-    private static void ComposeCanonically(FontProgram font, OpenTypeLayout? layout, GlyphRun run, int i)
+    private static int CompositionClass(int cp, bool arabic, ref int phase)
     {
-        var letter = run[i];
-        int lastClass = 0;
-        for (int j = i + 1; j < run.Count;)
+        int combiningClass = UnicodeTables.ModifiedCombiningClass(cp);
+        if (!arabic) return combiningClass;
+        if (combiningClass == 0)
         {
-            var mark = run[j];
-            int combiningClass = UnicodeTables.CombiningClass(mark.CodePoint);
-            if (combiningClass == 0) return;
-            if (lastClass < combiningClass && ComposePair(letter.CodePoint, mark.CodePoint) is var composed and not 0
-                && font.GlyphId(composed) is var gid and not 0)
-            {
-                letter.CodePoint = composed;
-                letter.Gid = gid;
-                letter.Props = layout is { HasGlyphClasses: true } ? layout.GlyphProps(gid) : OpenTypeLayout.Base;
-                letter.Length = Math.Max(letter.Cluster + letter.Length, mark.Cluster + mark.Length) - letter.Cluster;
-                run[i] = letter;
-                run.RemoveAt(j);
-                continue;
-            }
-            lastClass = combiningClass;
-            j++;
+            phase = CombiningClassBelow;
+            return 0;
         }
-    }
-
-    // The character a letter and a combining mark compose to under Unicode normalization, or 0.
-    private static int ComposePair(int letter, int mark)
-    {
-        string composed = string.Concat(char.ConvertFromUtf32(letter), char.ConvertFromUtf32(mark)).Normalize(System.Text.NormalizationForm.FormC);
-        return char.IsSurrogatePair(composed, 0) && composed.Length == 2 ? char.ConvertToUtf32(composed, 0)
-            : composed.Length == 1 ? composed[0] : 0;
+        if (phase == CombiningClassBelow)
+        {
+            if (combiningClass == CombiningClassBelow && IsModifierMark(cp)) return 22;
+            phase = CombiningClassAbove;
+        }
+        if (phase == CombiningClassAbove)
+        {
+            if (combiningClass == CombiningClassAbove && IsModifierMark(cp)) return 26;
+            phase = 0;
+        }
+        return combiningClass;
     }
 
     private static int CombiningClass(GlyphRun run, int index) => UnicodeTables.ModifiedCombiningClass(run[index].CodePoint);

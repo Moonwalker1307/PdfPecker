@@ -121,5 +121,12 @@ NotoSans-Subset	Voix ambiguë d'un cœur qui, au zéphyr, préfère les jatt
 NotoSans-Subset	Pchnąć w tę łódź jeża lub ośm skrzyń fig. Źdźbło
 NotoSans-Subset	Tiếng Việt có dấu: Những người ở đây rất tốt bụng. Thưởng thức phở.
 NotoSans-Subset	Ξεσκεπάζω την ψυχοφθόρα βδελυγμία. Ἀρχὴ ἥμισυ παντός.
+NotoSans-Subset	<U+1EA0 U+0306 U+0020 U+1EA1 U+0302 U+0020 U+1EB8 U+0302 U+0301>
+NotoSans-Subset	<U+1F00 U+0301 U+0345 U+0020 U+1F08 U+0300 U+0020 U+1F70 U+0345>
+# Arabic letters and the marks they compose with past other marks.
+NotoSansArabic-Subset	<U+0627 U+064E U+0653>
+NotoSansArabic-Subset	<U+0627 U+0653 U+064E U+064F>
+NotoSansArabic-Subset	<U+0627 U+0658 U+0653>
+NotoSansArabic-Subset	<U+0628 U+0627 U+064E U+0653 U+0020 U+064A U+0650 U+0654>
 # Thaana (Dhivehi), right to left, with its vowel marks.
 NotoSansThaana-Subset	ދިވެހި ބަސް އަކީ ދިވެހިރާއްޖޭގެ ބަހެވެ

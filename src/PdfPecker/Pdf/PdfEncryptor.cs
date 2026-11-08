@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using PdfPecker.Rendering.Parsing;
+using PdfPecker.Text;
 
 namespace PdfPecker.Pdf;
 
@@ -58,11 +59,14 @@ internal sealed class PdfEncryptor : IPdfObjectEncryption, IDisposable
         Perms = _aes.EncryptEcb(perms, PaddingMode.None);
     }
 
-    /// <summary>Passwords are UTF-8 after normalization (an approximation of SASLprep), at most 127 bytes.</summary>
+    /// <summary>
+    /// Passwords are UTF-8 after NFKC normalization (an approximation of SASLprep), at most 127 bytes. The library's own
+    /// normalization gives the same key on every host, ICU or not.
+    /// </summary>
     private static byte[] PasswordBytes(string? password)
     {
         if (string.IsNullOrEmpty(password)) return Array.Empty<byte>();
-        var b = Encoding.UTF8.GetBytes(password.Normalize(NormalizationForm.FormKC));
+        var b = Encoding.UTF8.GetBytes(UnicodeNormalization.Normalize(password, NormalizationForm.FormKC));
         return b.Length > 127 ? b.AsSpan(0, 127).ToArray() : b;
     }
 
