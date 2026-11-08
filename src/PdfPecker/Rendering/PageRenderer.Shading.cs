@@ -174,9 +174,9 @@ internal sealed partial class PageRenderer
     private IShader? CreateShadingShader(PdfDict shading, in Matrix shadingToDevice, bool usePatternBackground)
     {
         int type = _file.GetInt(shading, "ShadingType", 0);
-        var cs = ColorSpace.Parse(_file, shading["ColorSpace"] ?? shading["CS"], null);
+        var cs = _cache.GetColorSpace(_file, shading["ColorSpace"] ?? shading["CS"], _cacheUse);
         if (cs == null) return null;
-        var fn = PdfFunction.Create(_file, _file.Resolve(shading["Function"]));
+        var fn = _cache.GetFunction(_file, shading["Function"], _cacheUse);
         if (!shadingToDevice.TryInvert(out var inv)) return null;
         uint background = 0;
         if (usePatternBackground && _file.GetNumbers(shading, "Background") is { } bg && bg.Length >= cs.Components)
