@@ -191,6 +191,8 @@ internal sealed partial class ComputedStyle
     public string? SvgFillUrl { get => _svgPaint.SvgFillUrl; set => SvgPaint.SvgFillUrl = value; }
     public uint? SvgStroke { get => _svgPaint.SvgStroke; set => SvgPaint.SvgStroke = value; }
     public string? SvgStrokeUrl { get => _svgPaint.SvgStrokeUrl; set => SvgPaint.SvgStrokeUrl = value; }
+    public bool SvgFillCurrent { get => _svgPaint.SvgFillCurrent; set => SvgPaint.SvgFillCurrent = value; }
+    public bool SvgStrokeCurrent { get => _svgPaint.SvgStrokeCurrent; set => SvgPaint.SvgStrokeCurrent = value; }
     public float SvgStrokeWidth { get => _svgPaint.SvgStrokeWidth; set => SvgPaint.SvgStrokeWidth = value; }
     public float SvgFillOpacity { get => _svgPaint.SvgFillOpacity; set => SvgPaint.SvgFillOpacity = value; }
     public float SvgStrokeOpacity { get => _svgPaint.SvgStrokeOpacity; set => SvgPaint.SvgStrokeOpacity = value; }
@@ -208,6 +210,18 @@ internal sealed partial class ComputedStyle
     public string? SvgMarkerMid { get => _svgPaint.SvgMarkerMid; set => SvgPaint.SvgMarkerMid = value; }
     public string? SvgMarkerEnd { get => _svgPaint.SvgMarkerEnd; set => SvgPaint.SvgMarkerEnd = value; }
     public bool SvgFilterSrgb { get => _svgPaint.SvgFilterSrgb; set => SvgPaint.SvgFilterSrgb = value; }
+
+    /// <summary>
+    /// The fill colour to paint with: currentColor is resolved now, against this style's colour, since currentColor is
+    /// inherited as the keyword and an element drawn by a use element takes its colour from there.
+    /// </summary>
+    public uint? SvgFillColor => _svgPaint.SvgFillCurrent ? CurrentPaint(Color) : _svgPaint.SvgFill;
+
+    /// <summary>The stroke colour to paint with, currentColor resolved against this style's colour.</summary>
+    public uint? SvgStrokeColor => _svgPaint.SvgStrokeCurrent ? CurrentPaint(Color) : _svgPaint.SvgStroke;
+
+    // A transparent colour paints nothing, as a transparent fill or stroke does.
+    private static uint? CurrentPaint(uint color) => CssColor.IsVisible(color) ? color : null;
 
     /// <summary>
     /// Whether this style took every SVG paint property from <paramref name="parent"/> unchanged. A child shares its
@@ -237,6 +251,7 @@ internal sealed partial class ComputedStyle
         public string? SvgFillUrl;               // fill: url(#id)
         public uint? SvgStroke;
         public string? SvgStrokeUrl;
+        public bool SvgFillCurrent, SvgStrokeCurrent; // fill or stroke: currentColor (alone or as a url() fallback)
         public float SvgStrokeWidth = 1;         // user units
         public float SvgFillOpacity = 1, SvgStrokeOpacity = 1;
         public bool SvgEvenOdd;
