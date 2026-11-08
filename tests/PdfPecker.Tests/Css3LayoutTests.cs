@@ -550,6 +550,28 @@ public class Css3LayoutTests
         Assert.True(Box(ops, "#00ff00").H > 30);
     }
 
+    [Theory]
+    [InlineData("center")]
+    [InlineData("flex-end")]
+    public void A_column_flex_box_with_a_min_height_grows_to_its_content_when_aligned(string justify)
+    {
+        // Content taller than the min-height makes the box taller, as in Chrome, so centring or aligning it to the end
+        // must not push it above the box's top (a cover page's centred content longer than the page lost its start).
+        var ops = Layout("<div style='display:flex;flex-direction:column;justify-content:" + justify + ";min-height:20pt;font:10pt Helvetica'>" +
+                         "<div style='height:60pt;background:#ff0000'></div></div>");
+        Near(0, Box(ops, "#ff0000").Y);
+        // With a definite height the content overflows on both sides when centred, also as in Chrome.
+        ops = Layout("<div style='display:flex;flex-direction:column;justify-content:center;height:20pt'>" +
+                     "<div style='height:60pt;background:#ff0000'></div></div>");
+        Near(-20, Box(ops, "#ff0000").Y);
+        // A centred column longer than the page keeps every line, from the first page's top.
+        string lines = string.Concat(Enumerable.Range(0, 30).Select(i => "<p style='margin:0'>Line " + i.ToString(System.Globalization.CultureInfo.InvariantCulture) + "</p>"));
+        var pdf = HtmlToPdf.Convert("<style>@page{size:300pt 200pt;margin:20pt}</style><main style='display:flex;flex-direction:column;justify-content:" + justify + ";min-height:100vh'><div>" + lines + "</div></main>");
+        var pages = PdfText.ExtractPages(pdf);
+        Assert.Equal(3, pages.Count);
+        Assert.StartsWith("Line 0", pages[0].Text, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Aspect_ratio_with_a_definite_height_gives_the_width_in_a_flex_row()
     {

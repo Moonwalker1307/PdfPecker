@@ -804,7 +804,9 @@ internal sealed partial class LayoutEngine
                 }
                 else Distribute(justify, free, items.Count, out startOffset, out between);
             }
-            else if (free < -Eps && justify is BoxAlign.End or BoxAlign.Center) Distribute(justify, free, items.Count, out startOffset, out between);
+            // Items overflow a box of a definite height on both sides when centred. A box with only a min-height grows
+            // to hold them instead, so it has no negative free space to hand out, and its content stays below its top.
+            else if (free < -Eps && definiteH != null && justify is BoxAlign.End or BoxAlign.Center) Distribute(justify, free, items.Count, out startOffset, out between);
         }
 
         float cy = y + startOffset;
