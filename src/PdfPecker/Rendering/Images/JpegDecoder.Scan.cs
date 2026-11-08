@@ -145,6 +145,16 @@ internal sealed partial class JpegDecoder
         var ac = Table(_acTables, c.AcTable);
         for (int k = 1; k <= LastCoefficient;)
         {
+            // A damaged run past the last coefficient is left to the full decode, which stops before its extra bits.
+            int fast = _bits.PeekFastAc(ac);
+            if (fast != 0 && k + (fast >> 5 & 15) <= LastCoefficient)
+            {
+                _bits.Skip(fast & 31);
+                k += fast >> 5 & 15;
+                block[ZigZag[k]] = (short)(fast >> 9);
+                k++;
+                continue;
+            }
             int symbol = _bits.Decode(ac);
             int run = symbol >> 4, size = symbol & 15;
             if (size == 0)
@@ -170,6 +180,15 @@ internal sealed partial class JpegDecoder
         var ac = Table(_acTables, c.AcTable);
         for (int k = band.Start; k <= band.End;)
         {
+            int fast = _bits.PeekFastAc(ac);
+            if (fast != 0 && k + (fast >> 5 & 15) <= LastCoefficient)
+            {
+                _bits.Skip(fast & 31);
+                k += fast >> 5 & 15;
+                block[ZigZag[k]] = (short)((fast >> 9) * (1 << band.Low));
+                k++;
+                continue;
+            }
             int symbol = _bits.Decode(ac);
             int run = symbol >> 4, size = symbol & 15;
             if (size == 0)

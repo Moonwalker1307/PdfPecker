@@ -1,3 +1,4 @@
+using System.Numerics;
 using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker.Rendering.Content;
@@ -233,6 +234,56 @@ internal sealed class DeviceCmyk : ColorSpace
         return (RedFit.Channel(c, m, y, k), GreenFit.Channel(c, m, y, k), BlueFit.Channel(c, m, y, k));
     }
 
+    // The 8-bit samples as the inks Convert takes, plain and inverted: a float division and clamp widened to double.
+    private static readonly double[] SampleInks = SampleTable(inverted: false), InvertedSampleInks = SampleTable(inverted: true);
+
+    private static double[] SampleTable(bool inverted)
+    {
+        var table = new double[256];
+        for (int i = 0; i < 256; i++)
+        {
+            float f = i / 255f;
+            if (inverted) f = 1 - f;
+            table[i] = Math.Clamp(f, 0, 1);
+        }
+        return table;
+    }
+
+    /// <summary>
+    /// Converts 8-bit CMYK samples, four bytes a pixel, to opaque 0xAABBGGRR pixels: the same values as
+    /// <see cref="Convert"/> gives each one, several pixels at a time.
+    /// </summary>
+    public static void ConvertSamples(ReadOnlySpan<byte> cmyk, bool inverted, Span<uint> pixels)
+    {
+        var ink = inverted ? InvertedSampleInks : SampleInks;
+        int i = 0;
+        if (Vector.IsHardwareAccelerated)
+        {
+            int n = Vector<double>.Count;
+            Span<double> c = stackalloc double[n], m = stackalloc double[n], y = stackalloc double[n], k = stackalloc double[n];
+            for (; i <= pixels.Length - n; i += n)
+            {
+                for (int j = 0, s = 4 * i; j < n; j++, s += 4)
+                {
+                    c[j] = ink[cmyk[s]];
+                    m[j] = ink[cmyk[s + 1]];
+                    y[j] = ink[cmyk[s + 2]];
+                    k[j] = ink[cmyk[s + 3]];
+                }
+                Vector<double> vc = new(c), vm = new(m), vy = new(y), vk = new(k);
+                var r = RedFit.Channel(vc, vm, vy, vk);
+                var g = GreenFit.Channel(vc, vm, vy, vk);
+                var b = BlueFit.Channel(vc, vm, vy, vk);
+                for (int j = 0; j < n; j++) pixels[i + j] = (uint)(r[j] | g[j] << 8 | b[j] << 16) | 0xFF000000;
+            }
+        }
+        for (int s = 4 * i; i < pixels.Length; i++, s += 4)
+        {
+            double c = ink[cmyk[s]], m = ink[cmyk[s + 1]], y = ink[cmyk[s + 2]], k = ink[cmyk[s + 3]];
+            pixels[i] = (uint)(RedFit.Channel(c, m, y, k) | GreenFit.Channel(c, m, y, k) << 8 | BlueFit.Channel(c, m, y, k) << 16) | 0xFF000000;
+        }
+    }
+
     /// <summary>
     /// The coefficients of one output channel's second-degree polynomial in C, M, Y and K, grouped by the first ink of
     /// each term: C*(CC*C + CM*M + CY*Y + CK*K + C1) + M*(MM*M + MY*Y + MK*K + M1) + Y*(YY*Y + YK*K + Y1) + K*(KK*K + K1).
@@ -251,6 +302,17 @@ internal sealed class DeviceCmyk : ColorSpace
                            + y * (YY * y + YK * k + Y1)
                            + k * (KK * k + K1);
             return (int)Math.Clamp(v + 0.5, 0, 255);
+        }
+
+        /// <summary><see cref="Channel(double, double, double, double)"/> of several colors, with the same operations in the same order.</summary>
+        public Vector<long> Channel(Vector<double> c, Vector<double> m, Vector<double> y, Vector<double> k)
+        {
+            var v = new Vector<double>(255) + c * (CC * c + CM * m + CY * y + CK * k + new Vector<double>(C1))
+                                            + m * (MM * m + MY * y + MK * k + new Vector<double>(M1))
+                                            + y * (YY * y + YK * k + new Vector<double>(Y1))
+                                            + k * (KK * k + new Vector<double>(K1));
+            v = Vector.Min(Vector.Max(v + new Vector<double>(0.5), Vector<double>.Zero), new Vector<double>(255));
+            return Vector.ConvertToInt64(v);
         }
     }
 }
