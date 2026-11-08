@@ -4,7 +4,8 @@ name: Fuzz
 # change can merge. A finding fails the job and uploads the minimised inputs; see fuzz/README.md.
 on:
   schedule:
-    - cron: "17 2 * * *"
+    # 03:01 Copenhagen time in winter (cron runs in UTC, so 04:01 in summer).
+    - cron: "1 2 * * *"
   workflow_dispatch:
     inputs:
       minutes:
