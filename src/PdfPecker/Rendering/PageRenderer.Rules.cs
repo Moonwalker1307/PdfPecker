@@ -103,10 +103,11 @@ internal sealed partial class PageRenderer
             if (frame[i - start]) fills.RemoveAt(i);
     }
 
-    private static void AddFilledRule(TextCollector rules, double x0, double y0, double x1, double y1, uint color, bool plain, in ClipBoxes clip, double radius)
+    private static void AddFilledRule(TextCollector rules, double x0, double y0, double x1, double y1, uint color, bool plain, in ClipBoxes clip, double radius,
+        bool bullet = true)
     {
         double w = x1 - x0, h = y1 - y0;
-        if (w is >= 1.5 and <= TextCollector.MaxBullet && h is >= 1.5 and <= TextCollector.MaxBullet && w <= 2 * h && h <= 2 * w)
+        if (bullet && w is >= 1.5 and <= TextCollector.MaxBullet && h is >= 1.5 and <= TextCollector.MaxBullet && w <= 2 * h && h <= 2 * w)
             rules.AddBullet(x0, y0, x1, y1);
         if (w >= h && h <= TextCollector.MaxRuleThickness && w > 2 * h && w >= 2)
             rules.AddRule(new PageRule(true, (y0 + y1) / 2, x0, x1, Color: color, Width: h));
@@ -114,6 +115,15 @@ internal sealed partial class PageRenderer
             rules.AddRule(new PageRule(false, (x0 + x1) / 2, y0, y1, Color: color, Width: w));
         else if (w > TextCollector.MaxRuleThickness && h > TextCollector.MaxRuleThickness)
         {
+            // Inset, outset, groove and ridge borders fill a cell's whole box through a clip of one side's strip, so the
+            // part of a box the clip leaves is what the page shows: a strip of it is a line, not the box's edges. Each
+            // part is a line or an area; a bullet is drawn as a shape of its own.
+            if (clip.Pieces(x0, y0, x1, y1) is { } pieces)
+            {
+                foreach (var (px0, py0, px1, py1) in pieces)
+                    AddFilledRule(rules, px0, py0, px1, py1, color, plain, default, radius, bullet: false);
+                return;
+            }
             // The top and bottom of a background, such as a table row's, can stand for the lines between rows.
             rules.AddRule(new PageRule(true, y0, x0, x1, Edge: true));
             rules.AddRule(new PageRule(true, y1, x0, x1, Edge: true));
@@ -181,6 +191,59 @@ internal readonly struct ClipBoxes((double X0, double Y0, double X1, double Y1)[
             if (inside % 2 == 0) return false;
         }
         return true;
+    }
+
+    /// <summary>Clip edges this close to a box's, in points, do not cut it.</summary>
+    private const double Slack = 0.01;
+
+    /// <summary>The most parts a box is cut into; more are a pattern of clips rather than a border.</summary>
+    private const int MaxPieces = 16;
+
+    /// <summary>
+    /// The parts of a box the clips paint, when they cut it down: a clip of one box keeps the part inside it, and a clip
+    /// of a box with another inside it, a frame, the part between them. Null when the clips leave the box whole, or are of
+    /// a shape these boxes cannot follow, which leaves it whole too.
+    /// </summary>
+    public List<(double X0, double Y0, double X1, double Y1)>? Pieces(double x0, double y0, double x1, double y1)
+    {
+        if (levels == null) return null;
+        var pieces = new List<(double X0, double Y0, double X1, double Y1)> { (x0, y0, x1, y1) };
+        bool cut = false;
+        foreach (var level in levels)
+        {
+            (double X0, double Y0, double X1, double Y1) outer, hole;
+            if (level.Length == 1) (outer, hole) = (level[0], default);
+            else if (level.Length == 2 && Holds(level[0], level[1])) (outer, hole) = (level[0], level[1]);
+            else if (level.Length == 2 && Holds(level[1], level[0])) (outer, hole) = (level[1], level[0]);
+            else return null;
+            var next = new List<(double X0, double Y0, double X1, double Y1)>(pieces.Count);
+            foreach (var p in pieces)
+            {
+                // A clip drawn along the box's own edges leaves it as it is.
+                var c = (X0: outer.X0 > p.X0 + Slack ? outer.X0 : p.X0, Y0: outer.Y0 > p.Y0 + Slack ? outer.Y0 : p.Y0,
+                    X1: outer.X1 < p.X1 - Slack ? outer.X1 : p.X1, Y1: outer.Y1 < p.Y1 - Slack ? outer.Y1 : p.Y1);
+                if (c != p) cut = true;
+                if (c.X1 - c.X0 <= Slack || c.Y1 - c.Y0 <= Slack) continue;
+                if (level.Length == 1 || hole.X0 >= c.X1 - Slack || hole.X1 <= c.X0 + Slack || hole.Y0 >= c.Y1 - Slack || hole.Y1 <= c.Y0 + Slack)
+                {
+                    next.Add(c);
+                    continue;
+                }
+                // What lies around the hole: the bands above and below it across the whole part, and beside it between them.
+                cut = true;
+                double top = Math.Max(c.Y0, hole.Y0), bottom = Math.Min(c.Y1, hole.Y1);
+                if (top - c.Y0 > Slack) next.Add((c.X0, c.Y0, c.X1, top));
+                if (c.Y1 - bottom > Slack) next.Add((c.X0, bottom, c.X1, c.Y1));
+                if (hole.X0 - c.X0 > Slack) next.Add((c.X0, top, hole.X0, bottom));
+                if (c.X1 - hole.X1 > Slack) next.Add((hole.X1, top, c.X1, bottom));
+            }
+            if (next.Count > MaxPieces) return null;
+            pieces = next;
+        }
+        return cut ? pieces : null;
+
+        static bool Holds((double X0, double Y0, double X1, double Y1) a, (double X0, double Y0, double X1, double Y1) b)
+            => a.X0 <= b.X0 && a.Y0 <= b.Y0 && a.X1 >= b.X1 && a.Y1 >= b.Y1;
     }
 
     /// <summary>The box no clip reaches outside of: within the outer box of every clip's subpaths; null for no clip.</summary>
