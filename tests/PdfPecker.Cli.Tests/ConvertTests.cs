@@ -350,6 +350,25 @@ public sealed class ConvertTests : IDisposable
     }
 
     [Fact]
+    public async Task WatchRendersAgainWhenAnInputStartsWithTheOutputName()
+    {
+        // Changes to any path that started with the output's were ignored, so with -o report the input report.html
+        // was rendered once and never again.
+        var html = _cli.Html("report.html", "<p>First version</p>");
+        var pdf = _cli.Path_("report");
+        using var cts = new CancellationTokenSource();
+        var run = Task.Run(() => _cli.RunWithInput(null, cts.Token, "watch", html, "-o", pdf));
+
+        await WaitFor(() => File.Exists(pdf) && CliRunner.Text(pdf).Contains("First version"));
+        File.WriteAllText(html, "<p>Second version</p>");
+        await WaitFor(() => CliRunner.Text(pdf).Contains("Second version"));
+
+        cts.Cancel();
+        var result = await run.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(0, result.Exit);
+    }
+
+    [Fact]
     public void WatchNeedsFilesAndAnOutputFile()
     {
         Assert.Equal(2, _cli.Run("watch", "-").Exit);
