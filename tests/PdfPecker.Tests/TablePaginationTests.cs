@@ -44,6 +44,71 @@ public class TablePaginationTests
         Assert.Equal("Row 10", pages[1].Lines[1].Text);
     }
 
+    [Theory]
+    [InlineData(1.5)]
+    [InlineData(4.5)]
+    [InlineData(10)]
+    public void A_header_is_repeated_when_the_border_spacing_before_a_row_reaches_past_the_page_end(double spacing)
+    {
+        // The box before the table puts the bottom of the sixth row half the spacing before the end of the 300-point
+        // page, so the seventh row would start just past it. As in Chrome, the spacing is dropped at the break and the
+        // row starts the next page under the repeated header, which sits at the top of the page. Rows are placed on
+        // whole pixels, so positions are compared to within a pixel.
+        double before = 100 - 7.5 * spacing;
+        string s = spacing.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        string b = before.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var pages = Pages($"<div style='height: {b}pt'>Before</div><table style='border-spacing: 0 {s}pt'><thead><tr><th style='height: 20pt'>Head</th></tr></thead><tbody>"
+                          + string.Concat(Enumerable.Range(1, 9).Select(i => $"<tr><td style='height: 30pt'>Row {i}</td></tr>")) + "</tbody></table>");
+        Assert.Equal(2, pages.Count);
+        Assert.Equal("Row 6", pages[0].Lines[^1].Text);
+        Assert.Equal(new[] { "Head", "Row 7", "Row 8", "Row 9" }, pages[1].Lines.Select(l => l.Text));
+        Assert.Equal(pages[0].Lines[1].Y - before - spacing, pages[1].Lines[0].Y, 1.0);
+        Assert.Equal(pages[0].Lines[2].Y - pages[0].Lines[1].Y, pages[1].Lines[1].Y - pages[1].Lines[0].Y, 1.0);
+    }
+
+    [Fact]
+    public void Border_spacing_that_reaches_past_the_page_end_is_dropped_there()
+    {
+        // The sixth row ends 5 points before the page end and the spacing is 10 points: as in Chrome, the seventh row
+        // starts at the top of the next page, as a row of a table without spacing would.
+        var pages = Pages("<div style='height: 25pt'>Before</div><table style='border-spacing: 0 10pt'><tbody>"
+                          + string.Concat(Enumerable.Range(1, 8).Select(i => $"<tr><td style='height: 35pt'>Row {i}</td></tr>")) + "</tbody></table>");
+        var unspaced = Pages("<table style='border-spacing: 0'><tr><td style='height: 35pt'>Row 7</td></tr></table>");
+        Assert.Equal("Row 6", pages[0].Lines[^1].Text);
+        Assert.Equal("Row 7", pages[1].Lines[0].Text);
+        Assert.Equal(unspaced[0].Lines[0].Y, pages[1].Lines[0].Y, 0.5);
+    }
+
+    [Theory]
+    [InlineData("", 1)]
+    [InlineData("<p style='margin: 0'>After</p>", 2)]
+    public void A_table_whose_bottom_spacing_reaches_past_the_page_end_ends_at_the_break(string after, int pageCount)
+    {
+        // The last row ends 5 points before the page end: the spacing under it is dropped, as in Chrome, so it adds no
+        // blank page, and what follows starts at the top of the next page.
+        var pages = Pages("<div style='height: 25pt'>Before</div><table style='border-spacing: 0 10pt'><tbody>"
+                          + string.Concat(Enumerable.Range(1, 6).Select(i => $"<tr><td style='height: 35pt'>Row {i}</td></tr>"))
+                          + "</tbody></table>" + after);
+        Assert.Equal(pageCount, pages.Count);
+        Assert.Equal("Row 6", pages[0].Lines[^1].Text);
+        if (pageCount == 2) Assert.True(pages[1].Lines[0].Y < 2);
+    }
+
+    [Theory]
+    [InlineData(265, 10)]
+    [InlineData(280, 0)]
+    public void A_table_moves_with_its_header_when_its_first_row_starts_the_next_page(int before, int spacing)
+    {
+        // The header ends 5 points before the page end with 10 points of spacing under it, or right at the end without
+        // spacing: the first row would start the next page and leave the header behind on its own, so the whole table
+        // moves, as in Chrome.
+        var pages = Pages($"<div style='height: {before}pt'>Before</div><table style='border-spacing: 0 {spacing}pt'>"
+                          + "<thead><tr><th style='height: 20pt'>Head</th></tr></thead><tbody><tr><td style='height: 30pt'>Row 1</td></tr>"
+                          + "<tr><td style='height: 30pt'>Row 2</td></tr></tbody></table>");
+        Assert.Equal(new[] { "Before" }, pages[0].Lines.Select(l => l.Text));
+        Assert.Equal(new[] { "Head", "Row 1", "Row 2" }, pages[1].Lines.Select(l => l.Text));
+    }
+
     [Fact]
     public void A_table_whose_first_row_does_not_fit_starts_on_the_next_page()
     {

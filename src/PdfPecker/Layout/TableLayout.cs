@@ -860,6 +860,15 @@ internal sealed partial class LayoutEngine
         m.DefiniteHeight = false;
         _cbHeight = outerCb;
 
+        // As in Chrome, the border spacing under the last row is dropped where a page or column break falls in it: the
+        // table ends at the break, with its bottom edge before it when that fits there, else on the next page.
+        if (m.Rows.Count > 0 && !cloned && BreakInSpacing(cy, vs))
+        {
+            float lastBottom = cy - vs, end = FlowEnd(PageOf(cy) - 1);
+            if (lastBottom + frameB <= end + Eps) cy = Math.Max(lastBottom, end - frameB);
+            else cy = frameB > Eps ? FlowStart(PageOf(cy)) : lastBottom;
+        }
+
         float tableBottom = cy + frameB;
         if (tableH is float minBottom && tableBottom - tableTop < minBottom) tableBottom = tableTop + minBottom;
         // caption-side: bottom puts a caption under the table's border box.
@@ -1145,6 +1154,13 @@ internal sealed partial class LayoutEngine
         return run.Height;
     }
 
+    /// <summary>
+    /// Whether a page or column break falls in border spacing <paramref name="vs"/> tall that ends at <paramref name="y"/>:
+    /// what comes before the spacing ends at or before the start of the page that <paramref name="y"/> is on.
+    /// </summary>
+    private bool BreakInSpacing(float y, float vs)
+        => _paginate && vs > Eps && PageOf(y) > 0 && !AtPageTop(y) && y - vs < FlowStart(PageOf(y)) + 0.5f;
+
     /// <summary>Lays out one table row at <paramref name="rowTop"/> and returns its bottom. A row that would straddle a
     /// page boundary moves to the next page, where the table's header rows are repeated first; so does a row whose
     /// following rows, <paramref name="keepWith"/> tall, should stay on its page and do not fit there.</summary>
@@ -1159,6 +1175,15 @@ internal sealed partial class LayoutEngine
         // As in Chrome, a row that does not fit breaks inside, unless that would leave a cell's content all on the next
         // page; with a repeated header and footer that is only known once the row is laid out again around them.
         bool mayBreakInside = true;
+        // As in Chrome, the border spacing above a row is dropped where a page or column break falls in it: the row
+        // starts the next page, as a row moved there does, and the header is repeated above it.
+        float spacingFrom = float.NaN;
+        if (allowMove && r > 0 && BreakInSpacing(rowTop, vs))
+        {
+            spacingFrom = rowTop - vs;
+            rowTop = FlowStart(PageOf(rowTop));
+        }
+        bool afterSpacingBreak = !float.IsNaN(spacingFrom);
     layOut:
         for (int attempt = 0; attempt < 2; attempt++)
         {
@@ -1223,19 +1248,28 @@ internal sealed partial class LayoutEngine
                             || keepWith > 0 && CrossesPage(rowTop, keptBottom + reserve)
                             || SpanContentCrossesPage(m, r, rowTop, reserve));
             if (move && !CrossesPage(rowTop, rowBottom + reserve)) rowBottom = keptBottom;
-            // A row that starts a page or column because the row before it ended right at the break gets the header too.
-            bool atBreak = !move && allowMove && attempt == 0 && r > m.HeadCount && m.HeadCount > 0
-                           && PageOf(rowTop) > 0 && AtPageTop(rowTop);
+            // A row that starts a page or column because the row before it ended right at the break, or the spacing
+            // after it reached past the break, gets the header too; after the header itself, the whole table moves.
+            bool atBreak = !move && allowMove && attempt == 0 && m.HeadCount > 0 && r >= m.HeadCount && PageOf(rowTop) > 0
+                           && AtPageTop(rowTop) && (r > m.HeadCount || afterSpacingBreak || m.MayMoveTable);
+            float spacingShortage = 0;
+            if (afterSpacingBreak)
+            {
+                // The page before would have held the row if it had been this much taller.
+                spacingShortage = spacingFrom + vs + (rowBottom - rowTop) + reserve - FlowEnd(PageOf(spacingFrom));
+                if (attempt == 0) _columnNotes?.Break(PageOf(spacingFrom), spacingFrom, spacingShortage);
+            }
             if (move || atBreak)
             {
                 // A row without content moved: the headers repeated before it are content that may be dropped again,
                 // so the table is laid out in full.
                 _rowProbe = null;
                 Truncate(rowStartOps);
-                if (move && r == m.HeadCount && m.MayMoveTable)
+                if (r == m.HeadCount && m.MayMoveTable)
                 {
                     // The first row does not fit: the whole table moves (see LayoutTable).
-                    m.TableMove = rowBottom + reserve - FlowEnd(PageOf(rowTop));
+                    m.TableMove = move ? rowBottom + reserve - FlowEnd(PageOf(rowTop))
+                        : afterSpacingBreak ? spacingShortage : rowBottom - rowTop + reserve;
                     return rowTop;
                 }
                 TableBreak? pageBreak = null;
@@ -1262,7 +1296,7 @@ internal sealed partial class LayoutEngine
                     rowTop = NextPage(rowTop);
                     if (collapse && _measuringRows == 0) pageBreak = new TableBreak(bodyEnd, end, edgeHalf, reserve > 0, rowTop, rowTop);
                 }
-                else _columnNotes?.Exact(PageOf(rowTop), rowTop, rowBottom - rowTop, _grid);
+                else if (!afterSpacingBreak) _columnNotes?.Exact(PageOf(rowTop), rowTop, rowBottom - rowTop, _grid);
                 if (r >= m.HeadCount)
                 {
                     float headStart = rowTop;
