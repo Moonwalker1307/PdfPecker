@@ -109,6 +109,134 @@ public class TablePaginationTests
         Assert.Equal(new[] { "Head", "Row 1", "Row 2" }, pages[1].Lines.Select(l => l.Text));
     }
 
+    [Theory]
+    [InlineData("<thead><tr><th style='height: 100px'>Head</th></tr></thead>", true)]
+    [InlineData("<thead><tr><th style='height: 101px'>Head</th></tr></thead>", false)]
+    [InlineData("<thead><tr><th style='height: 46px'>Head</th></tr><tr><th style='height: 46px'>Head</th></tr></thead>", true)]
+    [InlineData("<thead><tr><th style='height: 46px'>Head</th></tr><tr><th style='height: 47px'>Head</th></tr></thead>", false)]
+    [InlineData("<tfoot><tr><td style='height: 100px'>Foot</td></tr></tfoot>", true)]
+    [InlineData("<tfoot><tr><td style='height: 101px'>Foot</td></tr></tfoot>", false)]
+    public void A_header_or_footer_is_repeated_only_while_it_takes_at_most_a_quarter_of_the_page(string section, bool repeated)
+    {
+        // The pages are 400 pixels tall. As in Chrome, a header or footer is repeated only while its rows and the 8 pixels
+        // of spacing between them take at most a quarter of that; the spacing around them does not count. Before, one up
+        // to half the page was repeated.
+        string label = section.Contains("Head", StringComparison.Ordinal) ? "Head" : "Foot";
+        var pages = Pages($"<table style='border-spacing: 0 8px'>{section}<tbody>"
+                          + string.Concat(Enumerable.Range(1, 20).Select(i => $"<tr><td style='height: 30px'>Row {i}</td></tr>")) + "</tbody></table>");
+        Assert.True(pages.Count >= 3);
+        Assert.Equal(repeated ? pages.Count : 1, pages.Count(p => p.Lines.Any(l => l.Text == label)));
+    }
+
+    [Fact]
+    public void The_footer_at_the_end_of_a_table_goes_to_the_next_page_whole()
+    {
+        // The footer is too tall to repeat on the 400-pixel pages. Its first row fits under the last row and its second
+        // does not: as in Chrome, the footer goes to the next page whole instead of breaking between or inside its rows.
+        var pages = Pages("<table style='border-spacing: 0 8px'><tfoot><tr><td style='height: 60px'>Foot 1</td></tr><tr><td style='height: 60px'>Foot 2</td></tr></tfoot><tbody>"
+                          + string.Concat(Enumerable.Range(1, 8).Select(i => $"<tr><td style='height: 30px'>Row {i}</td></tr>")) + "</tbody></table>");
+        Assert.Equal(2, pages.Count);
+        Assert.Equal("Row 8", pages[0].Lines[^1].Text);
+        Assert.Equal(new[] { "Foot 1", "Foot 2" }, pages[1].Lines.Select(l => l.Text));
+    }
+
+    [Theory]
+    [InlineData(365, "")]                                    // the header's text fits, so it would break inside
+    [InlineData(383, "")]                                    // the header's text does not fit, so it moved alone
+    [InlineData(390, "")]                                    // the header starts the next page after the spacing
+    [InlineData(385, "border: 3px solid; padding: 4px")]     // or after the table's border and padding
+    [InlineData(345, "", "Head 2")]                          // the second header row does not fit
+    public void A_table_whose_header_does_not_fit_moves_to_the_next_page_with_its_top_edge(int before, string frame, string? second = null)
+    {
+        // As in Chrome, the whole table moves, with its top border, padding and spacing: before, the header row moved on
+        // its own and started the next page without them, broke inside, or left the table's top edge behind.
+        string head = "<thead><tr><th style='height: 30px; vertical-align: top'>Head</th></tr>"
+                      + (second != null ? "<tr><th style='height: 30px; vertical-align: top'>Head 2</th></tr>" : "") + "</thead>";
+        string table = $"<table style='border-spacing: 0 10px; {frame}'>{head}<tbody>"
+                       + string.Concat(Enumerable.Range(1, 3).Select(i => $"<tr><td><span style='display: inline-block; height: 45px'></span>Row {i}</td></tr>"))
+                       + "</tbody></table>";
+        var pages = Pages($"<div style='height: {before}px'>Before</div>" + table);
+        var alone = Pages(table).Single();
+        Assert.Equal(new[] { "Before" }, pages[0].Lines.Select(l => l.Text));
+        Assert.Equal(alone.Lines.Select(l => l.Text), pages[1].Lines.Select(l => l.Text));
+        Assert.Equal(alone.Lines[0].Y, pages[1].Lines[0].Y, 0.5);
+        Assert.Equal(alone.Lines[^1].Y, pages[1].Lines[^1].Y, 0.5);
+    }
+
+    [Theory]
+    [InlineData("border-spacing: 0 10px")]
+    [InlineData("border-spacing: 0; border: 3px solid; padding: 4px")]
+    public void A_table_whose_first_row_starts_the_next_page_moves_there_with_its_top_edge(string style)
+    {
+        // Only the table's top spacing or its border and padding fit on the first page: as in Chrome, they move with the
+        // first row instead of staying behind, also without a header.
+        string table = $"<table style='{style}'><tbody>"
+                       + string.Concat(Enumerable.Range(1, 3).Select(i => $"<tr><td><span style='display: inline-block; height: 45px'></span>Row {i}</td></tr>"))
+                       + "</tbody></table>";
+        var pages = Pages("<div style='height: 395px'>Before</div>" + table);
+        var alone = Pages(table).Single();
+        Assert.Equal(new[] { "Before" }, pages[0].Lines.Select(l => l.Text));
+        Assert.Equal(alone.Lines[0].Y, pages[1].Lines[0].Y, 0.5);
+    }
+
+    [Fact]
+    public void A_header_too_tall_to_repeat_stays_on_its_page_when_the_first_row_does_not_fit()
+    {
+        // A 101-pixel header is more than a quarter of the 400-pixel page, so it is not repeated: as in Chrome, the
+        // table does not move to keep it with the first row, and the rows go on alone on the next page.
+        var pages = Pages("<div style='height: 279px'>Before</div><table style='border-spacing: 0'><thead><tr><th style='height: 101px'>Head</th></tr></thead><tbody>"
+                          + string.Concat(Enumerable.Range(1, 3).Select(i => $"<tr><td><span style='display: inline-block; height: 45px'></span>Row {i}</td></tr>"))
+                          + "</tbody></table>");
+        Assert.Equal(new[] { "Before", "Head" }, pages[0].Lines.Select(l => l.Text));
+        Assert.Equal(new[] { "Row 1", "Row 2", "Row 3" }, pages[1].Lines.Select(l => l.Text));
+    }
+
+    [Fact]
+    public void A_repeated_footer_starts_no_lower_than_the_page_leaves_room_for_it()
+    {
+        // Rows of 30 pixels with 10 pixels of spacing, and a 50-pixel footer with its spacing under it: as in Chrome, the
+        // footer starts 60 pixels above the end of every page the table breaks across, also where the last row on the
+        // page ends right there, so the spacing above the footer gives way. Before, it then came 10 pixels lower.
+        var pages = Pages("<table style='border-spacing: 0 10px; font: 10px/1 sans-serif'><tfoot><tr><td style='height: 50px; vertical-align: top'>Foot</td></tr></tfoot><tbody>"
+                          + string.Concat(Enumerable.Range(1, 30).Select(i => $"<tr><td style='height: 30px; vertical-align: top'>Row {i}</td></tr>"))
+                          + "</tbody></table>");
+        var feet = pages.Take(pages.Count - 1).Select(p => p.Lines.Single(l => l.Text == "Foot").Y).ToList();
+        var rows = pages[0].Lines.Where(l => l.Text.StartsWith("Row ", StringComparison.Ordinal)).ToList();
+        Assert.Equal(4, pages.Count);
+        // The first row's text is 10 pixels below the page top, and the footer's 340 pixels.
+        Assert.All(feet, y => Assert.Equal(rows[0].Y + 330 * 0.75, y, 0.5));
+    }
+
+    [Theory]
+    [InlineData("<td style='padding: 20px 0'></td>", 385)]                       // the break would fall in the top padding
+    [InlineData("<td style='height: 40px; border-top: 10px solid'></td>", 393)]  // or in the top border
+    public void A_cell_with_only_its_top_border_and_padding_before_the_break_moves_with_its_row(string cell, int top)
+    {
+        // As in Chrome, a cell without content breaks only below its top border and padding: before, the row broke
+        // there, and the rest of it went on at the top of the next page, so the text row after it came higher.
+        string table = $"<table style='border-spacing: 0'><tr>{cell}</tr><tr><td style='vertical-align: top'>After</td></tr></table>";
+        var pages = Pages($"<div style='height: {top}px'>Before</div>" + table);
+        var alone = Pages(table).Single();
+        Assert.Equal(new[] { "Before" }, pages[0].Lines.Select(l => l.Text));
+        Assert.Equal(alone.Lines.Single().Y, pages[1].Lines.Single(l => l.Text == "After").Y, 0.5);
+    }
+
+    [Fact]
+    public void A_row_that_starts_in_the_room_for_the_repeated_footer_moves_to_the_next_page()
+    {
+        // The third row ends 5 pixels above the room for the footer, which is 30 pixels tall at the page end, and the
+        // fourth, a cell with only a height, starts after the spacing, 5 pixels into that room. As in Chrome, it moves to
+        // the next page whole: before, it broke there with nothing before the break, drew its first part under the
+        // footer, and went on 5 pixels longer on the next page.
+        var pages = Pages("<div style='height: 215px'>Before</div><table style='border-spacing: 0 10px'><tfoot><tr><td style='height: 20px'>Foot</td></tr></tfoot><tbody>"
+                          + "<tr><td style='height: 40px'>Row 1</td></tr><tr><td style='height: 40px'>Row 2</td></tr><tr><td style='height: 40px'>Row 3</td></tr>"
+                          + "<tr><td style='height: 40px'></td></tr><tr><td style='vertical-align: top'>After</td></tr></tbody></table>");
+        var alone = Pages("<table style='border-spacing: 0 10px'><tr><td style='height: 40px'></td></tr><tr><td style='vertical-align: top'>After</td></tr></table>").Single();
+        Assert.Equal(new[] { "Before", "Row 1", "Row 2", "Row 3", "Foot" }, pages[0].Lines.Select(l => l.Text));
+        // The spacing above the row is dropped at the break.
+        Assert.Equal(alone.Lines.Single().Y - 10 * 0.75, pages[1].Lines.Single(l => l.Text == "After").Y, 0.5);
+    }
+
     [Fact]
     public void A_table_whose_first_row_does_not_fit_starts_on_the_next_page()
     {
