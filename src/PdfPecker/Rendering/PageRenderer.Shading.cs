@@ -271,7 +271,9 @@ internal static class ShadingColor
     public static uint[] BuildLut(ColorSpace cs, PdfFunction? fn, double t0, double t1, int n)
     {
         var lut = new uint[n];
-        Span<double> outBuf = stackalloc double[Math.Max(8, fn?.Outputs ?? 0)];
+        // Room for every output and every component: a function with fewer outputs than the space has components
+        // leaves the rest at 0.
+        Span<double> outBuf = stackalloc double[PdfFunction.MaxOutputs];
         Span<float> comps = stackalloc float[Math.Max(1, cs.Components)];
         Span<double> input = stackalloc double[1];
         for (int i = 0; i < n; i++)
@@ -410,7 +412,7 @@ internal sealed class FunctionShader : IShader
         _inv = inv;
         _domain = domain;
         _background = background;
-        _out = new double[Math.Max(8, fn.Outputs)];
+        _out = new double[PdfFunction.MaxOutputs];
         _comps = new float[Math.Max(1, cs.Components)];
     }
 
