@@ -3,44 +3,47 @@ using System.Text;
 
 namespace PdfPecker.Html;
 
-internal static class HtmlEntities
+internal static partial class HtmlEntities
 {
-    private static readonly Dictionary<string, string> Named = Build();
-
-    private static Dictionary<string, string> Build()
+    // The table is built on the first named reference, so documents without one never pay for its 2,125 entries.
+    private static class Table
     {
-        // The commonly used subset of the HTML5 named character references.
-        const string table =
-            "amp=26 lt=3C gt=3E quot=22 apos=27 nbsp=A0 iexcl=A1 cent=A2 pound=A3 curren=A4 yen=A5 brvbar=A6 sect=A7 " +
-            "uml=A8 copy=A9 ordf=AA laquo=AB not=AC shy=AD reg=AE macr=AF deg=B0 plusmn=B1 sup2=B2 sup3=B3 acute=B4 " +
-            "micro=B5 para=B6 middot=B7 cedil=B8 sup1=B9 ordm=BA raquo=BB frac14=BC frac12=BD frac34=BE iquest=BF " +
-            "Agrave=C0 Aacute=C1 Acirc=C2 Atilde=C3 Auml=C4 Aring=C5 AElig=C6 Ccedil=C7 Egrave=C8 Eacute=C9 Ecirc=CA " +
-            "Euml=CB Igrave=CC Iacute=CD Icirc=CE Iuml=CF ETH=D0 Ntilde=D1 Ograve=D2 Oacute=D3 Ocirc=D4 Otilde=D5 " +
-            "Ouml=D6 times=D7 Oslash=D8 Ugrave=D9 Uacute=DA Ucirc=DB Uuml=DC Yacute=DD THORN=DE szlig=DF agrave=E0 " +
-            "aacute=E1 acirc=E2 atilde=E3 auml=E4 aring=E5 aelig=E6 ccedil=E7 egrave=E8 eacute=E9 ecirc=EA euml=EB " +
-            "igrave=EC iacute=ED icirc=EE iuml=EF eth=F0 ntilde=F1 ograve=F2 oacute=F3 ocirc=F4 otilde=F5 ouml=F6 " +
-            "divide=F7 oslash=F8 ugrave=F9 uacute=FA ucirc=FB uuml=FC yacute=FD thorn=FE yuml=FF OElig=152 oelig=153 " +
-            "Scaron=160 scaron=161 Yuml=178 fnof=192 circ=2C6 tilde=2DC ensp=2002 emsp=2003 thinsp=2009 zwnj=200C " +
-            "zwj=200D lrm=200E rlm=200F ndash=2013 mdash=2014 lsquo=2018 rsquo=2019 sbquo=201A ldquo=201C rdquo=201D " +
-            "bdquo=201E dagger=2020 Dagger=2021 bull=2022 hellip=2026 permil=2030 prime=2032 Prime=2033 lsaquo=2039 " +
-            "rsaquo=203A euro=20AC trade=2122 larr=2190 uarr=2191 rarr=2192 darr=2193 harr=2194 minus=2212 le=2264 " +
-            "ge=2265 ne=2260 infin=221E asymp=2248 check=2713 hearts=2665 Alpha=391 alpha=3B1 Beta=392 beta=3B2 " +
-            "Gamma=393 gamma=3B3 Delta=394 delta=3B4 pi=3C0 Pi=3A0 sigma=3C3 Sigma=3A3 Omega=3A9 omega=3C9 mu=3BC";
-        var d = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var pair in table.Split(' '))
+        public static readonly Dictionary<string, string> Named = BuildNamed();
+        public static readonly HashSet<string> Legacy = new(LegacyNames.Split(' '), StringComparer.Ordinal);
+    }
+
+    // The longest name, "CounterClockwiseContourIntegral", has 31 characters; the longest legacy name has 6.
+    private const int MaxNameLength = 31, MaxLegacyLength = 6;
+
+    private static Dictionary<string, string> BuildNamed()
+    {
+        var d = new Dictionary<string, string>(2200, StringComparer.Ordinal);
+        foreach (var pair in NamedTable.Split(' '))
         {
             int eq = pair.IndexOf('=');
-            int cp = int.Parse(pair.AsSpan(eq + 1), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-            d[pair.Substring(0, eq)] = char.ConvertFromUtf32(cp);
+            int comma = pair.IndexOf(',', eq);
+            string value = char.ConvertFromUtf32(Hex(comma < 0 ? pair.AsSpan(eq + 1) : pair.AsSpan(eq + 1, comma - eq - 1)));
+            if (comma >= 0) value += char.ConvertFromUtf32(Hex(pair.AsSpan(comma + 1)));
+            d[pair.Substring(0, eq)] = value;
         }
         return d;
+
+        static int Hex(ReadOnlySpan<char> s) => int.Parse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
     }
 
     /// <summary>Looks up a named character reference (without '&amp;' and ';').</summary>
-    public static bool TryGetNamed(string name, out string value) => Named.TryGetValue(name, out value!);
+    public static bool TryGetNamed(string name, out string value) => Table.Named.TryGetValue(name, out value!);
 
-    /// <summary>Decodes character references in <paramref name="s"/>. Returns the input when it has none.</summary>
-    public static string Decode(string s)
+    /// <summary>Decodes character references in text. Returns the input when it has none.</summary>
+    public static string Decode(string s) => Decode(s, attribute: false);
+
+    /// <summary>
+    /// Decodes character references in an attribute value, where a legacy name without ';' followed by a letter, a
+    /// digit or '=' stays as written, so "?a=1&amp;region=eu" in a URL keeps "&amp;reg".
+    /// </summary>
+    public static string DecodeAttribute(string s) => Decode(s, attribute: true);
+
+    private static string Decode(string s, bool attribute)
     {
         int amp = s.IndexOf('&');
         if (amp < 0) return s;
@@ -51,14 +54,14 @@ internal static class HtmlEntities
         {
             char c = s[i];
             if (c != '&') { sb.Append(c); i++; continue; }
-            int consumed = TryDecodeAt(s, i, sb);
+            int consumed = TryDecodeAt(s, i, sb, attribute);
             if (consumed == 0) { sb.Append('&'); i++; }
             else i += consumed;
         }
         return sb.ToString();
     }
 
-    private static int TryDecodeAt(string s, int i, StringBuilder sb)
+    private static int TryDecodeAt(string s, int i, StringBuilder sb, bool attribute)
     {
         int start = i + 1;
         if (start >= s.Length) return 0;
@@ -85,19 +88,29 @@ internal static class HtmlEntities
             sb.Append(char.ConvertFromUtf32(value));
             return p - i;
         }
+        // The HTML tokenizer takes the longest name in the table. A name with ';' can only be the whole run of letters
+        // and digits; without ';', only the legacy names count, as a prefix of the run, so "&copy2024" in text is
+        // "©2024" and "&notit;" is "¬it;" while "&notin;" is "∉".
         int end = start;
-        while (end < s.Length && end - start < 10 && char.IsLetterOrDigit(s[end])) end++;
-        if (end == start) return 0;
-        // Longest prefix match, so "&copy2024" still decodes &copy.
-        for (int len = end - start; len >= 2; len--)
+        while (end < s.Length && end - start <= MaxNameLength && char.IsAsciiLetterOrDigit(s[end])) end++;
+        int run = end - start;
+        if (run == 0) return 0;
+        if (run <= MaxNameLength && end < s.Length && s[end] == ';'
+            && Table.Named.TryGetValue(s.Substring(start, run), out var full))
         {
-            if (Named.TryGetValue(s.Substring(start, len), out var v))
-            {
-                int after = start + len;
-                if (after < s.Length && s[after] == ';') after++;
-                sb.Append(v);
-                return after - i;
-            }
+            sb.Append(full);
+            return end + 1 - i;
+        }
+        for (int len = Math.Min(run, MaxLegacyLength); len >= 2; len--)
+        {
+            string name = s.Substring(start, len);
+            if (!Table.Legacy.Contains(name)) continue;
+            // In an attribute, a legacy name followed by a letter, a digit or '=' is not a reference (HTML 13.2.5.73),
+            // which keeps query strings such as "&region=eu" intact.
+            int after = start + len;
+            if (attribute && after < s.Length && (char.IsAsciiLetterOrDigit(s[after]) || s[after] == '=')) return 0;
+            sb.Append(Table.Named[name]);
+            return after - i;
         }
         return 0;
     }
