@@ -852,6 +852,21 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_svg_viewports_and_huge_unit_lengths_stay_bounded()
+    {
+        // Each nested svg clips to its viewport, but only the first levels write a clip, so the PDF's save and restore
+        // depth stays small; a length whose unit overflows a float is invalid, not infinite.
+        const int depth = 400;
+        string nested = Repeat("<svg x='1mm' width='99%' height='99%' viewBox='0 0 100 100' preserveAspectRatio='xMaxYMax slice'>", depth)
+            + "<rect width='1e38in' height='3.4e38pc' fill='red'/><circle cx='1e38cm' r='1e38em' fill='red'/>" + Repeat("</svg>", depth);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var pdf = Bounded($"<svg width='100' height='100'>{nested}</svg><svg width='20' height='20'><rect width='20' height='20' fill='blue'/></svg>",
+            new PdfOptions { Compress = false });
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"Took {sw.Elapsed}");
+        Assert.Contains("0 0 1 rg", System.Text.Encoding.Latin1.GetString(pdf));
+    }
+
+    [Fact]
     public void Svg_use_references_cannot_expand_exponentially()
     {
         var sb = new StringBuilder("<svg width=100 height=100><defs><g id=g0><rect width=1 height=1/></g>");

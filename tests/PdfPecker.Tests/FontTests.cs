@@ -600,6 +600,62 @@ public class FontTests
         Assert.Contains("<03A9>", text);
     }
 
+    // Default ignorable characters as localisation libraries and emoji pickers leave them in text: bidi isolates around
+    // a placeholder, a zero width joiner and non-joiner, bidi marks and embeddings, the byte order mark, a word joiner,
+    // the emoji and ideographic variation selectors.
+    private const string Ignorables = "A\u00A9\uFE0FB \u2067ab\u2069 x\u200Dy\u200Cz \u200Ec\u200Fd \uFEFFe\u2060f \u202Ag\u202Ch i\U000E0100j";
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DefaultIgnorableCharactersAreNotDrawn(bool embedStandardFonts)
+    {
+        // Before, the standard fonts drew each as '?' and the embedded Liberation fonts drew a .notdef box, or their own
+        // visible glyph for the joiners and bidi marks. Browsers draw none of them.
+        var pdf = HtmlToPdf.Convert($"<p style='font-family:Arial'>{Ignorables}</p>", new PdfOptions { Compress = false, EmbedStandardFonts = embedStandardFonts });
+        AssertStructurallyValid(pdf);
+        Assert.Equal("A\u00A9B ab xyz cd ef gh ij", PdfText.Extract(pdf).Trim());
+        var shown = string.Concat(Regex.Matches(AllContent(pdf), @"\bBT\b.*?\bET\b", RegexOptions.Singleline).Select(m => m.Value));
+        if (embedStandardFonts)
+        {
+            Assert.DoesNotMatch(@"<(?:[0-9A-F]{4})*0000", shown); // no .notdef
+            Assert.DoesNotMatch(@"<[0-9A-F]+> <(?:200[C-F]|202[A-E]|206[6-9]|FEFF)>", Latin1(pdf)); // none in the ToUnicode map
+        }
+        else Assert.DoesNotContain("?", string.Concat(Regex.Matches(shown, @"\((?:[^)\\]|\\.)*\)").Select(m => m.Value)));
+    }
+
+    [Fact]
+    public void DefaultIgnorableCharactersTakeNoSpace()
+    {
+        // The layout and the drawing agree: the characters around one are measured, kerned and drawn as a pair.
+        foreach (var standard in StandardFont.All)
+        {
+            var embedded = BundledFonts.Get(standard)!;
+            foreach (TextFont font in new TextFont[] { standard, embedded })
+            {
+                Assert.Equal(Units(font, "AV ab"), Units(font, "A\u200EV a\u2067\u2069b"));
+                Assert.Equal(Units(font, "xy"), Units(font, "x\U000E0100y"));
+                Assert.Equal(0, font.CharWidth('\uFEFF', 12));
+            }
+            var glyphs = new List<ShapedGlyph>();
+            embedded.Shape("A\u200EV\u2069", 0, 4, glyphs);
+            Assert.Equal(new[] { 0, 2 }, glyphs.Select(g => g.Start));
+        }
+
+        static int Units(TextFont font, string text) => font.MeasureUnits(text, 0, text.Length);
+    }
+
+    [Fact]
+    public void ZeroWidthNonJoinerStillPreventsALigature()
+    {
+        var font = new EmbeddedFont(Assert.Single(FontProgram.Load(Font("Roboto-Liga.ttf"))), false, false);
+        var glyphs = new List<ShapedGlyph>();
+        font.Shape("fi", 0, 2, glyphs);
+        Assert.Single(glyphs);
+        font.Shape("f\u200Ci", 0, 3, glyphs);
+        Assert.Equal(new[] { 0, 2 }, glyphs.Select(g => g.Start));
+    }
+
     [Fact]
     public void DefaultOutputStillUsesTheStandardFonts()
     {

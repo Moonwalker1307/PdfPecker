@@ -82,6 +82,14 @@ internal abstract class TextFont
     /// <summary>The used value of line-height: normal at a font size (in points): the rounded ascent, descent and line gap.</summary>
     public float NormalLineHeight(float size) => RoundPx(Ascent * size) + RoundPx(-Descent * size) + RoundPx(LineGap * size);
 
+    /// <summary>
+    /// Whether a code point is default ignorable and so never drawn: bidi controls, joiners, variation selectors, the
+    /// byte order mark and the like, which take no space, as browsers hide them. The shaper removes them itself; the
+    /// text it never sees skips them with this. The soft hyphen is left to the layout, which draws it as a hyphen at a
+    /// line break.
+    /// </summary>
+    public static bool IsHidden(int cp) => cp > 0xAD && Text.UnicodeTables.IsDefaultIgnorable(cp);
+
     /// <summary>Splits text into runs that each use one concrete font. Most fonts are a single run.</summary>
     public virtual void Split(string text, List<FontRun> runs) => runs.Add(new FontRun(this, 0, text.Length));
 }

@@ -334,11 +334,17 @@ internal sealed partial class StyleResolver
         return true;
     }
 
-    private static void ParsePaint(string v, ComputedStyle s, uint? inheritedColor, string? inheritedUrl, bool inherit,
-        out uint? color, out string? url, uint? currentColor, string? currentUrl)
+    /// <summary>
+    /// Parses a fill or stroke paint. <paramref name="current"/> tells whether the colour is currentColor, alone or as
+    /// the fallback of a url(): the drawing resolves it against the colour where the shape is drawn, which for the content
+    /// of a use element is the use element's, not the colour where that content is defined. An invalid value keeps the
+    /// paint the element had (<paramref name="currentColor"/>, <paramref name="currentUrl"/>, <paramref name="wasCurrent"/>).
+    /// </summary>
+    private static void ParsePaint(string v, ComputedStyle s, out uint? color, out string? url, out bool current,
+        uint? currentColor, string? currentUrl, bool wasCurrent)
     {
-        if (inherit) { color = inheritedColor; url = inheritedUrl; return; }
         var t = v.Trim();
+        current = false;
         if (t.Equals("none", StringComparison.OrdinalIgnoreCase) || t.Equals("transparent", StringComparison.OrdinalIgnoreCase))
         {
             color = null;
@@ -358,16 +364,19 @@ internal sealed partial class StyleResolver
             url = close > 4 ? t.Substring(4, close - 4).Trim().Trim('"', '\'') : null;
             var fallback = close >= 0 ? t.Substring(close + 1).Trim() : "";
             color = fallback.Length > 0 && CssColor.TryParse(fallback, s.Color, out var fc) ? fc : null;
+            current = color != null && fallback.Equals("currentcolor", StringComparison.OrdinalIgnoreCase);
             return;
         }
         if (CssColor.TryParse(t, s.Color, out var c))
         {
             color = CssColor.IsVisible(c) ? c : null;
             url = null;
+            current = t.Equals("currentcolor", StringComparison.OrdinalIgnoreCase);
             return;
         }
         color = currentColor;
         url = currentUrl;
+        current = wasCurrent;
     }
 
     /// <summary>Parses a counter-reset, counter-set or counter-increment list: names, each optionally followed by an integer.</summary>
