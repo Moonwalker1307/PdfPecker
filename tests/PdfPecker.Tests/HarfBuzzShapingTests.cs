@@ -79,13 +79,25 @@ public class HarfBuzzShapingTests
     [InlineData("NotoSansDevanagari-Subset", "परीक्षा")]
     [InlineData("NotoSansBengali-Subset", "বাংলা ক্ষমা")]
     [InlineData("NotoSansThai-Subset", "ภาษาไทย")]
+    // A vowel sign drawn before its consonant, a vowel split in two around it, and a vowel decomposed into a mark
+    // that moves before the tone mark: their clusters copy as their text through /ActualText.
+    [InlineData("NotoSansDevanagari-Subset", "क्षत्रिय हिन्दी किताब प्रिय")]
+    [InlineData("NotoSansBengali-Subset", "কি কো")]
+    [InlineData("NotoSansTamil-Subset", "கொ கோ கௌ தமிழ்நாடு")]
+    [InlineData("NotoSansMalayalam-Subset", "കൊ കൈ")]
+    [InlineData("NotoSansThai-Subset", "น้ำ ภาษาไทย")]
     public void Text_extracted_from_the_pdf_is_the_text_written(string font, string text)
     {
-        // A conjunct is one glyph, which the PDF maps back to the characters it was made of. (A vowel sign drawn before
-        // its consonant is extracted where it is drawn, as the documented limitations say.)
+        // A conjunct is one glyph, which the PDF maps back to the characters it was made of.
         byte[] data = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", font + ".woff2"));
-        string html = "<style>@font-face{font-family:F;src:url(data:font/woff2;base64," + Convert.ToBase64String(data) + ")}"
+        string html = "<title>T</title><style>@font-face{font-family:F;src:url(data:font/woff2;base64," + Convert.ToBase64String(data) + ")}"
             + "body{font-family:F}</style><p>" + text + "</p>";
         Assert.Equal(text, PdfText.Extract(HtmlToPdf.Convert(html)).Trim());
+        // The same in PDF/A-2u and PDF/UA, whose spans nest in the marked content of the structure tree.
+        var tagged = HtmlToPdf.Convert(html, new PdfOptions { Conformance = PdfConformance.PdfA2u, Accessibility = PdfAccessibility.PdfUA1, Compress = false });
+        PdfTestHelpers.AssertStructurallyValid(tagged);
+        Assert.Equal(text, PdfText.Extract(tagged).Trim());
+        var content = PdfTestHelpers.AllContent(tagged);
+        Assert.Equal(Regex.Count(content, @"\bBDC\b") + Regex.Count(content, @"\bBMC\b"), Regex.Count(content, @"\bEMC\b"));
     }
 }

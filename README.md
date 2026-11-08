@@ -284,9 +284,10 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   can be sized to match a web font. `FontCollection.AddDeferred` registers a font that is read only when a document
   uses it, with a `unicode-range` so that fallback skips it for other characters, which suits large CJK fonts.
   [More](https://pdfpecker.net/docs/fonts/)
-- **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts, Thai and Lao, CJK line breaking and
-  justification, and hyphenation in eleven languages (with `hyphenate-limit-lines`), plus TeX patterns of your own,
-  which `HyphenationPatterns.Deferred` reads only when a document uses their language. [More](https://pdfpecker.net/docs/languages/)
+- **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts, Thai and Lao (copied and extracted as written,
+  with `/ActualText` where shaping reorders or shares glyphs), CJK line breaking and justification, and hyphenation in
+  eleven languages (with `hyphenate-limit-lines`), plus TeX patterns of your own, which
+  `HyphenationPatterns.Deferred` reads only when a document uses their language. [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks.
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Existing PDFs to PDF/A**: `PdfToPdfA` converts PDFs from any tool to PDF/A-2b, 2u, 3b or 3u without rasterizing

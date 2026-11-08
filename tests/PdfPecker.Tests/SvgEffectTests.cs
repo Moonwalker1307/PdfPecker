@@ -634,12 +634,12 @@ public class SvgEffectTests
     public void Shaped_text_on_a_path_keeps_its_joined_glyphs()
     {
         // Arabic is shaped as a whole and its glyphs placed one by one: the same glyphs as the straight text, joined forms
-        // included, each with its own text matrix.
+        // included, each with its own text matrix. The /ActualText of the straight text's clusters is not a glyph.
         var arabic = Convert.ToBase64String(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansArabic-Subset.ttf")));
-        string Glyphs(string text) => string.Join(" ", Regex.Matches(AllContent(HtmlToPdf.Convert(
+        string Glyphs(string text) => string.Join(" ", Regex.Matches(Regex.Replace(AllContent(HtmlToPdf.Convert(
             "<style>@font-face{font-family:Ar;src:url(data:font/ttf;base64," + arabic + ")}</style><body style='margin:0'>"
             + "<svg width='400' height='200' font-family='Ar' font-size='20' direction='rtl'><path id='p' d='M10 150 Q200 0 390 150'/>"
-            + text + "</svg></body>", NoMargins)), @"<([0-9A-F]+)>")
+            + text + "</svg></body>", NoMargins)), @"/ActualText <[0-9A-F]*>", ""), @"<([0-9A-F]+)>")
             .SelectMany(m => m.Groups[1].Value.Chunk(4).Select(c => new string(c))).Order(StringComparer.Ordinal));
         string straight = Glyphs("<text x='300' y='100'>مرحبا</text>");
         Assert.Equal(straight, Glyphs("<text><textPath href='#p' startOffset='90%'>مرحبا</textPath></text>"));
