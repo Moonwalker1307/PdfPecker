@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 
@@ -181,6 +182,40 @@ public class StructuredHtmlHostileInputTests
         for (int i = 0; i < 1000; i++) content.Append(Tagged(i, 10 + i % 20 * 29, 20 + i / 20 * 14, "c" + i.ToString(CultureInfo.InvariantCulture)));
         var html = Convert(Page(content.ToString(), structure: structure.ToArray()));
         Assert.Contains("c999", html);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Thousands_of_tagged_tables_spanning_huge_grids_stay_fast(bool textOfTheirOwn)
+    {
+        // A thousand tables of a hundred rows on the page, each with one cell claiming 100 by 1,000 grid positions, the
+        // most one table may cover. They all name the same marked content, so only the first has text, or each its own.
+        const int tables = 1000;
+        var tree = new StringBuilder();
+        for (int t = 0; t < tables; t++)
+        {
+            int mcid = textOfTheirOwn ? t : 0;
+            tree.Append("<< /S /Table /K [<< /S /TR /K [<< /S /TD /A << /O /Table /RowSpan 100 /ColSpan 1000 >> /K ")
+                .Append(mcid).Append(" >>] >> ");
+            for (int r = 1; r < 100; r++) tree.Append("<< /S /TR /K ").Append(mcid).Append(" >> ");
+            tree.Append("] >> ");
+        }
+        var structure = new[] { "<< /Type /StructTreeRoot /K 7 0 R >>", $"<< /Type /StructElem /S /Document /Pg 3 0 R /K [{tree}] >>" };
+        var content = new StringBuilder();
+        for (int i = 0; i < (textOfTheirOwn ? tables : 1); i++)
+            content.Append(Tagged(i, 10 + i % 25 * 23, 20 + i / 25 * 18, "t" + i.ToString(CultureInfo.InvariantCulture)));
+        var pdf = Page(content.ToString(), structure: structure);
+
+        // Each took seconds when every table laid out its grid, with text on the page or not.
+        var sw = Stopwatch.StartNew();
+        var md = PdfToMarkdown.Convert(pdf);
+        var text = PdfText.Extract(pdf);
+        sw.Stop();
+        Assert.True(sw.ElapsedMilliseconds < 5000, $"took {sw.ElapsedMilliseconds} ms");
+        string last = textOfTheirOwn ? "t999" : "t0";
+        Assert.Contains(last, md, StringComparison.Ordinal);
+        Assert.Contains(last, text, StringComparison.Ordinal);
     }
 
     [Fact]
