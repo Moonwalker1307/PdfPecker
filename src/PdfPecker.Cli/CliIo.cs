@@ -54,7 +54,7 @@ internal sealed class CliIo
         var full = Path.GetFullPath(path);
         var dir = Path.GetDirectoryName(full);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        var temp = full + ".pdfpecker-" + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".tmp";
+        var temp = TemporaryPath(full);
         try
         {
             File.WriteAllBytes(temp, bytes);
@@ -65,6 +65,10 @@ internal sealed class CliIo
             if (File.Exists(temp)) File.Delete(temp);
         }
     }
+
+    /// <summary>The file a complete output is written to before it replaces <paramref name="fullPath"/>.</summary>
+    public static string TemporaryPath(string fullPath)
+        => fullPath + ".pdfpecker-" + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".tmp";
 
     public void WriteOutput(string path, string text) => WriteOutput(path, new UTF8Encoding(false).GetBytes(text));
 }

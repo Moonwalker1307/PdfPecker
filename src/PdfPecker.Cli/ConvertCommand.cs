@@ -236,11 +236,13 @@ internal static class ConvertCommand
     {
         var signal = new SemaphoreSlim(0);
         var outputFull = Path.GetFullPath(job.Output);
+        var outputTemp = CliIo.TemporaryPath(outputFull);
 
         void OnChange(object? sender, FileSystemEventArgs e)
         {
-            // Writing the PDF (and its temporary file) must not start another render.
-            if (e.FullPath.StartsWith(outputFull, StringComparison.Ordinal)) return;
+            // Writing the PDF (and its temporary file) must not start another render. The paths are compared whole, so
+            // an input whose name only starts with the output's, report.html beside -o report, still renders again.
+            if (string.Equals(e.FullPath, outputFull, StringComparison.Ordinal) || string.Equals(e.FullPath, outputTemp, StringComparison.Ordinal)) return;
             try { signal.Release(); } catch (ObjectDisposedException) { }
         }
 
