@@ -81,6 +81,21 @@ public sealed class SnapshotTests
     }
 
     [Fact]
+    public void The_word_stream_in_a_title_or_link_is_not_taken_for_a_stream()
+    {
+        // The words once made the object a stream that swallowed the rest of the file with its random /ID.
+        using var folder = new TempFolder();
+        const string html = """
+            <html><head><title>Upstream report</title></head>
+            <body><p><a href="https://example.com/livestream">Watch the livestream</a></p></body></html>
+            """;
+        var first = Pdfs.Make(html, o => o.CreationDate = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero));
+        var second = Pdfs.Make(html, o => o.CreationDate = new DateTimeOffset(2026, 11, 4, 20, 0, 0, TimeSpan.Zero));
+        PdfAssert.MatchesSnapshot(first, "upstream", folder.Options(o => o.UpdateSnapshots = true));
+        PdfAssert.MatchesSnapshot(second, "upstream", folder.Options());
+    }
+
+    [Fact]
     public void PDF_A_metadata_dates_are_left_out()
     {
         using var folder = new TempFolder();
@@ -273,6 +288,45 @@ public sealed class SnapshotTests
         for (int i = 0; i < rgba.Length; i += 4)
             if (rgba[i] > 200 && rgba[i + 1] < 60 && rgba[i + 2] > 200) count++;
         return count;
+    }
+}
+
+public sealed class NormalizerTests
+{
+    private static byte[] File(string title, System.IO.Compression.CompressionLevel level)
+    {
+        var content = new MemoryStream();
+        using (var z = new System.IO.Compression.ZLibStream(content, level, leaveOpen: true))
+            z.Write(System.Text.Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat("BT /F1 12 Tf (Hello) Tj ET\n", 200))));
+        var pdf = new MemoryStream();
+        void Write(string s) => pdf.Write(System.Text.Encoding.Latin1.GetBytes(s));
+        Write($"%PDF-1.7\n1 0 obj\n<< /Title ({title} \\(stream\\)) /Keywords <73747265616d> % stream\n/URI /livestream >>\nendobj\n");
+        Write($"2 0 obj\n<< /Length {content.Length} /Filter /FlateDecode >>\nstream\n");
+        pdf.Write(content.ToArray());
+        Write("\nendstream\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n");
+        return pdf.ToArray();
+    }
+
+    [Theory]
+    [InlineData("Quarterly report")]
+    [InlineData("Upstream report")]
+    [InlineData("Mainstream endobj")]
+    public void Words_in_strings_names_and_comments_are_not_keywords(string title)
+    {
+        var fast = PdfNormalizer.Normalize(File(title, System.IO.Compression.CompressionLevel.Fastest));
+        var small = PdfNormalizer.Normalize(File(title, System.IO.Compression.CompressionLevel.SmallestSize));
+        Assert.Equal(["1", "2"], fast.Select(o => o.Number));
+        Assert.Equal("", fast[0].Stream);
+        Assert.StartsWith("BT /F1 12 Tf", fast[1].Stream, StringComparison.Ordinal);
+        // The streams were compressed differently, and their inflated content is what is compared.
+        Assert.Null(PdfNormalizer.FirstDifference(fast, small));
+    }
+
+    [Fact]
+    public void An_unbalanced_string_falls_back_to_the_plain_search()
+    {
+        var objects = PdfNormalizer.Normalize("%PDF-1.7\n1 0 obj\n(open\nendobj\n2 0 obj\n<< /A 1 >>\nendobj\n"u8.ToArray());
+        Assert.Equal(["1", "2"], objects.Select(o => o.Number));
     }
 }
 

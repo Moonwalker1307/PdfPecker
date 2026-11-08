@@ -44,15 +44,24 @@ internal static partial class PdfNormalizer
         var objects = new List<NormalizedObject>();
         var pattern = ObjectStart();
         int position = 0;
+        bool tokens = true;
         while (position < text.Length)
         {
             var m = pattern.Match(text, position);
             if (!m.Success) break;
             int start = m.Index + m.Length;
-            int end = text.IndexOf("endobj", start, StringComparison.Ordinal);
-            int streamAt = text.IndexOf("stream", start, StringComparison.Ordinal);
-            if (end < 0) end = text.Length;
-            if (streamAt < 0 || streamAt > end)
+            var (end, streamAt) = tokens ? FindObjectEnd(text, start) : (-1, -1);
+            if (end < 0)
+            {
+                // An unbalanced string in a damaged file hides the keywords. The plain search then finds them, as it
+                // does for every later object, so that such a file costs no more than one pass to its end.
+                tokens = false;
+                end = text.IndexOf("endobj", start, StringComparison.Ordinal);
+                streamAt = text.IndexOf("stream", start, StringComparison.Ordinal);
+                if (end < 0) end = text.Length;
+                if (streamAt > end) streamAt = -1;
+            }
+            if (streamAt < 0)
             {
                 objects.Add(new NormalizedObject(m.Groups[1].Value, Volatile().Replace(text[start..end], ""), ""));
                 position = end;
@@ -84,6 +93,84 @@ internal static partial class PdfNormalizer
         }
         return objects;
     }
+
+    /// <summary>
+    /// Where the object's value ends: at its endobj keyword, or at the stream keyword that follows its dictionary
+    /// (then streamAt is that position), or -1 when neither comes before the end of the file. The value is read token by
+    /// token, so the words in strings, names and comments (a link to …/livestream, a title "Upstream report") are not
+    /// taken for keywords.
+    /// </summary>
+    private static (int End, int StreamAt) FindObjectEnd(string text, int start)
+    {
+        int i = start;
+        while (i < text.Length)
+        {
+            char c = text[i];
+            switch (c)
+            {
+                case '%':
+                    while (i < text.Length && text[i] is not ('\r' or '\n')) i++;
+                    break;
+                case '(':
+                    i = SkipLiteralString(text, i);
+                    break;
+                case '<':
+                    if (i + 1 < text.Length && text[i + 1] == '<') i += 2;
+                    else
+                    {
+                        int close = text.IndexOf('>', i + 1);
+                        i = close < 0 ? text.Length : close + 1;
+                    }
+                    break;
+                case '>' or '[' or ']' or '{' or '}' or ')':
+                    i++;
+                    break;
+                case '/':
+                    i++;
+                    while (i < text.Length && IsRegular(text[i])) i++;
+                    break;
+                default:
+                    if (!IsRegular(c))
+                    {
+                        i++;
+                        break;
+                    }
+                    int tokenStart = i;
+                    while (i < text.Length && IsRegular(text[i])) i++;
+                    var token = text.AsSpan(tokenStart, i - tokenStart);
+                    if (token.SequenceEqual("endobj")) return (tokenStart, -1);
+                    if (token.SequenceEqual("stream")) return (tokenStart, tokenStart);
+                    break;
+            }
+        }
+        return (-1, -1);
+    }
+
+    /// <summary>The position after a literal string that starts at <paramref name="at"/>, with its escapes and nested parentheses.</summary>
+    private static int SkipLiteralString(string text, int at)
+    {
+        int depth = 0;
+        for (int i = at; i < text.Length; i++)
+        {
+            switch (text[i])
+            {
+                case '\\':
+                    i++;
+                    break;
+                case '(':
+                    depth++;
+                    break;
+                case ')':
+                    if (--depth == 0) return i + 1;
+                    break;
+            }
+        }
+        return text.Length;
+    }
+
+    /// <summary>Whether the character is neither white space nor a delimiter, so that it belongs to a token.</summary>
+    private static bool IsRegular(char c) =>
+        c is not (' ' or '\t' or '\r' or '\n' or '\f' or '\0' or '(' or ')' or '<' or '>' or '[' or ']' or '{' or '}' or '/' or '%');
 
     /// <summary>Where the stream's data ends: at its direct /Length when endstream follows it, else before endstream.</summary>
     private static int FindStreamEnd(string text, string dictionary, int dataAt)
