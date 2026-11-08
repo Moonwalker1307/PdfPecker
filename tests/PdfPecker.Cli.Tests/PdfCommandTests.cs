@@ -175,6 +175,19 @@ public sealed class PdfCommandTests : IDisposable
         _cli.Ok("stamp", three, stampPdf, _cli.Path_("s2.pdf"), "--underlay");
         Assert.Equal(3, PdfPages.Count(File.ReadAllBytes(_cli.Path_("s2.pdf"))));
         Assert.Equal(2, _cli.Run("stamp", three, stampPdf, _cli.Path_("s3.pdf"), "--position", "middle").Exit);
+
+        // An encrypted stamp opens with a password from the environment.
+        _cli.Ok("convert", mark, _cli.Path_("locked.pdf"), "--user-password", "stamp-pw");
+        Environment.SetEnvironmentVariable("PDFPECKER_TEST_STAMP_PW", "stamp-pw");
+        try
+        {
+            _cli.Ok("stamp", three, _cli.Path_("locked.pdf"), _cli.Path_("s4.pdf"), "--stamp-password-env", "PDFPECKER_TEST_STAMP_PW");
+            Assert.Contains("DRA", PdfText.ExtractPages(File.ReadAllBytes(_cli.Path_("s4.pdf")))[0].Text);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PDFPECKER_TEST_STAMP_PW", null);
+        }
     }
 
     [Fact]

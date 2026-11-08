@@ -128,7 +128,7 @@ internal static class PageCommands
         const string usage = "stamp <input.pdf> <stamp.pdf|stamp.html> <output.pdf> [--underlay] [--opacity 0.5] [--position center] [--pages 1,3]";
         var a = Common.WithPassword(new OptionSet())
             .Flag("underlay").Value("opacity").Value("scale").Value("position").Value("offset-x").Value("offset-y")
-            .Value("pages").Value("stamp-page").Value("stamp-password").Parse(args);
+            .Value("pages").Value("stamp-page").Value("stamp-password").Value("stamp-password-env").Parse(args);
         io.Quiet = a.Has("quiet");
         var positionals = Common.Positionals(a, 2, 3, usage);
         var output = Common.Output(a, positionals, 2, usage, positionals[0]);
@@ -139,7 +139,7 @@ internal static class PageCommands
         {
             Underlay = a.Has("underlay"),
             Password = password,
-            StampPassword = a.Get("stamp-password"),
+            StampPassword = Common.Password(a, "stamp-password", "stamp-password-env"),
         };
         if (a.GetFloat("opacity") is { } opacity) options.Opacity = opacity;
         if (a.GetFloat("scale") is { } scale) options.Scale = scale;

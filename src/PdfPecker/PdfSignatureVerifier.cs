@@ -28,7 +28,10 @@ public sealed class PdfSignatureVerificationOptions
 
     /// <summary>
     /// Revocation checking. Default: <see cref="X509RevocationMode.NoCheck"/>, which keeps verification offline.
-    /// <see cref="X509RevocationMode.Online"/> lets the platform fetch CRLs, OCSP answers and missing intermediates.
+    /// <see cref="X509RevocationMode.Online"/> lets the platform fetch CRLs, OCSP answers and missing intermediates. Their
+    /// addresses come from the certificates in the PDF, which anyone can write, and the platform fetches them as they are,
+    /// internal addresses included; use it only where the machine cannot reach internal services, or verify offline with
+    /// <see cref="X509RevocationMode.Offline"/> and revocation data gathered beforehand.
     /// </summary>
     public X509RevocationMode RevocationMode { get; set; } = X509RevocationMode.NoCheck;
 

@@ -29,6 +29,12 @@ Run `pdfpecker help` for the commands and `pdfpecker help <command>` for the opt
 0 on success, 1 when the work failed (a damaged file, a wrong password, an invalid signature) and 2 when the command line
 is wrong.
 
+A document reads local files (images, style sheets) only from its own folder, unless `--enable-local-file-access` is
+given. HTML or Markdown piped in on standard input has no folder, so it reads local files only from a `--base-dir` it
+is given. Every password option has an `-env` form (`--user-password-env`, `--owner-password-env`, `--password-env`,
+`--cert-password-env`, `--stamp-password-env`) that reads it from an environment variable instead, where other users
+of the machine cannot see it in the process list.
+
 ## Replacing wkhtmltopdf
 
 A call without a command word is read like wkhtmltopdf's, with its 10 mm default margins:

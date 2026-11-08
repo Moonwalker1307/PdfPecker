@@ -52,7 +52,7 @@ internal static class ConvertOptions
             .Value("header-font-size").Value("footer-font-size").Value("header-font-name").Value("footer-font-name")
             .Value("font").Value("font-dir").Flag("system-fonts")
             .Value("pdfa").Value("accessibility").Value("lang")
-            .Value("user-password").Value("owner-password").Flag("linearize")
+            .Value("user-password").Value("owner-password").Value("user-password-env").Value("owner-password-env").Flag("linearize")
             .Value("creation-date");
         foreach (var (names, arity) in Ignored) set.Add(names, arity);
         return set;
@@ -123,8 +123,8 @@ internal static class ConvertOptions
         if (a.Get("pdfa") is { } pdfa) options.Conformance = ParseConformance(pdfa);
         if (a.Get("accessibility") is { } acc) options.Accessibility = ParseAccessibility(acc);
 
-        var user = a.Get("user-password");
-        var owner = a.Get("owner-password");
+        var user = Common.Password(a, "user-password", "user-password-env");
+        var owner = Common.Password(a, "owner-password", "owner-password-env");
         if (user != null || owner != null)
             options.Security = new PdfSecurity { UserPassword = user, OwnerPassword = owner };
 

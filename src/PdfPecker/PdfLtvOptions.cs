@@ -33,9 +33,9 @@ public sealed class PdfLtvOptions
     public bool FetchRevocationData { get; set; }
 
     /// <summary>
-    /// HTTP client for OCSP and CRL requests, e.g. with a proxy. Default: a shared client that connects only to public
-    /// addresses (or, when <see cref="UrlFilter"/> is set, to whatever the filter allows). A supplied client resolves
-    /// and connects as it is configured to.
+    /// HTTP client for OCSP and CRL requests, e.g. with a proxy. Default: a shared client that connects directly, never
+    /// through a proxy, and only to public addresses (or, when <see cref="UrlFilter"/> is set, to whatever the filter
+    /// allows). A supplied client resolves and connects as it is configured to.
     /// </summary>
     public HttpClient? HttpClient { get; set; }
 
