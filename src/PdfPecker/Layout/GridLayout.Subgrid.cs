@@ -136,6 +136,19 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
+    /// The minimum contribution, without margins, of an item that spans a flexible track, along the axis of
+    /// <paramref name="minSize"/>: its min-width or min-height when that is not auto, and otherwise only its border and
+    /// padding <paramref name="frame"/>, because such an item has no automatic minimum (CSS Grid §6.6). A percentage
+    /// resolves against zero, as for any intrinsic contribution.
+    /// </summary>
+    private static float FlexibleSpanMinimum(BoxItem it, Length minSize, float frame)
+    {
+        if (it.El == null) return 0;
+        if (minSize.IsAuto) return frame;
+        return Math.Max(frame, minSize.Resolve(0) + (it.Style.BorderBox ? 0 : frame));
+    }
+
+    /// <summary>
     /// An item's minimum contribution to the tracks it spans, without its margins (CSS Grid §6.6 and §11.5): its
     /// min-width when that is not auto, and otherwise its automatic minimum, which is nothing for a scroll container
     /// and its min-content width <paramref name="minContent"/> for any other box. As for any intrinsic contribution, a
