@@ -24,6 +24,9 @@ internal static partial class CffSubsetter
     private const int FdSelectFormatLength = 1, FdRangeCountLength = 2, FdRangeLength = 3, FdRangeFdField = 2;
     private const int FdSentinelLength = 2;
 
+    // A Private DICT's Subrs entry when written again: a five-byte integer and the operator.
+    private const int SubrsEntryLength = 6;
+
     /// <summary>
     /// The font's INDEXes and DICTs. The charset and FDSelect are the bytes they are encoded as, and a CID-keyed font
     /// has its Font DICTs; every font has a Private DICT block for each Font DICT, or one for the Top DICT.
@@ -147,9 +150,11 @@ internal static partial class CffSubsetter
 
     /// <summary>
     /// A Private DICT: its size, the bytes from its start up to its local subroutines (which keep their offset from
-    /// the DICT), and the subroutines. Without subroutines the bytes are the DICT alone.
+    /// the DICT), and the subroutines. Without subroutines the bytes are the DICT alone. When the font puts other data
+    /// between the DICT and its subroutines, as the Noto CJK fonts do with hundreds of kilobytes, the DICT is written
+    /// again with the subroutines right after it, so that a subset does not copy that data.
     /// </summary>
-    private readonly record struct PrivateBlock(int DictSize, int PrefixStart, int PrefixLength, CffIndex? Subrs)
+    private readonly record struct PrivateBlock(int DictSize, int PrefixStart, int PrefixLength, CffIndex? Subrs, byte[]? Rewritten = null)
     {
         /// <summary>The Private DICT a Top or Font DICT points at; only its first Private entry counts.</summary>
         public static PrivateBlock Read(byte[] data, Dict dict)
@@ -163,10 +168,24 @@ internal static partial class CffSubsetter
             if (subrsOffset < size) return new PrivateBlock(size, offset, size, null);
             int subrsAt = offset + subrsOffset;
             var subrs = CffIndex.Read(data, ref subrsAt);
-            return new PrivateBlock(size, offset, subrsOffset, subrs);
+            if (subrsOffset == size) return new PrivateBlock(size, offset, subrsOffset, subrs);
+            var rewritten = RewriteSubrsOffset(data, privateDict);
+            return new PrivateBlock(rewritten.Length, offset, rewritten.Length, subrs, rewritten);
         }
 
-        public ReadOnlySpan<byte> Prefix(byte[] data) => data.AsSpan(PrefixStart, PrefixLength);
+        public ReadOnlySpan<byte> Prefix(byte[] data) => Rewritten ?? data.AsSpan(PrefixStart, PrefixLength);
+
+        /// <summary>The DICT's entries as they were encoded, with the Subrs offset changed to the end of the DICT.</summary>
+        private static byte[] RewriteSubrsOffset(byte[] data, Dict privateDict)
+        {
+            var bytes = new List<byte>();
+            foreach (var e in privateDict.Entries)
+                if (e.Operator != SubrsOperator) bytes.AddRange(e.Encoded(data));
+            // The offset is the DICT's own length, which includes the entry: a fixed five-byte integer keeps it known.
+            CffDict.WriteInt32(bytes, bytes.Count + SubrsEntryLength);
+            CffDict.WriteOperator(bytes, SubrsOperator);
+            return bytes.ToArray();
+        }
     }
 
     /// <summary>An operator, its integer operands (a real one reads as 0) and the bytes it was encoded as.</summary>
