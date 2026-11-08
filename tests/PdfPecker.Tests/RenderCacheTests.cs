@@ -94,10 +94,10 @@ public class RenderCacheTests
 
     private const long AmpleBudget = 1L << 40;
 
-    /// <summary>Renders the page with the given decode budget and returns the canvas and what decoding used of it.</summary>
-    private static (Canvas Canvas, long Used) RenderWithBudget(RenderDocument doc, RenderCache cache, long budget)
+    /// <summary>Renders a page with the given decode budget and returns the canvas and what decoding used of it.</summary>
+    private static (Canvas Canvas, long Used) RenderWithBudget(RenderDocument doc, RenderCache cache, long budget, int index = 0)
     {
-        var page = doc.Pages[0];
+        var page = doc.Pages[index];
         var canvas = new Canvas(20, 40, 0);
         using (PdfFile.BeginRender(CancellationToken.None, budget))
         {
@@ -141,5 +141,80 @@ public class RenderCacheTests
         var after = RenderWithBudget(doc, cache, one);
         Assert.Equal(alone.Canvas.Pixels, after.Canvas.Pixels);
         Assert.Equal(alone.Used, after.Used);
+    }
+
+    /// <summary>
+    /// Two 20 by 40 pages that fill their bottom half with red through a graphics state of half opacity, which sits in an
+    /// object stream padded to 100 KB; the first page draws a blue image above it first.
+    /// </summary>
+    private static byte[] SharedObjectStreamPages()
+    {
+        static byte[] L(string t) => Encoding.Latin1.GetBytes(t);
+        var ms = new MemoryStream();
+        var offsets = new SortedDictionary<int, long>();
+        void Add(int num, byte[] body)
+        {
+            offsets[num] = ms.Position;
+            ms.Write(L(num + " 0 obj\n"));
+            ms.Write(body);
+            ms.Write(L("\nendobj\n"));
+        }
+        byte[] Stream(string entries, byte[] data) => L($"<< {entries} /Length {data.Length} >>\nstream\n").Concat(data).Concat(L("\nendstream")).ToArray();
+        ms.Write(L("%PDF-1.7\n"));
+        Add(1, L("<< /Type /Catalog /Pages 2 0 R >>"));
+        Add(2, L("<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>"));
+        const string resources = "/Resources << /XObject << /Im 7 0 R >> /ExtGState << /GS0 9 0 R >> >>";
+        Add(3, L($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 40] {resources} /Contents 4 0 R >>"));
+        Add(4, Stream("", L("q 20 0 0 20 0 20 cm /Im Do Q /GS0 gs 1 0 0 rg 0 0 20 20 re f")));
+        Add(5, L($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 40] {resources} /Contents 6 0 R >>"));
+        Add(6, Stream("", L("/GS0 gs 1 0 0 rg 0 0 20 20 re f")));
+        var blue = new byte[64 * 64 * 3];
+        for (int i = 2; i < blue.Length; i += 3) blue[i] = 255;
+        Add(7, Stream("/Type /XObject /Subtype /Image /Width 64 /Height 64 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode", Deflate(blue)));
+        var objects = new byte[100_000];
+        Array.Fill(objects, (byte)' ');
+        L("9 0 << /Type /ExtGState /ca 0.5 >>").CopyTo(objects, 0);
+        Add(8, Stream("/Type /ObjStm /N 1 /First 4 /Filter /FlateDecode", Deflate(objects)));
+        // A cross-reference stream, which is what can point into object streams.
+        long xref = ms.Position;
+        var rows = new MemoryStream();
+        for (int num = 0; num <= 10; num++)
+        {
+            var (type, a, b) = num switch { 0 => (0, 0L, 65535), 9 => (2, 8L, 0), 10 => (1, xref, 0), _ => (1, offsets[num], 0) };
+            rows.WriteByte((byte)type);
+            rows.Write(new[] { (byte)(a >> 24), (byte)(a >> 16), (byte)(a >> 8), (byte)a, (byte)(b >> 8), (byte)b });
+        }
+        Add(10, Stream("/Type /XRef /Size 11 /W [1 4 2] /Root 1 0 R", rows.ToArray()));
+        ms.Write(L($"startxref\n{xref}\n%%EOF\n"));
+        return ms.ToArray();
+    }
+
+    private const uint HalfRed = 0x7E00007Eu; // premultiplied red at the half opacity of the graphics state
+
+    [Fact]
+    public void A_page_that_ran_out_of_budget_leaves_objects_in_object_streams_readable()
+    {
+        // Reading the graphics state decoded its object stream on the page's budget: a page that had none left failed
+        // to read it, and the document kept it as missing, so the next page filled at full opacity.
+        var doc = new RenderDocument(SharedObjectStreamPages(), null);
+        var cache = new RenderCache();
+        RenderWithBudget(doc, cache, 0);
+        var next = RenderWithBudget(doc, cache, AmpleBudget, index: 1).Canvas;
+        Assert.Equal(HalfRed, Bottom(next));
+    }
+
+    [Fact]
+    public void A_page_decodes_the_same_whatever_page_read_its_object_stream_first()
+    {
+        // The first page to read an object from an object stream paid for decoding it, so a page near its budget fitted or
+        // not depending on the pages rendered before it. Object streams now go on the file's own budget.
+        var alone = RenderWithBudget(new RenderDocument(SharedObjectStreamPages(), null), new RenderCache(), AmpleBudget, index: 1);
+        var doc = new RenderDocument(SharedObjectStreamPages(), null);
+        var cache = new RenderCache();
+        RenderWithBudget(doc, cache, AmpleBudget);
+        var after = RenderWithBudget(doc, cache, AmpleBudget, index: 1);
+        Assert.Equal(alone.Used, after.Used);
+        Assert.InRange(alone.Used, 0, 1000);
+        Assert.Equal(alone.Canvas.Pixels, after.Canvas.Pixels);
     }
 }

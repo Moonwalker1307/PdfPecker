@@ -406,7 +406,7 @@ internal static partial class PageStructure
             int shared = few.Count(l => many.Exists(o => Math.Abs(Baseline(o) - Baseline(l)) <= 0.25 * Math.Max(l.Size, o.Size)
                 && Math.Abs(o.Size - l.Size) <= 0.1 * Math.Max(l.Size, o.Size)));
             // Lists side by side line up as a table's rows do, but a table's cells seldom start with list markers.
-            bool lists = left.Count(l => Marker(l, out _) != TextKind.Paragraph) >= 2 && right.Count(l => Marker(l, out _) != TextKind.Paragraph) >= 2;
+            bool lists = ListItems(left) >= 2 && ListItems(right) >= 2;
             if (shared > 0.3 * few.Count && !lists) return null;
             var group = new GroupBlock { Top = run.Min(l => l.Top), Left = run.Min(l => l.X0) };
             group.Parts.Add(Flow(left, body, columns: true));
@@ -612,6 +612,8 @@ internal static partial class PageStructure
     /// The parts side by side, read one after the other, when a column holds a list, such as delivery terms and payment
     /// terms numbered beside a box of totals: its items start with list markers in two or more rows. Each list is a part
     /// of its own, and the columns between lists, which may still be a table, are one part. Null when no column is a list.
+    /// A column counted in letters or roman numbers is a list only when every entry is an item, as a column of names
+    /// whose initials happen to follow each other under a header is not.
     /// </summary>
     private static GroupBlock? ListColumns(List<FlowLine> run, List<List<TableCell>> rows, List<Band> bands, double body)
     {
@@ -619,8 +621,9 @@ internal static partial class PageStructure
         for (int c = 0; c < bands.Count; c++)
         {
             var entries = rows.SelectMany(r => r).Where(t => t.Column == c && t.ColumnSpan == 1 && t.Lines.Count > 0).ToList();
-            int items = entries.Count(t => Marker(t.Lines[0], out _) != TextKind.Paragraph);
-            list[c] = items >= 2 && items * 2 >= entries.Count;
+            var firsts = entries.ConvertAll(t => t.Lines[0]);
+            int items = ListItems(firsts), marked = firsts.Count(l => Marker(l, out _) != TextKind.Paragraph);
+            list[c] = items >= 2 && (items == marked ? items * 2 >= entries.Count : items == entries.Count);
         }
         if (!list.Contains(true)) return null;
         var group = new GroupBlock { Top = run.Min(l => l.Top), Left = bands[0].X0 };
