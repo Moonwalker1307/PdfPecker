@@ -311,6 +311,11 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **Barcodes**: QR codes, EPC payment QR codes, Swiss QR-bill codes (with the Swiss cross and a checked payload), Data
   Matrix and GS1 Data Matrix, Code 128 and EAN-13 as vector SVG, e.g. `Barcode.QrCode("https://example.com")` or
   `Barcode.Gs1DataMatrix("(01)09506000134352(10)AB-123")`. [More](https://pdfpecker.net/docs/barcodes/)
+- **Reading barcodes**: `Barcode.Read(image)` reads the QR, Data Matrix (including the rectangular DMRE sizes), Code
+  128 and EAN-13 codes in a PNG, JPEG, GIF, WebP, BMP or TIFF image, and `PdfBarcodes.Find(pdf)` those on PDF pages,
+  whether drawn as vectors, embedded as images or scanned. Codes may be turned, tilted, mirrored or light on dark;
+  each result has its text and bytes, its corners in pixels or page points, a GS1 flag, and the payment parsed from an
+  EPC or Swiss QR-bill code. On the zxing-cpp test images it reads about 85 % of what zxing-cpp reads, with no wrong reads.
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp, extract text with positions, extract images
   and read document properties. Text comes out in reading order: a tagged PDF's in the order of its tags, and columns
   side by side one after the other, also on pages turned sideways or upside down. [More](https://pdfpecker.net/docs/merging/)

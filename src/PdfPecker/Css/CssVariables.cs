@@ -91,13 +91,14 @@ internal static class CssVariables
                 bool t = false;
                 if (own != null && own.Declares(name))
                 {
-                    if (vars!.TryGetValue(name, out var ov) && ov.Length > 0)
+                    // An empty value (--x:;) is a value: only a missing or invalid one takes the fallback.
+                    if (vars!.TryGetValue(name, out _))
                     {
                         replacement = own.Resolve(name, depth + 1);
                         t = own.IsTainted(name);
                     }
                 }
-                else if (vars != null && vars.TryGetValue(name, out var v, out t) && v.Length > 0)
+                else if (vars != null && vars.TryGetValue(name, out var v, out t))
                     // A value with text from an attribute is final: that text is never read as CSS again.
                     replacement = t ? v : Run(v, vars, own, attrs, depth + 1, ref t);
                 // On an attribute reference cycle, every substitution up to the attr() of that attribute fails, fallbacks included.
@@ -141,8 +142,8 @@ internal static class CssVariables
     }
 
     /// <summary>
-    /// The next var( (or attr( with <paramref name="attrs"/>) from <paramref name="from"/> that starts a token. attr( is
-    /// looked for outside strings only, so that the text of an attribute, which becomes a string, is never read again.
+    /// The next var( (or attr( with <paramref name="attrs"/>) from <paramref name="from"/> that starts a token, outside
+    /// strings: font-family: 'var(--x)' names a font. <paramref name="from"/> is never inside a string.
     /// </summary>
     private static int Next(string value, int from, bool attrs, out bool isAttr)
     {
@@ -151,6 +152,7 @@ internal static class CssVariables
         // "var(" must start a token, not end a longer identifier.
         while (i > 0 && (char.IsLetterOrDigit(value[i - 1]) || value[i - 1] == '-'))
             i = value.IndexOf("var(", i + 4, StringComparison.OrdinalIgnoreCase);
+        if (i > from && value.AsSpan(from, i - from).IndexOfAny('"', '\'', '\\') >= 0) i = NextOutsideStrings(value, from);
         if (!attrs) return i;
         int a = CssAttr.Next(value, from);
         if (a >= 0 && (i < 0 || a < i))
@@ -159,6 +161,26 @@ internal static class CssVariables
             return a;
         }
         return i;
+    }
+
+    /// <summary>The next var( from <paramref name="from"/> that starts a token and is not inside a string.</summary>
+    private static int NextOutsideStrings(string value, int from)
+    {
+        char quote = '\0';
+        for (int i = from; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (c == '\\') { i++; continue; }
+            if (quote != '\0')
+            {
+                if (c == quote) quote = '\0';
+                continue;
+            }
+            if (c is '"' or '\'') quote = c;
+            else if (c is 'v' or 'V' && i + 4 <= value.Length && value.AsSpan(i, 4).Equals("var(", StringComparison.OrdinalIgnoreCase)
+                     && (i == 0 || !(char.IsLetterOrDigit(value[i - 1]) || value[i - 1] == '-'))) return i;
+        }
+        return -1;
     }
 
     /// <summary>
@@ -222,7 +244,8 @@ internal static class CssVariables
         {
             var v = value.Trim();
             if (v.Equals("initial", StringComparison.OrdinalIgnoreCase)) raw.Set(name, null);
-            else if (v.Equals("inherit", StringComparison.OrdinalIgnoreCase))
+            // Custom properties inherit, so unset is inherit.
+            else if (v.Equals("inherit", StringComparison.OrdinalIgnoreCase) || v.Equals("unset", StringComparison.OrdinalIgnoreCase))
             {
                 if (inherited != null && inherited.TryGetValue(name, out var pv, out bool pt)) raw.Set(name, pv, pt);
                 else raw.Set(name, null);

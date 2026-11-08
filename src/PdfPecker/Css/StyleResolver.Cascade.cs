@@ -80,7 +80,7 @@ internal sealed partial class StyleResolver
         for (int i = _count - 1; i >= 0; i--)
         {
             if (_decls[i].Property != "font-family" || ResetByAll(i, allDecl)) continue;
-            var family = Substituted(_decls[i], s);
+            var family = WinningValue(i, s);
             if (family == null) break;
             return family.Trim().ToLowerInvariant() switch
             {
@@ -113,11 +113,12 @@ internal sealed partial class StyleResolver
 
         var allDecl = FindAll();
         var s = StartingStyle(parent, allDecl.Keyword);
+        _overriddenKnown = false;
 
         // Custom properties first: any other declaration may reference them.
         _custom.Clear();
         for (int i = 0; i < _count; i++)
-            if (_decls[i].Property.StartsWith("--", StringComparison.Ordinal)) _custom.Add(new(_decls[i].Property, _decls[i].Value));
+            if (_decls[i].Property.StartsWith("--", StringComparison.Ordinal)) _custom.Add(new(_decls[i].Property, CustomValue(i)));
         if (_custom.Count > 0) s.CustomProperties = CssVariables.Compute(parent.CustomProperties, _custom, _attrUsed ? AttrContext(false) : null);
 
         // zoom before any length: every absolute length on the element is multiplied by its effective zoom.
@@ -130,7 +131,7 @@ internal sealed partial class StyleResolver
         {
             if (_decls[i].Property == "direction")
             {
-                if (Substituted(_decls[i], s) is { } dir) Apply(s, parent, "direction", dir);
+                Apply(s, parent, "direction", WinningValue(i, s) ?? "unset");
                 break;
             }
         }
@@ -138,7 +139,7 @@ internal sealed partial class StyleResolver
         {
             if (_decls[i].Property is "writing-mode" or "-webkit-writing-mode" && !ResetByAll(i, allDecl))
             {
-                if (Substituted(_decls[i], s) is { } mode) Apply(s, parent, "writing-mode", mode);
+                Apply(s, parent, "writing-mode", WinningValue(i, s) ?? "unset");
                 break;
             }
         }
@@ -148,14 +149,12 @@ internal sealed partial class StyleResolver
         {
             if (_decls[i].Property == "font-size" && !ResetByAll(i, allDecl))
             {
-                var fs = Substituted(_decls[i], s);
-                if (fs != null && zoomed) fs = Zoomed("font-size", fs, s, parent);
-                if (fs != null && CssUnits.HasMetricUnit(fs)) fs = RewriteMetricUnits(fs, parent, parent);
-                if (fs != null)
-                {
-                    ApplyFontSize(s, parent, fs);
-                    if (zoomed) ZoomFontSizeKeyword(s, parent, fs);
-                }
+                // A var() or if() that fails leaves font-size unset, as any value invalid at computed-value time does.
+                var fs = WinningValue(i, s) ?? "unset";
+                if (zoomed) fs = Zoomed("font-size", fs, s, parent);
+                if (CssUnits.HasMetricUnit(fs)) fs = RewriteMetricUnits(fs, parent, parent);
+                ApplyFontSize(s, parent, fs);
+                if (zoomed) ZoomFontSizeKeyword(s, parent, fs);
                 break;
             }
         }
@@ -166,10 +165,9 @@ internal sealed partial class StyleResolver
         // element's own colour, whichever of the rules setting them comes first.
         for (int i = 0; i < _count; i++)
         {
-            if (_decls[i].Property != "color" || ResetByAll(i, allDecl)) continue;
-            // A colour from attr() that does not work out leaves color unset, as an invalid value at computed-value time does.
-            if (_attrUsed && _decls[i].UsesAttr) Apply(s, parent, "color", "unset");
-            if (Substituted(_decls[i], s) is { } color) Apply(s, parent, "color", color);
+            if (_decls[i].Property != "color" || ResetByAll(i, allDecl) || RevertOverridden(i)) continue;
+            _applyIndex = i;
+            ApplyDeclaration(s, parent, _decls[i]);
         }
 
         bool fontFirst = HasMetricUnit();
@@ -180,36 +178,11 @@ internal sealed partial class StyleResolver
             var d = _decls[i];
             if (!UsedViewportHeight && d.HasViewportHeightUnit) UsedViewportHeight = true;
             if (d.Property is "font-size" or "color" or "all" || d.Property.StartsWith("--", StringComparison.Ordinal) || ResetByAll(i, allDecl)) continue;
-            if (fontFirst && _applied[i]) continue;
-            bool attr = _attrUsed && d.UsesAttr;
-            if (!d.HasVar && !attr)
-            {
-                var dv = zoomed ? Zoomed(d.Property, d.Value, s, parent) : d.Value;
-                Apply(s, parent, d.Property, d.MetricUnits ? RewriteMetricUnits(dv, s, d.Property == "line-height" ? parent : s) : dv);
-                continue;
-            }
-            // var() and attr(): substitute, then expand shorthands now that the value is known.
-            var value = Substitute(d, s);
-            // With attr(), the property starts unset, as Chrome treats a declaration that is invalid at computed-value
-            // time, whether the substitution fails or its result does not parse. var() keeps the earlier declarations.
-            if (attr) ApplyUnset(s, parent, d.Property);
-            if (value == null) continue; // invalid at computed-value time
-            _expanded.Clear();
-            CssParser.Expand(d.Property, value, d.Important, _expanded);
-            foreach (var x in _expanded)
-            {
-                // A number where a length belongs is as invalid from an attribute as when written in standards mode.
-                if (attr && StandardsMode && x.HasUnitlessLength) continue;
-                var xv = zoomed ? Zoomed(x.Property, x.Value, s, parent) : x.Value;
-                xv = CssUnits.HasMetricUnit(xv) ? RewriteMetricUnits(xv, x.Property == "font-size" ? parent : s, x.Property is "font-size" or "line-height" ? parent : s) : xv;
-                if (x.Property == "font-size")
-                {
-                    ApplyFontSize(s, parent, xv);
-                    if (zoomed) ZoomFontSizeKeyword(s, parent, xv);
-                }
-                else Apply(s, parent, x.Property, xv);
-            }
+            if (fontFirst && _applied[i] || RevertOverridden(i)) continue;
+            _applyIndex = i;
+            ApplyDeclaration(s, parent, d);
         }
+        _applyIndex = -1;
         if (fontFirst) Array.Clear(_applied, 0, _count);
 
         // A box that sets its text decoration fixes the decoration's colour to its own colour (currentColor here), so
@@ -276,6 +249,49 @@ internal sealed partial class StyleResolver
     }
 
     /// <summary>
+    /// Applies one declaration of the working buffer (<see cref="_applyIndex"/> is its index, which revert needs). A
+    /// value with var(), attr() or if() is substituted first, and a shorthand expanded once the value is known.
+    /// </summary>
+    private void ApplyDeclaration(ComputedStyle s, ComputedStyle parent, Declaration d)
+    {
+        bool zoomed = s.Zoom != 1 || _rootZoom != 1;
+        bool attr = _attrUsed && d.UsesAttr;
+        if (!d.HasVar && !attr)
+        {
+            var dv = zoomed ? Zoomed(d.Property, d.Value, s, parent) : d.Value;
+            Apply(s, parent, d.Property, d.MetricUnits ? RewriteMetricUnits(dv, s, d.Property == "line-height" ? parent : s) : dv);
+            return;
+        }
+        var value = Substitute(d, s);
+        // The property starts unset, as Chrome treats a declaration that is invalid at computed-value time, whether the
+        // substitution fails or its result does not parse; an earlier declaration of the property no longer counts.
+        ApplyUnset(s, parent, d.Property);
+        if (value == null) return;
+        _expanded.Clear();
+        CssParser.Expand(d.Property, value, d.Important, _expanded);
+        int n = _expanded.Count;
+        if (n == 0) return;
+        // Apply can revert and so come back here, which reuses the list, so a shorthand's longhands are copied first.
+        var first = _expanded[0];
+        var longhands = n > 1 ? _expanded.ToArray() : null;
+        for (int k = 0; k < n; k++)
+        {
+            var x = longhands != null ? longhands[k] : first;
+            // A number where a length belongs is as invalid from an attribute as when written in standards mode.
+            if (attr && StandardsMode && x.HasUnitlessLength) continue;
+            var xv = zoomed ? Zoomed(x.Property, x.Value, s, parent) : x.Value;
+            xv = CssUnits.HasMetricUnit(xv) ? RewriteMetricUnits(xv, x.Property == "font-size" ? parent : s, x.Property is "font-size" or "line-height" ? parent : s) : xv;
+            if (x.Property == "font-size")
+            {
+                if (_revertFilter != null) continue;
+                ApplyFontSize(s, parent, xv);
+                if (zoomed) ZoomFontSizeKeyword(s, parent, xv);
+            }
+            else Apply(s, parent, x.Property, xv);
+        }
+    }
+
+    /// <summary>
     /// Whether a flex column or a grid stretches the box over its width. Chrome sizes a text field with width auto to
     /// its size attribute, except where stretching gives it the width of its line or grid area.
     /// </summary>
@@ -338,7 +354,7 @@ internal sealed partial class StyleResolver
         CssParser.Expand(property, "unset", false, _expanded);
         foreach (var x in _expanded)
         {
-            if (x.Property == "font-size") ApplyFontSize(s, parent, "unset");
+            if (x.Property == "font-size") { if (_revertFilter == null) ApplyFontSize(s, parent, "unset"); }
             else Apply(s, parent, x.Property, "unset");
         }
     }
