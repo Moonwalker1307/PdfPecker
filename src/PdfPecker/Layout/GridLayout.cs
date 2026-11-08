@@ -350,7 +350,7 @@ internal sealed partial class LayoutEngine
     /// Sizes tracks from item contributions (§11.5 simplified): fixed sizes, intrinsic sizes from single-span items, extra
     /// space for spanning items, maximisation up to the growth limits, then fr tracks share what is left.
     /// <paramref name="minimums"/> holds the items' minimum contributions and <paramref name="flexMinimums"/> those of
-    /// items that span a flexible track; without them, items give their min-content sizes.
+    /// items that span a flexible track; without them, as under a content constraint, items give their min-content sizes.
     /// </summary>
     private static void SizeTracks(GridTrack[] tracks, float avail, bool definite, float gap,
         List<(int Start, int Span, float Min, float Max)> contributions, bool stretchAuto, List<float>? minimums = null,
@@ -415,15 +415,15 @@ internal sealed partial class LayoutEngine
             if (t.Limit < t.Base) t.Limit = t.Base;
         }
 
-        // Spanning items: grow intrinsic tracks they cross so that the item fits. Given their minimum contributions,
-        // items that cross a flexible track come after the others, and grow only the flexible tracks.
+        // Spanning items: grow intrinsic tracks they cross so that the item fits. Items that cross a flexible track
+        // come after the others, and grow only the flexible tracks.
         List<int>? flexibleSpans = null;
         for (int c = 0; c < contributions.Count; c++)
         {
             var (start, span, min, max) = contributions[c];
             if (span <= 1 || start >= n) continue;
             int end = Math.Min(n, start + span);
-            if (flexMinimums != null && CrossesFlexibleTrack(tracks, start, end))
+            if (CrossesFlexibleTrack(tracks, start, end))
             {
                 (flexibleSpans ??= new List<int>()).Add(c);
                 continue;
@@ -434,7 +434,7 @@ internal sealed partial class LayoutEngine
             {
                 current += tracks[i].Base;
                 currentLimit += tracks[i].Limit;
-                if (tracks[i].Def.Min.IsIntrinsic || tracks[i].IsFlexible) growable.Add(tracks[i]);
+                if (tracks[i].Def.Min.IsIntrinsic) growable.Add(tracks[i]);
             }
             if (growable.Count == 0) continue;
             // Tracks of auto minimums take the item's minimum contribution, as a single track does; a min-content or
@@ -444,7 +444,7 @@ internal sealed partial class LayoutEngine
             if (min > current)
                 foreach (var t in growable) t.Base += (min - current) / growable.Count;
             if (max > currentLimit)
-                foreach (var t in growable) if (!t.IsFlexible) t.Limit += (max - currentLimit) / growable.Count;
+                foreach (var t in growable) t.Limit += (max - currentLimit) / growable.Count;
             foreach (var t in growable) if (t.Limit < t.Base) t.Limit = t.Base;
         }
         if (flexibleSpans != null)
@@ -532,7 +532,7 @@ internal sealed partial class LayoutEngine
     /// to their fr when these add up to 1 or more and equally otherwise (CSS Grid §11.5, step 4). Such an item has no
     /// automatic minimum (§6.6), so where <paramref name="flexMinimum"/> is known it is only the item's own min-width or
     /// min-height, and an item without one leaves the tracks to the fr step, as in Chrome. A min-content or max-content
-    /// minimum takes the item's min-content contribution.
+    /// minimum, and sizing under a content constraint, take the item's min-content contribution.
     /// </summary>
     private static void FitFlexibleSpan(GridTrack[] tracks, float gap, (int Start, int Span, float Min, float Max) item, float? flexMinimum)
     {
@@ -742,8 +742,9 @@ internal sealed partial class LayoutEngine
         // Column sizes from the items' intrinsic widths.
         var contributions = new List<(int, int, float, float)>(items.Count);
         var minimums = new List<float>(items.Count);
-        ColumnContributions(items, g.W, colGap, g.ColNames, g.RowNames, contributions, null, 0, minimums);
-        SizeTracks(cols, g.W, definite: true, colGap, contributions, s.JustifyContent is BoxAlign.Normal or BoxAlign.Stretch, minimums);
+        var flexMinimums = new List<float>(items.Count);
+        ColumnContributions(items, g.W, colGap, g.ColNames, g.RowNames, contributions, null, 0, minimums, flexMinimums);
+        SizeTracks(cols, g.W, definite: true, colGap, contributions, s.JustifyContent is BoxAlign.Normal or BoxAlign.Stretch, minimums, flexMinimums);
 
         // Column positions, with justify-content.
         float used = 0;
