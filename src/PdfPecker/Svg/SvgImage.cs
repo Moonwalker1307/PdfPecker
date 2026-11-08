@@ -506,20 +506,7 @@ internal sealed partial class SvgImage
                 {
                     if (clips) { _clipDepth--; _wrapDepth--; }
                 }
-                if (clips && Shapes.Count > start)
-                {
-                    // What the element drew, clipped to its viewport, as a clip path would clip it.
-                    var rect = new PathBuilder();
-                    rect.MoveTo(port.X, port.Y);
-                    rect.LineTo(port.X + port.W, port.Y);
-                    rect.LineTo(port.X + port.W, port.Y + port.H);
-                    rect.LineTo(port.X, port.Y + port.H);
-                    rect.Close();
-                    var pts = rect.Points.ToArray();
-                    for (int i = 0; i + 1 < pts.Length; i += 2) ctm.Apply(ref pts[i], ref pts[i + 1]);
-                    Shapes.Insert(start, new SvgShape { Kind = SvgShape.KindClip, Verbs = rect.Verbs.ToArray(), Points = pts });
-                    Shapes.Add(new SvgShape { Kind = SvgShape.KindEndClip });
-                }
+                if (clips) ClipToViewport(start, port, ctm);
                 return;
             }
             case "use":
@@ -537,7 +524,7 @@ internal sealed partial class SvgImage
                     if (target.Name == "symbol")
                         foreach (var c in target.Children)
                         {
-                            if (c is Element ce) ContentBounds(ce, SymbolTransform(target, e).Then(place), ref minX, ref minY, ref maxX, ref maxY, depth);
+                            if (c is Element ce) ContentBounds(ce, SymbolTransform(target, e, out _, out _).Then(place), ref minX, ref minY, ref maxX, ref maxY, depth);
                         }
                     else ContentBounds(target, place, ref minX, ref minY, ref maxX, ref maxY, depth, e);
                 }
@@ -551,8 +538,22 @@ internal sealed partial class SvgImage
                     if (target.Name == "symbol")
                     {
                         if (target.Style is { } symbol) _useParent = InUse(symbol, s);
-                        m = SymbolTransform(target, e).Then(m);
-                        foreach (var c in target.Children) if (c is Element ce) Render(ce, m, op, depth + 1);
+                        var fit = SymbolTransform(target, e, out float w, out float h);
+                        // As for a nested svg, a width or height of zero turns the drawing off.
+                        if (!(w > 0 && h > 0)) return;
+                        bool clips = _clipDepth < 8 && ClipsToViewport(target, target.Style);
+                        int start = Shapes.Count;
+                        if (clips) { _clipDepth++; _wrapDepth++; }
+                        try
+                        {
+                            foreach (var c in target.Children) if (c is Element ce) Render(ce, fit.Then(m), op, depth + 1);
+                        }
+                        finally
+                        {
+                            if (clips) { _clipDepth--; _wrapDepth--; }
+                        }
+                        // The viewport the use element gives the symbol starts at the use element's x and y.
+                        if (clips) ClipToViewport(start, (0, 0, w, h), m);
                     }
                     else
                     {
@@ -638,16 +639,37 @@ internal sealed partial class SvgImage
 
     /// <summary>
     /// The transform that fits a symbol's viewBox into the width and height of the use element drawing it (100% of the
-    /// viewport when absent, which is taken as the root's viewBox size); none without a viewBox.
+    /// viewport when absent, which is taken as the root's viewBox size); none without a viewBox. <paramref name="w"/>
+    /// and <paramref name="h"/> are that width and height, the size of the symbol's viewport.
     /// </summary>
-    private Matrix SymbolTransform(Element symbol, Element use)
+    private Matrix SymbolTransform(Element symbol, Element use, out float w, out float h)
     {
-        var vb = ParseNumbers(symbol.GetAttribute("viewbox"));
-        if (vb.Count != 4 || !(vb[2] > 0) || !(vb[3] > 0)) return Matrix.Identity;
-        float w = Num(use, "width", float.NaN), h = Num(use, "height", float.NaN);
+        w = Num(use, "width", float.NaN);
+        h = Num(use, "height", float.NaN);
         if (float.IsNaN(w)) w = Num(symbol, "width", ViewportWidth);
         if (float.IsNaN(h)) h = Num(symbol, "height", ViewportHeight);
+        var vb = ParseNumbers(symbol.GetAttribute("viewbox"));
+        if (vb.Count != 4 || !(vb[2] > 0) || !(vb[3] > 0)) return Matrix.Identity;
         return FitViewBox(vb, w, h, symbol.GetAttribute("preserveaspectratio"));
+    }
+
+    /// <summary>
+    /// Clips the shapes from <paramref name="start"/> on to a viewport, the rectangle <paramref name="port"/> of the user
+    /// space that <paramref name="ctm"/> maps to the root, as a clip path would clip them.
+    /// </summary>
+    private void ClipToViewport(int start, (float X, float Y, float W, float H) port, Matrix ctm)
+    {
+        if (Shapes.Count == start) return;
+        var rect = new PathBuilder();
+        rect.MoveTo(port.X, port.Y);
+        rect.LineTo(port.X + port.W, port.Y);
+        rect.LineTo(port.X + port.W, port.Y + port.H);
+        rect.LineTo(port.X, port.Y + port.H);
+        rect.Close();
+        var pts = rect.Points.ToArray();
+        for (int i = 0; i + 1 < pts.Length; i += 2) ctm.Apply(ref pts[i], ref pts[i + 1]);
+        Shapes.Insert(start, new SvgShape { Kind = SvgShape.KindClip, Verbs = rect.Verbs.ToArray(), Points = pts });
+        Shapes.Add(new SvgShape { Kind = SvgShape.KindEndClip });
     }
 
     /// <summary>
@@ -675,7 +697,7 @@ internal sealed partial class SvgImage
     }
 
     /// <summary>
-    /// Whether a nested svg element or a marker clips what it draws to its viewport: it does unless its overflow is
+    /// Whether a nested svg element, a symbol or a marker clips what it draws to its viewport: it does unless its overflow is
     /// visible, which the overflow property and attribute can say as visible or auto. In SVG, auto means visible.
     /// </summary>
     private static bool ClipsToViewport(Element e, ComputedStyle? s)
@@ -726,7 +748,7 @@ internal sealed partial class SvgImage
                 var place = Matrix.Translate(Len(e, "x", Axis.X), Len(e, "y", Axis.Y)).Then(m);
                 if (target.Name == "symbol")
                 {
-                    var fitted = SymbolTransform(target, e).Then(place);
+                    var fitted = SymbolTransform(target, e, out _, out _).Then(place);
                     foreach (var c in target.Children) if (c is Element ce) ContentBounds(ce, fitted, ref minX, ref minY, ref maxX, ref maxY, depth + 1);
                 }
                 else ContentBounds(target, place, ref minX, ref minY, ref maxX, ref maxY, depth + 1, e);
