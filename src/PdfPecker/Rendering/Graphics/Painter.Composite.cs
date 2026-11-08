@@ -8,12 +8,13 @@ internal sealed partial class Painter
     private void Composite(int y, int x0, ReadOnlySpan<byte> coverage)
     {
         int count = coverage.Length;
+        Canvas.MarkDirty(y, x0, x0 + count);
         var pixels = Canvas.Pixels.AsSpan(y * Canvas.Width + x0, count);
         var clip = Clip;
         ReadOnlySpan<byte> clipMask = clip.Mask != null
             ? clip.Mask.AsSpan((y - clip.MaskY0) * clip.MaskStride + (x0 - clip.MaskX0), count)
             : default;
-        ReadOnlySpan<byte> softMask = SoftMask != null ? SoftMask.AsSpan(y * Canvas.Width + x0, count) : default;
+        ReadOnlySpan<byte> softMask = SoftMask != null ? SoftMask.Row(y, x0, count, ref _softMaskRow) : default;
 
         Span<uint> shaded = default;
         if (Shader != null)
