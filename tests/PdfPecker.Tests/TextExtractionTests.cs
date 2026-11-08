@@ -106,6 +106,52 @@ public class TextExtractionTests
     }
 
     [Fact]
+    public void Numbers_in_right_to_left_lines_keep_their_separators_and_signs()
+    {
+        // A separator between two digits and a percent or currency sign next to one belong to the number, which reads
+        // left to right as a whole; the numbers used to come out turned around at them (56.234,1, 2024/05/12, 30:10).
+        // In Arabic, digits after Arabic letters are Arabic numbers, which a hyphen does not join: the page shows
+        // 1234567-03, and it reads back as written. A number inside or joined to Latin text stays with it.
+        string[] hebrew =
+        {
+            "המחיר הוא 1,234.56 שקל, כולל 17% מע\"מ", "התאריך 12/05/2024 בשעה 10:30", "טלפון 03-1234567 או +972-3-1234567",
+            "המחיר הוא $1,200 או -2.5%", "התקנתי Python 3.12 version ואת item-42 היום",
+        };
+        string[] arabic = { "السعر 1,234.56 دينار", "رسم 03-1234567 دينار" };
+        var pdf = HtmlToPdf.Convert("<style>" + Face("Ar", "NotoSansArabic-Subset.ttf") + "</style>" +
+            string.Concat(hebrew.Select(t => "<p dir='rtl'>" + t + "</p>")) +
+            string.Concat(arabic.Select(t => "<p dir='rtl' style='font-family:Ar'>" + t + "</p>")));
+        var page = PdfText.ExtractPage(pdf, 1);
+        Assert.Equal(hebrew.Concat(arabic), Lines(page.Text));
+        Assert.All(page.Lines, l => Assert.True(l.RightToLeft));
+        // Markdown and structured HTML are written from the same lines.
+        var markdown = PdfToMarkdown.Convert(pdf);
+        var html = PdfToHtml.Convert(pdf, new PdfHtmlOptions { Mode = PdfHtmlMode.Structured });
+        foreach (var number in new[] { "1,234.56", "12/05/2024", "10:30", "03-1234567", "+972-3-1234567", "$1,200", "-2.5%", "Python 3.12 version", "item-42" })
+        {
+            Assert.Contains(number, markdown, StringComparison.Ordinal);
+            Assert.Contains(number, html, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void A_right_to_left_line_that_ends_in_latin_text_reads_as_the_lines_around_it()
+    {
+        // The line starts with Hebrew and ends with an e-mail address, which has more letters than the Hebrew: it used
+        // to be read left to right, from the address. Read from either end it starts with a letter of that end's
+        // direction, so it reads as the page's other Hebrew lines do.
+        string[] lines = { "שורה ראשונה בעברית.", "טלפון: 03-1234567, דוא\"ל: info@example.com", "שורה אחרונה בעברית." };
+        var page = PdfText.ExtractPage(HtmlToPdf.Convert(string.Concat(lines.Select(t => "<p dir='rtl'>" + t + "</p>"))), 1);
+        Assert.Equal(lines, Lines(page.Text));
+        Assert.All(page.Lines, l => Assert.True(l.RightToLeft));
+        // On an English page, a line that ends in Hebrew stays left to right.
+        string[] english = { "The first line is in English.", "The Hebrew word for peace is שלום", "The last line is in English, too." };
+        page = PdfText.ExtractPage(HtmlToPdf.Convert(string.Concat(english.Select(t => "<p>" + t + "</p>"))), 1);
+        Assert.Equal(english, Lines(page.Text));
+        Assert.All(page.Lines, l => Assert.False(l.RightToLeft));
+    }
+
+    [Fact]
     public void Form_field_values_are_included_unless_annotations_are_left_out()
     {
         var pdf = HtmlToPdf.Convert("<form><p><input name=a value='Typed value'></p><p><select name=c><option>One</option><option selected>Two</option></select></p></form>");
