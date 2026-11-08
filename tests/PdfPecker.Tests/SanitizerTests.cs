@@ -37,6 +37,12 @@ public class SanitizerTests
             "<< /Type /Annot /Subtype /Link /Rect [72 440 300 460] /A << /S /URI /URI (https://example.com/) >> >>",
             "<< /Type /Annot /Subtype /Link /Rect [72 400 300 420] /A << /S /GoToR /F (\\\\\\\\server\\\\share\\\\x.pdf) /D [0 /Fit] >> >>",
         };
+        return Build(objects);
+    }
+
+    /// <summary>A PDF of the given objects, numbered from 1 with the catalog first, and a correct cross-reference table.</summary>
+    private static byte[] Build(List<string> objects)
+    {
         var sb = new StringBuilder("%PDF-1.7\n");
         var offsets = new List<int>();
         for (int i = 0; i < objects.Count; i++)
@@ -115,6 +121,55 @@ public class SanitizerTests
         var result = PdfSanitizer.RemoveActiveContent(pdf);
         Assert.Equal(pdf, result);
         Assert.NotSame(pdf, result);
+    }
+
+    [Fact]
+    public void Links_stay_only_for_web_mail_and_phone_addresses()
+    {
+        // Each link annotation is one address; the ones a viewer would hand to the system, or could resolve against the
+        // catalog's /URI /Base, lose their action.
+        string[] addresses =
+        {
+            "https://example.com/", "HTTP://example.com/a", "mailto:ada@example.com", "tel:+4512345678",
+            "smb://attacker.example/share", "\\\\\\\\attacker.example\\\\share", "search-ms:query=x&crumb=location:\\\\\\\\attacker.example\\\\s",
+            "ms-msdt:/id PCWDiagnostic", "page2.html", "\\001javascript:alert\\(1\\)", "file:///etc/passwd", "ftp://example.com/x",
+        };
+        var annots = string.Join(" ", addresses.Select((_, i) => (i + 5).ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R"));
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R /URI << /Base (file:///) >> >>",
+            "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [" + annots + "] >>",
+            "<< /Length 0 >>\nstream\n\nendstream",
+        };
+        foreach (var a in addresses) objects.Add("<< /Type /Annot /Subtype /Link /Rect [72 700 300 730] /A << /S /URI /URI (" + a + ") >> >>");
+        var pdf = Build(objects);
+        Assert.True(PdfSanitizer.HasActiveContent(pdf));
+
+        var clean = PdfSanitizer.RemoveActiveContent(pdf);
+        Assert.False(PdfSanitizer.HasActiveContent(clean));
+        var expected = new[] { "Link:URI", "Link:URI", "Link:URI", "Link:URI" }.Concat(Enumerable.Repeat("Link:-", addresses.Length - 4));
+        Assert.Equal(expected, Links(PdfFile.Open(clean, null)));
+    }
+
+    [Fact]
+    public void A_damaged_PDF_without_active_content_is_written_out_again()
+    {
+        // Every offset in the table is wrong, so the table is rebuilt. A viewer repairs such a file its own way, so the
+        // result is what PdfPecker read and checked rather than the original bytes.
+        var pdf = HtmlToPdf.Convert("<h1>Plain</h1><p><a href=\"https://example.com\">A link</a>.</p>", new PdfOptions { Compress = false });
+        var text = Encoding.Latin1.GetString(pdf);
+        int xref = text.LastIndexOf("\nxref\n", StringComparison.Ordinal);
+        Assert.True(xref > 0);
+        var damaged = Encoding.Latin1.GetBytes(text[..xref] + System.Text.RegularExpressions.Regex.Replace(text[xref..], @"\b\d{10} 00000 n", "0000000001 00000 n"));
+        Assert.True(PdfFile.Open(damaged, null) is var f && f.Catalog != null);
+        Assert.False(PdfSanitizer.HasActiveContent(damaged));
+
+        var result = PdfSanitizer.RemoveActiveContent(damaged);
+        Assert.NotEqual(damaged, result);
+        Assert.False(PdfFile.Open(result, null).Reconstructed);
+        Assert.Contains("Plain", PdfText.Extract(result));
+        Assert.Equal(result, PdfSanitizer.RemoveActiveContent(result)); // now intact, so it stays as it is
     }
 
     [Fact]

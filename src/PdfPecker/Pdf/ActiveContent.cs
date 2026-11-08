@@ -23,14 +23,16 @@ internal static class ActiveContent
     // Annotations that exist to play media or 3D content, which can carry script of its own.
     private static readonly HashSet<string> ActiveAnnotations = new(StringComparer.Ordinal) { "RichMedia", "Screen", "Movie", "Sound", "3D" };
 
-    // Link schemes a viewer may run as script or resolve to a local or network file.
-    private static readonly string[] ActiveSchemes = { "javascript:", "vbscript:", "data:", "file:" };
+    // Link schemes a viewer may run as script or resolve to a local file, which PDF/A conversion removes.
+    private static readonly string[] ScriptSchemes = { "javascript:", "vbscript:", "data:", "file:" };
 
     /// <summary>
     /// Walks everything reachable from the catalog and counts the active parts; with <paramref name="remove"/>, takes them
-    /// out of the parsed objects as well. With <paramref name="attachments"/>, embedded files count as active too.
+    /// out of the parsed objects as well. With <paramref name="attachments"/>, embedded files count as active too. With
+    /// <paramref name="webLinksOnly"/>, a link counts as active unless it is an absolute web, e-mail or phone address;
+    /// without it, only links to script, data or local files do, as PDF/A conversion keeps every other link.
     /// </summary>
-    public static int Process(PdfFile file, bool remove, bool attachments, CancellationToken cancellationToken)
+    public static int Process(PdfFile file, bool remove, bool attachments, CancellationToken cancellationToken, bool webLinksOnly = false)
     {
         int found = 0;
         if (file.Trailer["Root"] is not { } root) return 0;
@@ -49,14 +51,14 @@ internal static class ActiveContent
                 continue;
             }
             if (o is not PdfDict dict) continue;
-            found += Clean(file, dict, remove, attachments, ReferenceEquals(o, file.Catalog));
+            found += Clean(file, dict, remove, attachments, ReferenceEquals(o, file.Catalog), webLinksOnly);
             foreach (var value in dict.Entries.Values) stack.Push(value);
         }
         return found;
     }
 
     /// <summary>Counts, and with <paramref name="remove"/> removes, the active entries of one dictionary.</summary>
-    private static int Clean(PdfFile file, PdfDict dict, bool remove, bool attachments, bool isCatalog)
+    private static int Clean(PdfFile file, PdfDict dict, bool remove, bool attachments, bool isCatalog, bool webLinksOnly)
     {
         var drop = new List<string>();
         int found = 0;
@@ -65,14 +67,14 @@ internal static class ActiveContent
             bool active = key switch
             {
                 "AA" or "XFA" or "JavaScript" => true,
-                "A" or "OpenAction" => IsActiveAction(file, value),
-                "Next" => file.Resolve(value) is PdfDict && IsActiveAction(file, value),
+                "A" or "OpenAction" => IsActiveAction(file, value, webLinksOnly),
+                "Next" => file.Resolve(value) is PdfDict && IsActiveAction(file, value, webLinksOnly),
                 "EmbeddedFiles" => attachments,
                 "AF" => attachments && isCatalog,
                 _ => false,
             };
             if (active) drop.Add(key);
-            else if (key == "Next") found += Filter(file, value, remove, a => IsActiveAction(file, a));
+            else if (key == "Next") found += Filter(file, value, remove, a => IsActiveAction(file, a, webLinksOnly));
             else if (key == "Annots") found += Filter(file, value, remove, a => IsActiveAnnotation(file, a, attachments));
         }
         found += drop.Count;
@@ -97,15 +99,24 @@ internal static class ActiveContent
         return count;
     }
 
-    private static bool IsActiveAction(PdfFile file, PdfObject? value)
+    private static bool IsActiveAction(PdfFile file, PdfObject? value, bool webLinksOnly)
     {
         if (file.Resolve(value) is not PdfDict action || file.GetName(action, "S") is not { } type) return false;
         if (ActiveActions.Contains(type)) return true;
-        if (type != "URI" || file.Resolve(action["URI"]) is not PdfString uri) return false;
-        var text = uri.Text.TrimStart();
-        foreach (var scheme in ActiveSchemes)
-            if (text.StartsWith(scheme, StringComparison.OrdinalIgnoreCase)) return true;
-        return false;
+        if (type != "URI") return false;
+        if (!webLinksOnly)
+        {
+            if (file.Resolve(action["URI"]) is not PdfString uri) return false;
+            var text = uri.Text.TrimStart();
+            foreach (var scheme in ScriptSchemes)
+                if (text.StartsWith(scheme, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+        // Only absolute web, mail and phone addresses stay, as in PdfToHtml. A list of bad schemes missed too much: a
+        // viewer hands smb: or a UNC path to the system, which sends the user's Windows credentials to that server, and
+        // search-ms:, ms-msdt: and other protocol handlers have run programs. Relative addresses go too, since the
+        // catalog's /URI /Base can turn them into any of those.
+        return Rendering.Html.PageLinks.WebAddress(file.GetBytes(action, "URI")) == null;
     }
 
     private static bool IsActiveAnnotation(PdfFile file, PdfObject value, bool attachments)
