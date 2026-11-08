@@ -24,7 +24,7 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 | `PDFPECKER_UPDATE_GOLDEN=1` | `GoldenPdfTests`, `RendererGoldenTests` | Rewrites the golden baselines instead of comparing. |
 | `PDFPECKER_UPDATE_COMMONMARK=1` | `MarkdownSpecTests` | Records newly passing CommonMark examples in `Fixtures/commonmark-passing.txt`. |
 | `PDFPECKER_COMMONMARK_SPEC` | `MarkdownSpecTests` | Path to a local `spec.txt`, for running the spec tests offline. |
-| `PDFPECKER_NORMALIZATION_TEST` | `UnicodeNormalizationTests` | Path to a local `NormalizationTest.txt` of the Unicode version in `UnicodeTables.g.cs`, for running the conformance test offline. |
+| `PDFPECKER_NORMALIZATION_TEST` | `UnicodeNormalizationTests` | Path to a local `NormalizationTest.txt` of the Unicode version in `UnicodeTables.g.cs`, with that version's `DerivedAge.txt` in the same folder, for running the normalization tests offline. |
 | `PDFPECKER_BENCH_WARMUP` | `bench/compare-versions.sh` | Seconds of warm-up before timing (3 by default); 12 to 15 lets JIT tiering finish. |
 | `SOURCE_DATE_EPOCH` | The library at run time | When no `CreationDate` is set, fixes the dates and file identifier, so the same input gives a byte-identical PDF. |
 

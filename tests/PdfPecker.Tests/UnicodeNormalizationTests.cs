@@ -135,18 +135,27 @@ public class UnicodeNormalizationTests
     {
         // Every decomposition in the BMP is older than any ICU .NET runs with, so the host must agree on all of it; the
         // characters that Unicode 15 and 16 added with decompositions are all outside the BMP, which the conformance
-        // test below covers.
+        // test below covers. Characters that a newer Unicode than the tables' added (an ICU may be newer) are left out:
+        // the host may decompose them, and the tables rightly know nothing of them.
         if (!HostNormalizes)
         {
             _output.WriteLine("The host has no normalization (invariant globalization), so there is nothing to compare.");
             return;
         }
+        if (LoadUcdFile("DerivedAge.txt") is not { } ages)
+        {
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "DerivedAge.txt could not be downloaded, so the comparison with the host could not run.");
+            _output.WriteLine("DerivedAge.txt could not be downloaded, so the comparison with the host was skipped.");
+            return;
+        }
+        var assigned = AssignedCodePoints(ages);
         var forms = new[] { NormalizationForm.FormC, NormalizationForm.FormD, NormalizationForm.FormKC, NormalizationForm.FormKD };
         var differences = new List<string>();
         for (int cp = 0; cp < 0x10000 && differences.Count < 10; cp++)
         {
             // .NET refuses to normalize surrogates and the noncharacters U+FFFE and U+FFFF.
-            if (char.IsSurrogate((char)cp) || cp >= 0xFFFE) continue;
+            if (char.IsSurrogate((char)cp) || cp >= 0xFFFE || !assigned[cp]) continue;
             string s = ((char)cp).ToString();
             foreach (var form in forms)
                 if (UnicodeNormalization.Normalize(s, form) != s.Normalize(form)) differences.Add($"{form} of U+{cp:X4}");
@@ -181,7 +190,7 @@ public class UnicodeNormalizationTests
     [Fact]
     public void Conforms_to_the_unicode_normalization_test()
     {
-        var lines = LoadConformanceTest();
+        var lines = LoadUcdFile("NormalizationTest.txt");
         if (lines == null)
         {
             // Offline runs skip the check, but in CI a failed download would hide every regression behind a green test.
@@ -235,13 +244,34 @@ public class UnicodeNormalizationTests
         }
     }
 
-    private static string[]? LoadConformanceTest()
+    // The code points of the Basic Multilingual Plane that DerivedAge.txt lists, which are those assigned in its version.
+    private static bool[] AssignedCodePoints(string[] ages)
+    {
+        var assigned = new bool[0x10000];
+        foreach (var raw in ages)
+        {
+            int hash = raw.IndexOf('#');
+            var line = (hash >= 0 ? raw[..hash] : raw).Trim();
+            if (line.Length == 0) continue;
+            var range = line.Split(';')[0].Trim().Split("..");
+            int first = int.Parse(range[0], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            int last = range.Length > 1 ? int.Parse(range[1], NumberStyles.HexNumber, CultureInfo.InvariantCulture) : first;
+            for (int cp = first; cp <= last && cp < assigned.Length; cp++) assigned[cp] = true;
+        }
+        return assigned;
+    }
+
+    /// <summary>
+    /// A file of the Unicode Character Database of the tables' version: next to the file PDFPECKER_NORMALIZATION_TEST
+    /// names when it is set, else downloaded once into the temp folder. Null when it cannot be had or is of another version.
+    /// </summary>
+    private static string[]? LoadUcdFile(string name)
     {
         try
         {
             var local = Environment.GetEnvironmentVariable("PDFPECKER_NORMALIZATION_TEST");
-            if (!string.IsNullOrEmpty(local)) return File.ReadAllLines(local);
-            var cache = Path.Combine(Path.GetTempPath(), "pdfpecker-tests", $"NormalizationTest-{UnicodeTables.Version}.txt");
+            if (!string.IsNullOrEmpty(local)) return OfTablesVersion(File.ReadAllLines(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(local))!, name)));
+            var cache = Path.Combine(Path.GetTempPath(), "pdfpecker-tests", $"{Path.GetFileNameWithoutExtension(name)}-{UnicodeTables.Version}.txt");
             if (!File.Exists(cache))
             {
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
@@ -250,7 +280,7 @@ public class UnicodeNormalizationTests
                 {
                     try
                     {
-                        text = client.GetStringAsync($"https://www.unicode.org/Public/{UnicodeTables.Version}/ucd/NormalizationTest.txt").GetAwaiter().GetResult();
+                        text = client.GetStringAsync($"https://www.unicode.org/Public/{UnicodeTables.Version}/ucd/{name}").GetAwaiter().GetResult();
                         break;
                     }
                     catch (Exception ex) when (attempt < 3 && ex is HttpRequestException or TaskCanceledException)
@@ -264,13 +294,15 @@ public class UnicodeNormalizationTests
                 File.WriteAllText(temporary, text);
                 File.Move(temporary, cache, overwrite: true);
             }
-            var lines = File.ReadAllLines(cache);
-            // The file names its version in its first line, so a stale or truncated download is not mistaken for a pass.
-            return lines.Length > 0 && lines[0].Contains($"-{UnicodeTables.Version}.txt", StringComparison.Ordinal) ? lines : null;
+            return OfTablesVersion(File.ReadAllLines(cache));
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or TaskCanceledException or UnauthorizedAccessException)
         {
             return null;
         }
     }
+
+    // The file names its version in its first line, so a stale or truncated download is not mistaken for a pass.
+    private static string[]? OfTablesVersion(string[] lines)
+        => lines.Length > 0 && lines[0].Contains($"-{UnicodeTables.Version}.txt", StringComparison.Ordinal) ? lines : null;
 }
