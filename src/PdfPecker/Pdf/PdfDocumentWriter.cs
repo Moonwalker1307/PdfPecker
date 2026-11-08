@@ -386,21 +386,33 @@ internal sealed partial class PdfDocumentWriter
     }
 
     /// <summary>
-    /// The links inside a translucent layer that is not transformed, or inside a clip: they stay where they are on the page.
+    /// The links inside a layer or a clip. Those in a transformed layer carry the layer's transform in the page's PDF
+    /// space, combined with the transforms of the layers around it, so that the annotation lands where the link is drawn.
     /// </summary>
-    private static void AddUntransformedLinks(Placed placed, List<(Placed Link, float Origin, float PageTop)> links, float origin, float pageTop)
+    private void AddNestedLinks(Placed placed, List<(Placed Link, float Origin, float PageTop, Matrix? Transform)> links, float origin,
+        float pageTop, Matrix? transform = null)
     {
-        var items = placed.Op switch
+        List<Placed>? items;
+        switch (placed.Op)
         {
-            LayerBlock { Layer.Transform: null } block => block.Items,
-            ClipBlock clip => clip.Items,
-            _ => null,
-        };
-        if (items == null) return;
+            case LayerBlock block:
+                items = block.Items;
+                if (block.Layer.Transform is { } m)
+                {
+                    // The same matrix as the layer's cm in WriteLayer, with the page's origin of the links.
+                    float px = _page.MarginLeft + block.Layer.OriginX, py = _page.Height - origin - (block.Layer.OriginY - pageTop);
+                    float e = px - m.A * px + m.C * py + m.E, f = py + m.B * px - m.D * py - m.F;
+                    var layer = new Matrix(m.A, -m.B, -m.C, m.D, e, f);
+                    transform = transform is { } outer ? layer.Then(outer) : layer;
+                }
+                break;
+            case ClipBlock clip: items = clip.Items; break;
+            default: return;
+        }
         foreach (var p in items)
         {
-            if (p.Op is LinkOp) links.Add((p, origin, pageTop));
-            else AddUntransformedLinks(p, links, origin, pageTop);
+            if (p.Op is LinkOp) links.Add((p, origin, pageTop, transform));
+            else AddNestedLinks(p, links, origin, pageTop, transform);
         }
     }
 
@@ -562,7 +574,7 @@ internal sealed partial class PdfDocumentWriter
 
         // What writing the pages leaves for the objects after them: the link annotations, each page's marked content,
         // the next free key of the parent tree and the key of each annotation in it.
-        public readonly List<(int Id, Placed Link, float Origin, float PageTop, int Page)> Annotations = new();
+        public readonly List<(int Id, Placed Link, float Origin, float PageTop, Matrix? Transform, int Page)> Annotations = new();
         public McStream[] PageStreams = null!;
         public int OpenActionId; // the open action as an object of its own (PDF 2.0 tagged files), or 0
         public int ParentKey;

@@ -432,6 +432,91 @@ public class RobustnessTests
         Assert.Matches(@"/Subtype /Link /Rect \[45 ", text);
     }
 
+    /// <summary>The rectangles and quad points of the link annotations of a 400 x 400pt page without margins.</summary>
+    private static List<(float[] Rect, float[]? Quad, string Text)> TransformedLinks(string html, PdfOptions? options = null)
+    {
+        options ??= new PdfOptions();
+        options.PageSize = new PageSize(400, 400);
+        options.Margins = new PageMargins(0);
+        var pdf = ConvertUncompressed("<body style='margin: 0; font: 12px Arial'>" + html + "</body>", options);
+        AssertStructurallyValid(pdf);
+        static float[] Numbers(string s)
+            => s.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(n => float.Parse(n, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        return Regex.Matches(Latin1(pdf), @"/Subtype /Link /Rect \[([^\]]+)\] (?:/QuadPoints \[([^\]]+)\] )?/F 4[^\n]*")
+            .Select(m => (Numbers(m.Groups[1].Value), m.Groups[2].Success ? Numbers(m.Groups[2].Value) : null, m.Value)).ToList();
+    }
+
+    [Fact]
+    public void Links_in_translated_boxes_are_annotated_where_they_are_drawn()
+    {
+        var links = TransformedLinks("""
+            <p style="margin: 0"><a href="https://example.com/plain">link</a></p>
+            <div style="transform: translateX(100px); width: 100px"><a href="https://example.com/moved">link</a></div>
+            <div style="position: relative; left: 50%; transform: translateX(-50%); width: 200px"><a href="https://example.com/centred">link</a></div>
+            """);
+        Assert.Equal(3, links.Count);
+        var (plain, moved, centred) = (links[0], links[1], links[2]);
+        Assert.Contains("example.com/moved", moved.Text);
+        Assert.Contains("example.com/centred", centred.Text);
+        // 100px is 75pt; the centred box of 150pt starts at 200 - 75.
+        Assert.Equal(plain.Rect[0] + 75, moved.Rect[0], 2);
+        Assert.Equal(plain.Rect[2] - plain.Rect[0], moved.Rect[2] - moved.Rect[0], 2);
+        Assert.Equal(125, centred.Rect[0], 2);
+        Assert.All(links, l => Assert.Null(l.Quad));
+    }
+
+    [Fact]
+    public void Links_in_scaled_and_nested_transforms_are_annotated_at_their_drawn_size()
+    {
+        var links = TransformedLinks("""
+            <p style="margin: 0"><a href="https://example.com/plain">link</a></p>
+            <div style="transform: translateX(30px); width: 100px"><div style="transform: scale(2); transform-origin: 0 0; width: 50px"><a href="https://example.com/big">link</a></div></div>
+            """);
+        var (plain, big) = (links[0], links[1]);
+        float w = plain.Rect[2] - plain.Rect[0], h = plain.Rect[3] - plain.Rect[1];
+        Assert.Equal(22.5f, big.Rect[0], 2);
+        Assert.Equal(2 * w, big.Rect[2] - big.Rect[0], 2);
+        Assert.Equal(2 * h, big.Rect[3] - big.Rect[1], 2);
+        Assert.Null(big.Quad);
+    }
+
+    [Fact]
+    public void Links_in_rotated_boxes_get_their_corners_as_quad_points()
+    {
+        var links = TransformedLinks("""
+            <p style="margin: 0"><a href="https://example.com/plain">link</a></p>
+            <div style="transform: rotate(90deg); transform-origin: 0 0; margin-left: 100px; width: 100px"><a href="https://example.com/turned">link</a></div>
+            """);
+        var (plain, turned) = (links[0], links[1]);
+        float w = plain.Rect[2] - plain.Rect[0], h = plain.Rect[3] - plain.Rect[1];
+        // Turned a quarter clockwise about its top left corner, the link runs down the page from there.
+        Assert.Equal(h, turned.Rect[2] - turned.Rect[0], 2);
+        Assert.Equal(w, turned.Rect[3] - turned.Rect[1], 2);
+        Assert.Equal(75, turned.Rect[2], 2);
+        var q = turned.Quad!;
+        Assert.Equal(8, q.Length);
+        // The top edge of the text, left to right, is the right edge of the box, top to bottom.
+        Assert.Equal((75f, turned.Rect[3]), (q[0], q[1]));
+        Assert.Equal((75f, turned.Rect[1]), (q[2], q[3]));
+        for (int i = 0; i < 8; i += 2)
+        {
+            Assert.InRange(q[i], turned.Rect[0] - 0.01f, turned.Rect[2] + 0.01f);
+            Assert.InRange(q[i + 1], turned.Rect[1] - 0.01f, turned.Rect[3] + 0.01f);
+        }
+    }
+
+    [Fact]
+    public void Internal_links_in_transformed_boxes_keep_their_target_and_tags()
+    {
+        var links = TransformedLinks("""
+            <div style="transform: translateX(50px) rotate(10deg); width: 200px"><a href="#target">Go to the target</a></div>
+            <h1 id="target" style="margin-top: 500px">Target</h1>
+            """, new PdfOptions { Accessibility = PdfAccessibility.Tagged });
+        var link = Assert.Single(links);
+        Assert.Matches(@"/StructParent \d+ /Contents \(Go to the target\) /Dest \[\d+ 0 R /XYZ ", link.Text);
+        Assert.NotNull(link.Quad);
+    }
+
     [Theory]
     // The page area is 210pt, 280px, wide: content that reaches to 350px is laid out at 350px and drawn at 0.8.
     [InlineData("<div style='width: 350px; height: 5px'></div>", "0.8")]
