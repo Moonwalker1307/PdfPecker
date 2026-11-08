@@ -384,6 +384,8 @@ internal sealed partial class ComputedStyle
     /// <summary>Whether the box clips its content horizontally and vertically (visible next to hidden computes to auto).</summary>
     public bool ClipsX => OverflowX == Overflow.Clip || OverflowX == Overflow.Hidden || OverflowX == Overflow.Visible && OverflowY == Overflow.Hidden;
     public bool ClipsY => OverflowY == Overflow.Clip || OverflowY == Overflow.Hidden || OverflowY == Overflow.Visible && OverflowX == Overflow.Hidden;
+    /// <summary>Whether the box is a scroll container: overflow hidden, auto or scroll on either axis (clip makes none).</summary>
+    public bool IsScrollContainer => OverflowX == Overflow.Hidden || OverflowY == Overflow.Hidden;
     public string? PageName;                    // page: the named page this box goes on (inherited; null = auto)
 
     public bool BoxReverse; // -webkit-box-direction: reverse, which is inherited

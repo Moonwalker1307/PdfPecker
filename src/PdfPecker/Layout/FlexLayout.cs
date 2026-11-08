@@ -271,7 +271,10 @@ internal sealed partial class LayoutEngine
             // min-width: auto means "not smaller than the content" for flex items: the min-content width of what is inside
             // the item, not of the item with its own width, or a fixed width could never shrink.
             if (specified.HasValue && it.El != null && st.Display != Display.Table) mn = ContentIntrinsic(it.El).Min + frame;
-            float min = !st.MinWidth.IsAuto ? st.MinWidth.Resolve(w) + (st.BorderBox ? 0 : frame) : Math.Min(mn, specified ?? mn);
+            // A scroll container's automatic minimum is zero (css-flexbox §4.5): its content scrolls, or here is clipped.
+            float min = !st.MinWidth.IsAuto ? st.MinWidth.Resolve(w) + (st.BorderBox ? 0 : frame)
+                : it.El != null && !it.IsReplaced && st.IsScrollContainer ? frame
+                : Math.Min(mn, specified ?? mn);
             float max = !st.MaxWidth.IsAuto ? st.MaxWidth.Resolve(w) + (st.BorderBox ? 0 : frame) : float.PositiveInfinity;
             it.MinMain = min;
             it.MaxMain = Math.Max(min, max);
@@ -916,6 +919,28 @@ internal sealed partial class LayoutEngine
         return Math.Max(0, contentW) + frame;
     }
 
+    /// <summary>
+    /// A row flex item's min-content and max-content contributions to its container's widths (css-flexbox §9.9.3), as
+    /// in Chrome: an item that cannot grow contributes no more than its flex-basis, one that cannot shrink no less, and
+    /// either stays within its min and max widths. A percentage basis, which has nothing to resolve against here, and an
+    /// auto one, which is the width or the content, leave the item's own widths.
+    /// </summary>
+    private (float Min, float Max) RowItemContribution(BoxItem it)
+    {
+        var (mn, mx) = ItemIntrinsic(it);
+        if (it.El == null) return (mn, mx);
+        var st = it.Style;
+        if (st.FlexBasis.IsAuto || st.FlexBasis.IsPercent || st.FlexGrow > 0 && st.FlexShrink > 0) return (mn, mx);
+        float frame = HorizontalFrame(st, 0);
+        float basis = st.FlexBasis.Value + (st.BorderBox ? 0 : frame);
+        float lo = !st.MinWidth.IsAuto ? st.MinWidth.Resolve(0) + (st.BorderBox ? 0 : frame) : st.IsScrollContainer && !it.IsReplaced ? frame : mn;
+        float hi = !st.MaxWidth.IsAuto && !st.MaxWidth.IsPercent ? st.MaxWidth.Value + (st.BorderBox ? 0 : frame) : float.PositiveInfinity;
+        if (st.FlexGrow <= 0) (mn, mx) = (Math.Min(mn, basis), Math.Min(mx, basis));
+        if (st.FlexShrink <= 0) (mn, mx) = (Math.Max(mn, basis), Math.Max(mx, basis));
+        hi = Math.Max(lo, hi);
+        return (Math.Clamp(mn, lo, hi), Math.Clamp(mx, lo, hi));
+    }
+
     /// <summary>Min-content and max-content widths of a flex container's content box.</summary>
     private (float Min, float Max) FlexIntrinsic(Element e)
     {
@@ -927,7 +952,7 @@ internal sealed partial class LayoutEngine
             float gap = GapOf(s.ColumnGap, 0) * Math.Max(0, items.Count - 1);
             foreach (var it in items)
             {
-                var (mn, mx) = ItemIntrinsic(it);
+                var (mn, mx) = RowItemContribution(it);
                 float m = it.Ml + it.Mr;
                 if (s.FlexWrap == FlexWrap.NoWrap) min += mn + m;
                 else min = Math.Max(min, mn + m);
