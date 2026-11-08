@@ -376,6 +376,51 @@ public class TextExtractionTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_column_that_starts_higher_than_the_first_is_read_after_it(bool boxes)
+    {
+        // The first column opens with a heading and the space above it, so the second column's first line, or its
+        // heading, sits higher than anything in the first; it used to be read first, before "1 Introduction".
+        string[] first =
+        {
+            "1 Introduction",
+            "The first paragraph opens the paper and runs long enough to fill several lines of the first column before it ends, so that the column holds real running text with many words.",
+            "The second paragraph keeps going in the first column and also wraps over several lines, adding more words so that the text will flow over into the next column of the page. It goes on a little longer to push the next section over.",
+        };
+        string[] second =
+        {
+            "2 Method", "The method section starts in the second column with a heading, and continues with enough words to wrap a few times in that column as well.",
+            "The closing paragraph of the method section adds a few more lines of ordinary text to the second column.",
+        };
+        const string style = "<style>body{font:10pt serif;margin:40px} h3{font-size:11pt;margin:12pt 0 4pt} p{margin:0 0 6pt;text-align:justify}</style>";
+        static string Column(string[] paragraphs, string top = "") =>
+            "<h3" + top + ">" + paragraphs[0] + "</h3>" + string.Concat(paragraphs.Skip(1).Select(p => "<p>" + p + "</p>"));
+        // CSS columns, where the end of the first column's last paragraph tops the second, or two boxes side by side,
+        // the second higher up and starting with its heading, as Chrome's columns can be.
+        string html = style + (boxes
+            ? "<div style='position:relative'><div style='position:absolute;left:0;top:14pt;width:250px'>" + Column(first, " style='margin-top:0'") +
+              "</div><div style='position:absolute;left:280px;top:0;width:250px'>" + Column(second, " style='margin-top:0'") + "</div></div>"
+            : "<div style='columns:2;column-gap:24pt'>" + Column(first) + Column(second) + "</div>");
+        var pdf = HtmlToPdf.Convert(html);
+        string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"[\s*]+", " ");
+        var text = Flat(PdfText.ExtractPage(pdf, 1).Text);
+        Assert.StartsWith("1 Introduction", text);
+        var markdown = Flat(PdfToMarkdown.Convert(pdf));
+        var structured = Flat(System.Text.RegularExpressions.Regex.Replace(PdfToHtml.Convert(pdf, new PdfHtmlOptions { Mode = PdfHtmlMode.Structured }), "<[^>]+>", " "));
+        foreach (var output in new[] { text, markdown, structured })
+        {
+            int at = -1;
+            foreach (var paragraph in first.Concat(second))
+            {
+                int next = output.IndexOf(paragraph, StringComparison.Ordinal);
+                Assert.True(next > at, $"Out of order or missing: {paragraph}\n{output}");
+                at = next;
+            }
+        }
+    }
+
+    [Theory]
     [InlineData(90, false)]
     [InlineData(90, true)]
     [InlineData(180, false)]
