@@ -59,7 +59,7 @@ internal sealed partial class PdfDocumentWriter
         {
             int cp = text[i];
             if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
-            if (Invisible(cp)) continue;
+            if (Invisible(cp) || TextFont.IsHidden(cp)) continue;
             bool has = embedded != null
                 ? embedded.Program.GlyphId(cp) != 0
                 : cp == '?' || (cp < 0x10000 && WinAnsi.Encode((char)cp) != (byte)'?');
@@ -275,9 +275,14 @@ internal sealed partial class PdfDocumentWriter
         b.Ascii("\n");
     }
 
-    /// <summary>Shows text in a standard font: one string with Tj, or with TJ when kerned pairs move glyphs.</summary>
+    /// <summary>
+    /// Shows text in a standard font: one string with Tj, or with TJ when kerned pairs move glyphs. Default ignorable
+    /// characters are left out, as <see cref="StandardFont.MeasureUnits"/> measures them: WinAnsi has no glyph for them,
+    /// and a '?' in their place is what a browser never draws.
+    /// </summary>
     private static void WriteStandardText(ByteBuffer b, TextFont font, string text)
     {
+        text = WithoutHidden(text);
         int first = -1;
         if (font.HasKerning)
             for (int i = 1; i < text.Length && first < 0; i++)
@@ -300,6 +305,22 @@ internal sealed partial class PdfDocumentWriter
         }
         WriteTextBytes(b, text.Substring(runStart));
         b.Ascii("] TJ");
+    }
+
+    /// <summary>The text without its default ignorable characters, or the text itself when it has none.</summary>
+    private static string WithoutHidden(string text)
+    {
+        int i = 0;
+        while (i < text.Length && !(text[i] > 0xAD && StandardFont.Hidden(text, i, text.Length, out _))) i++;
+        if (i == text.Length) return text;
+        var kept = new System.Text.StringBuilder(text.Length);
+        kept.Append(text, 0, i);
+        while (i < text.Length)
+        {
+            if (text[i] > 0xAD && StandardFont.Hidden(text, i, text.Length, out int units)) i += units;
+            else kept.Append(text[i++]);
+        }
+        return kept.ToString();
     }
 
     private void WriteEmbeddedRun(ByteBuffer b, EmbeddedFont font, TextOp t, int start, int length, float x, float y, int pass)

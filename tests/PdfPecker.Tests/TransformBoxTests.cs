@@ -135,7 +135,8 @@ public class TransformBoxTests
         // The inner svg is 40 x 40: 50% is 20, not 50 as in the outer viewport of 100 x 100.
         var doc = Resolve("<svg id='s' width='100' height='100'><svg width='40' height='40'>"
             + "<rect x='0' y='0' width='10' height='10' style='transform-origin:50% 50%;transform:rotate(180deg)'/></svg></svg>");
-        var shape = SvgImage.Build(Descendants(doc).First(e => e.Id == "s")).Shapes.Single();
+        // The inner svg clips the rectangle to its viewport, between a clip and its end.
+        var shape = SvgImage.Build(Descendants(doc).First(e => e.Id == "s")).Shapes.Single(sh => sh.Kind == SvgShape.KindPath);
         Near((shape.MinX, shape.MinY, shape.MaxX, shape.MaxY), 30, 30, 40, 40);
     }
 
