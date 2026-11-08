@@ -39,10 +39,12 @@ internal sealed partial class InlineLayout
 
     /// <summary>The width of <paramref name="length"/> characters of text in a font, with the letter spacing after each.</summary>
     private static float TextWidth(TextFont font, string text, int start, int length, float size, float letterSpacing) =>
-        font.MeasureUnits(text, start, length) * size / 1000f + letterSpacing * length;
+        font.MeasureUnits(text, start, length) * size / 1000f
+        + (letterSpacing == 0 ? 0 : letterSpacing * TextFont.SpacedCharacters(text, start, length));
 
     /// <summary>A character's advance in a font, with the letter spacing after it.</summary>
-    private static float CharAdvance(TextFont font, char c, float size, float letterSpacing) => font.CharWidth(c, size) + letterSpacing;
+    private static float CharAdvance(TextFont font, char c, float size, float letterSpacing)
+        => font.CharWidth(c, size) + (TextFont.Spaced(c) ? letterSpacing : 0);
 
     /// <summary>The spaces a tab at <paramref name="column"/> covers: up to the next tab stop, none with tab-size: 0.</summary>
     private static int TabWidth(int column, int tabSize)
