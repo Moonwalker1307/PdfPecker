@@ -190,7 +190,7 @@ internal sealed partial class PdfDocumentWriter
         }
         else
         {
-            var text = shape.Rtl ? Text.Bidi.VisualText(shape.Text!) : shape.Text!;
+            var text = WithoutHidden(shape.Rtl ? Text.Bidi.VisualText(shape.Text!) : shape.Text!);
             for (int i = 0; i < text.Length; i++)
             {
                 if (i > 0) pen += font.KernUnits(text[i - 1], text[i]) * size / 1000f;
