@@ -10,7 +10,7 @@ internal interface ICmapSink
 /// <summary>
 /// The cmap table, read the same way for HTML to PDF (<see cref="FontProgram"/>) and for the renderer's embedded fonts:
 /// the directory of encoding records, and the subtable formats 0, 2, 4, 6, 10, 12 and 13. Which subtable to read is
-/// each caller's choice. Reads go through <see cref="TableReader"/>, so a subtable cut off by the end of the file
+/// each caller's choice. Format 14, the variation sequences, is read apart (see <see cref="ReadVariationSequences"/>). Reads go through <see cref="TableReader"/>, so a subtable cut off by the end of the file
 /// throws <see cref="IndexOutOfRangeException"/> after passing on what came before the damage.
 /// </summary>
 internal static class CmapTable
@@ -34,6 +34,8 @@ internal static class CmapTable
     public const int SegmentedCoverageFormat = 12;
     /// <summary>Many-to-one range mappings: ranges of 32-bit codes that each share one glyph, as in last-resort fonts.</summary>
     public const int ManyToOneRangeFormat = 13;
+    /// <summary>Unicode variation sequences: the glyphs of a character followed by a variation selector.</summary>
+    public const int VariationSequencesFormat = 14;
 
     private const int ByteEncodingGlyphsField = 6, ByteEncodingCodes = 256;
     // Format 2: 256 sub-header keys (a sub-header's index times 8), then the sub-headers of a first code, an entry count,
@@ -48,6 +50,13 @@ internal static class CmapTable
     // Formats 12 and 13: the group count, then groups of a start code, an end code and a glyph.
     private const int GroupCountField = 12, GroupsField = 16, GroupLength = 12;
     private const int GroupEndCodeField = 4, GroupGlyphField = 8;
+
+    // Format 14: the subtable's length and the selector record count, then records of a 24-bit selector and the offsets
+    // of its default table (ranges of a 24-bit start and a count of further characters) and its non-default table
+    // (mappings of a 24-bit character and a glyph), counted from the subtable's start.
+    private const int VariationLengthField = 2, SelectorCountField = 6, SelectorRecordsField = 10, SelectorRecordLength = 11;
+    private const int DefaultOffsetField = 3, NonDefaultOffsetField = 7;
+    private const int RangeLength = 4, RangeCountField = 3, MappingLength = 5, MappingGlyphField = 3;
 
     private const int MaxCodePoint = 0x10FFFF, MaxGlyphId = 0xFFFF;
 
@@ -214,4 +223,48 @@ internal static class CmapTable
                 if (!codes.Map(code, sequential ? glyph + code - start : glyph)) return;
         }
     }
+
+    /// <summary>
+    /// The variation sequences of the format 14 subtable at <paramref name="subtable"/>: for each selector, the characters
+    /// it gives a glyph of their own (non-default) and those it leaves with their usual glyph (default). Records and
+    /// tables outside the subtable's length are left out, glyphs the font does not have are ignored, and no more than
+    /// <see cref="MaxCodes"/> mappings and ranges are read in all.
+    /// </summary>
+    public static VariationSequences ReadVariationSequences(TableReader font, int subtable, int numGlyphs)
+    {
+        var sequences = new VariationSequences();
+        long length = Math.Min(font.U32(subtable + VariationLengthField), font.Data.Length - (long)subtable);
+        long selectors = Math.Min(font.U32(subtable + SelectorCountField), (length - SelectorRecordsField) / SelectorRecordLength);
+        int left = MaxCodes;
+        for (int i = 0; i < selectors; i++)
+        {
+            int record = subtable + SelectorRecordsField + i * SelectorRecordLength;
+            int selector = U24(font, record);
+            uint defaults = font.U32(record + DefaultOffsetField), nonDefaults = font.U32(record + NonDefaultOffsetField);
+            if (defaults != 0 && defaults <= length - 4)
+            {
+                int table = subtable + (int)defaults;
+                long ranges = Math.Min(font.U32(table), (length - defaults - 4) / RangeLength);
+                for (int r = 0; r < ranges && left-- > 0; r++)
+                {
+                    int range = table + 4 + r * RangeLength, start = U24(font, range);
+                    sequences.AddDefault(selector, start, start + font.Data[range + RangeCountField]);
+                }
+            }
+            if (nonDefaults != 0 && nonDefaults <= length - 4)
+            {
+                int table = subtable + (int)nonDefaults;
+                long mappings = Math.Min(font.U32(table), (length - nonDefaults - 4) / MappingLength);
+                for (int m = 0; m < mappings && left-- > 0; m++)
+                {
+                    int mapping = table + 4 + m * MappingLength, glyph = font.U16(mapping + MappingGlyphField);
+                    if (glyph > 0 && glyph < numGlyphs) sequences.AddGlyph(selector, U24(font, mapping), glyph);
+                }
+            }
+        }
+        sequences.Seal();
+        return sequences;
+    }
+
+    private static int U24(TableReader font, int offset) => font.Data[offset] << 16 | font.U16(offset + 1);
 }

@@ -1713,6 +1713,35 @@ public class HostileInputTests
         }
     }
 
+    [Fact]
+    public void Variation_sequence_tables_stop_at_their_limits()
+    {
+        // 240 selector records that all point at one table of 20,000 mappings and one of 20,000 ranges would be almost
+        // ten million entries unless the subtable stops at its limit; counts, a length and offsets past the end of the
+        // table are cut to what it holds; glyphs the font lacks are ignored.
+        var regular = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "WorkSans-Regular.ttf"));
+        var latin = CmapFonts.Segments(new[] { (0x20, 0x7E, 0) });
+        var selectors = Enumerable.Range(0xE0100, 240);
+        var ranges = Enumerable.Range(0, 20_000).Select(i => (i * 3, 2)).ToList();
+        var mappings = Enumerable.Range(0, 20_000).Select(i => (0x4E00 + i, i % 2 == 0 ? 0x41 - 0x1D : 0xFFFF)).ToList();
+        var fonts = new[]
+        {
+            CmapFonts.VariationSequences(selectors, ranges, 20_000, mappings, 20_000),
+            CmapFonts.VariationSequences(selectors, ranges, uint.MaxValue, mappings, uint.MaxValue),
+            CmapFonts.VariationSequences(new[] { 0xFE00 }, ranges, uint.MaxValue, mappings, uint.MaxValue, length: uint.MaxValue),
+            CmapFonts.VariationSequences(new[] { 0xFE00 }, ranges, 20_000, mappings, 20_000, length: 30),
+        }.Select(sequences => CmapFonts.With(regular, (3, 1, latin), (0, 5, sequences))).ToList();
+        foreach (var font in fonts)
+        {
+            var program = Bounded(() => Assert.Single(FontProgram.Load(font)));
+            Assert.NotEqual(0, program.GlyphId('A'));
+            Assert.InRange(Bounded(() => program.VariationGlyphId(0x4E02, 0xE01EF)), -1, program.NumGlyphs - 1);
+            var options = new PdfOptions();
+            options.Fonts.Add(font);
+            AssertStructurallyValid(Bounded("<p style='font-family: \"Work Sans\"'>A\uFE00 B\U000E0100 \u4E00\U000E01EF</p>", options));
+        }
+    }
+
     private static PdfOptions ColorFont(byte[] font) => new() { Fonts = new FontCollection().Add(font, "C") };
 
     [Fact]
