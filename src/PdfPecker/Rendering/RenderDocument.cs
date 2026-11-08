@@ -150,11 +150,13 @@ internal sealed class RenderDocument
 
     private static void Give<T>(Stack<List<T>> spares, List<T> list)
     {
-        list.Clear();
+        // Each page gives its lists back once, after which nothing reads them. A list that is waiting here already is left
+        // as it is, so a second give cannot clear it or hand it to two pages.
         lock (spares)
         {
-            // A list given back twice must not be handed to two pages at once.
-            if (spares.Count < MaxSpareLists && !spares.Contains(list)) spares.Push(list);
+            if (spares.Count >= MaxSpareLists || spares.Contains(list)) return;
+            list.Clear();
+            spares.Push(list);
         }
     }
 

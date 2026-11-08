@@ -223,7 +223,8 @@ internal static class Targets
                     PdfToHtml.Convert(d, new PdfHtmlOptions
                     {
                         Pages = PdfPageRange.Parse("1-" + pages.ToString(System.Globalization.CultureInfo.InvariantCulture)),
-                        Mode = PdfHtmlMode.Structured, MaxDegreeOfParallelism = 1,
+                        // Styles too, so the fuzzer reaches the CSS written from the PDF's fills, rules and fonts.
+                        Mode = PdfHtmlMode.Structured, IncludeStyles = true, MaxDegreeOfParallelism = 1,
                     }, ct);
                 },
             },

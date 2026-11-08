@@ -206,9 +206,13 @@ internal sealed class FlowStyles
 
     private void StartCount()
     {
+        // Only the last count's styles are taken out of the index. Clearing it whole would cost its capacity, which the
+        // count of every word on the page makes as large as the page's styles, and a page that sets each word in a colour
+        // of its own would then pay for all of them again in every block.
+        if (_indexed)
+            foreach (var style in _styles) _styleIndex!.Remove(style);
         _styles.Clear();
         _letters.Clear();
-        _styleIndex?.Clear();
         _indexed = false;
         _last = 0;
     }
