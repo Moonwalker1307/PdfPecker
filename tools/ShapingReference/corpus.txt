@@ -123,6 +123,9 @@ NotoSans-Subset	Tiếng Việt có dấu: Những người ở đa
 NotoSans-Subset	Ξεσκεπάζω την ψυχοφθόρα βδελυγμία. Ἀρχὴ ἥμισυ παντός.
 NotoSans-Subset	<U+1EA0 U+0306 U+0020 U+1EA1 U+0302 U+0020 U+1EB8 U+0302 U+0301>
 NotoSans-Subset	<U+1F00 U+0301 U+0345 U+0020 U+1F08 U+0300 U+0020 U+1F70 U+0345>
+# A run of 32 marks is put in canonical order, and a longer one (only hostile text has them) is left as written.
+NotoSans-Subset	<U+0061 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323>
+NotoSans-Subset	<U+0061 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301 U+0323 U+0301>
 # Arabic letters and the marks they compose with past other marks.
 NotoSansArabic-Subset	<U+0627 U+064E U+0653>
 NotoSansArabic-Subset	<U+0627 U+0653 U+064E U+064F>

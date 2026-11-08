@@ -149,6 +149,17 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Long_runs_of_marks_out_of_order_shape_in_linear_time()
+    {
+        // Marks above and below in turn: putting them in canonical order by insertion moved every mark below past all the
+        // marks above before it, the square of the run's length. Runs over 32 marks now keep their order, as in HarfBuzz.
+        var options = new PdfOptions();
+        options.Fonts.Add(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansArabic-Subset.ttf")), "Ar");
+        AssertStructurallyValid(Bounded("<p>a" + Repeat("\u0301\u0323", 40_000) + "</p><p dir=rtl style='font-family:Ar'>\u0628"
+            + Repeat("\u0654\u064E", 40_000) + "</p>", options));
+    }
+
+    [Fact]
     public void Thousands_of_nested_multi_column_boxes_stay_fast()
     {
         // Found by the fuzzer: target html, timeout-36981e1b. Each multi-column box divides the width again, and each
