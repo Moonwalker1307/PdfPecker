@@ -165,6 +165,26 @@ public class PdfToPdfAHostileInputTests
     }
 
     [Fact]
+    public void A_to_unicode_map_that_gives_a_lone_surrogate_draws_no_glyph()
+    {
+        // Found by the pdf-pdfa fuzz target (exception-c467c0e4): a composite font without a program of its own is drawn
+        // with a bundled face, found by its ToUnicode text, and a map that gives a code half of a surrogate pair was
+        // read as a whole character. The renderer uses the same lookup.
+        const string toUnicode = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap 1 begincodespacerange <0000> <FFFF> endcodespacerange "
+            + "2 beginbfchar <0001> <D800> <0002> <0041> endbfchar endcmap CMapName currentdict /CMap defineresource pop end end";
+        var pdf = BuildPdf(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            Page("<< /Font << /F 4 0 R >> >>", 7),
+            "<< /Type /Font /Subtype /Type0 /BaseFont /Arial /Encoding /Identity-H /DescendantFonts [5 0 R] /ToUnicode 6 0 R >>",
+            "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Arial /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /DW 500 >>",
+            Stream(toUnicode),
+            Stream("BT /F 12 Tf 10 10 Td <00010002> Tj ET"));
+        Assert.NotEmpty(Bounded(pdf).Pdf);
+        Assert.NotEmpty(PdfRenderer.Open(pdf).RenderPageToPng(0, new ImageOptions { Dpi = 36 }));
+    }
+
+    [Fact]
     public void A_catalog_lost_when_the_cross_reference_table_is_rebuilt_is_invalid_data()
     {
         // Found by the pdf-pdfa fuzz target (exception-8c168e97), as it found it: the cross-reference table is damaged,

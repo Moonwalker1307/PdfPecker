@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Text;
 using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker.Rendering.Fonts;
@@ -137,7 +139,8 @@ internal sealed partial class PdfFont
                 int cid = cmap.ToCid((uint)code);
                 return cid < LatinCidLimit ? face.Lookup(cid) : 0;
             }
-            return face.Lookup(char.ConvertToUtf32(text, 0));
+            // A damaged ToUnicode map can give a lone surrogate, which names no character the face could have.
+            return Rune.DecodeFromUtf16(text, out var rune, out _) == OperationStatus.Done ? face.Lookup(rune.Value) : 0;
         };
     }
 
