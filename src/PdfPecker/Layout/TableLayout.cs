@@ -1951,6 +1951,13 @@ internal sealed partial class LayoutEngine
             // can shrink to their padding and borders, so they do not hold a table column or a shrink-to-fit box open.
             result = (Math.Min(result.Item1, frame), result.Item2);
         }
+        if (!s.MinWidth.IsAuto && !s.MinWidth.IsPercent)
+        {
+            // A box is never narrower than its min-width, which wins over its max-width (CSS Sizing 3 §5.1), so its
+            // min-content and max-content contributions are at least that wide too.
+            float mw = s.MinWidth.Value + (s.BorderBox ? 0 : frame);
+            result = (Math.Max(result.Item1, mw), Math.Max(result.Item2, mw));
+        }
         _intrinsicCache[e] = result;
         return result;
     }
