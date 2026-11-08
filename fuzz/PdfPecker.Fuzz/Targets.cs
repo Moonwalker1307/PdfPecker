@@ -290,6 +290,19 @@ internal static class Targets
             },
             new()
             {
+                Name = "pdf-redact", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
+                // A mutated input can turn out encrypted, which redacting refuses as documented, or have no first page for
+                // the areas, which is refused as an area past the last page.
+                ExtraExpected = ex => ex is ArgumentException { ParamName: "pdf" or "areas" },
+                Run = (d, ct) =>
+                {
+                    // One band across the middle of the first page and one corner, then every "e" the text has.
+                    PdfRedactor.Redact(d, new[] { new PdfRedactionArea(1, 0, 200, 2000, 300), new PdfRedactionArea(1, 0, 0, 120, 80) }, null, ct);
+                    PdfRedactor.RedactText(d, "e", new PdfRedactOptions { FillColor = null }, StringComparison.Ordinal, ct);
+                },
+            },
+            new()
+            {
                 Name = "pdf-pdfa", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
                 // A mutated input can turn out signed or encrypted, which the conversion refuses as documented.
                 ExtraExpected = ex => ex is ArgumentException { ParamName: "pdf" },

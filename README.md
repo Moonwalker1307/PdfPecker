@@ -67,6 +67,10 @@ byte[] smallest = PdfCompactor.Compact(pdf, new PdfCompactOptions { MaxImageDpi 
 // Strip JavaScript, launch and submit actions and other active content from a PDF someone sent you
 byte[] safe = PdfSanitizer.RemoveActiveContent(File.ReadAllBytes("received.pdf"));
 
+// Redact: take every match out of the file itself (text, image pixels, shapes, fields), not just cover it
+byte[] redacted = PdfRedactor.RedactText(File.ReadAllBytes("contract.pdf"), new Regex(@"\b\d{6}-\d{4}\b"));
+byte[] cut = PdfRedactor.Redact(pdf, new[] { new PdfRedactionArea(pageNumber: 1, x: 72, y: 100, width: 200, height: 40) });
+
 // Turn any existing PDF into PDF/A-2b for archiving, with a list of what changed and of anything left to fix
 var archived = PdfToPdfA.Convert(File.ReadAllBytes("received.pdf"));
 if (!archived.IsConformant) Console.WriteLine(string.Join("\n", archived.Problems));
@@ -318,6 +322,11 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   submit form data, XFA and media annotations out of PDFs from others, together with links to anything but web, e-mail
   and phone addresses (network paths, `smb:` and other protocol handlers), and `HasActiveContent` tells whether a PDF
   has any. Pages, text, web links and form fields stay.
+- **Redaction**: `PdfRedactor` removes what pages draw in given areas, or wherever a text or regular expression
+  matches, from the file itself: the glyphs leave the content streams (so text extraction and copying no longer find
+  them, while the text around them keeps its place), image pixels under an area are overwritten, and shapes, links and
+  form fields in an area go, before a black box (or none) is drawn over it. Forms shared with other pages are redacted
+  in copies, replacement texts that would still name what was there are removed, and earlier revisions do not survive.
 - **Images to PDF**: `ImageToPdf` puts scans and photos on pages of their own size or fitted to a page size, with
   photos turned upright by their EXIF orientation.
   [More](https://pdfpecker.net/docs/images-to-pdf/)
