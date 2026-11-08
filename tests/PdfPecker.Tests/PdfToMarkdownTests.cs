@@ -76,6 +76,69 @@ public class PdfToMarkdownTests
         Assert.Equal("|  |  |\n| --- | --- |\n| Apples | 3 |\n| Pears | 5 |\n", md);
     }
 
+    [Theory]
+    [InlineData("td,th{border:1px solid #000;padding:1px}", "")] // the CSS default: each cell's box 2px from the next
+    [InlineData("td,th{border:1px solid #000;padding:2px}", "")]
+    [InlineData("td,th{border:2px solid #000;padding:1px}", "")]
+    [InlineData("td,th{border:2px groove #888;padding:1px}", "")] // painted through a clip of each side's strip
+    [InlineData("", " border=\"1\"")] // inset cells in an outset table, painted the same way
+    public void A_table_whose_cells_draw_their_own_borders_is_a_table(string css, string attributes)
+    {
+        var md = Md($"<style>body{{font-family:sans-serif}} {css}</style><table{attributes}><tr><th>Name</th><th>Value</th><th>Note</th></tr>"
+            + "<tr><td>Alpha</td><td>1</td><td>a*b</td></tr><tr><td>Beta</td><td>2</td><td>x</td></tr><tr><td>Gamma</td><td>3</td><td>z</td></tr></table>");
+        Assert.Equal("| Name | Value | Note |\n| --- | --- | --- |\n| Alpha | 1 | a\\*b |\n| Beta | 2 | x |\n| Gamma | 3 | z |\n", md);
+    }
+
+    [Fact]
+    public void A_clip_cuts_a_filled_box_down_to_the_parts_it_paints()
+    {
+        // The top side of an inset border: the cell's box filled through the side's half and the frame between the
+        // border's outer and inner edges leaves the top strip and the tops of the left and right strips.
+        var side = new PdfPecker.Rendering.ClipBoxes(new[] { new[] { (0.0, 0.0, 100.0, 20.0) }, new[] { (-1.0, -1.0, 101.0, 41.0), (1.0, 1.0, 99.0, 39.0) } });
+        Assert.Equal(new[] { (0.0, 0.0, 100.0, 1.0), (0.0, 1.0, 1.0, 20.0), (99.0, 1.0, 100.0, 20.0) }, side.Pieces(0, 0, 100, 40));
+        // A clip around the whole box, no clip and a clip of a shape the boxes cannot follow leave the box whole.
+        Assert.Null(new PdfPecker.Rendering.ClipBoxes(new[] { new[] { (-5.0, -5.0, 105.0, 45.0) } }).Pieces(0, 0, 100, 40));
+        Assert.Null(new PdfPecker.Rendering.ClipBoxes(null).Pieces(0, 0, 100, 40));
+        Assert.Null(new PdfPecker.Rendering.ClipBoxes(new[] { new[] { (0.0, 0.0, 10.0, 10.0), (20.0, 0.0, 30.0, 10.0), (40.0, 0.0, 50.0, 10.0) } }).Pieces(0, 0, 100, 40));
+        // A clip that misses the box leaves nothing of it.
+        Assert.Empty(new PdfPecker.Rendering.ClipBoxes(new[] { new[] { (200.0, 0.0, 300.0, 40.0) } }).Pieces(0, 0, 100, 40)!);
+    }
+
+    [Fact]
+    public void A_cell_spanning_columns_of_a_table_with_separate_borders_keeps_its_span()
+    {
+        var md = Md("""
+            <style>td,th{border:1px solid #000;padding:2px}</style>
+            <table><tr><th>Name</th><th>Value</th><th>Note</th></tr><tr><td colspan="2">Spans two</td><td>x</td></tr>
+            <tr><td>Gamma</td><td>3</td><td>z</td></tr></table>
+            """);
+        Assert.Equal("| Name | Value | Note |\n| --- | --- | --- |\n| Spans two |  | x |\n| Gamma | 3 | z |\n", md);
+    }
+
+    [Fact]
+    public void Boxes_in_a_row_that_draw_their_own_borders_are_not_a_table()
+    {
+        // Cards set a few points apart, like the cells of a table with separate borders, but in one row only.
+        var md = Md("<style>.c{display:inline-block;width:30%;border:1px solid #444;padding:4px;margin:2px;vertical-align:top}</style>"
+            + string.Concat(Enumerable.Range(1, 3).Select(i => $"<div class=\"c\"><b>Card {i}</b><br>Some words that describe the card and wrap onto a second line of text.</div>")));
+        Assert.DoesNotContain("|", md, StringComparison.Ordinal);
+        Assert.Contains("**Card 1**\n\nSome words that describe the card and wrap onto a second line of text.\n\n**Card 2**", md, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_borderless_table_with_lower_case_values_is_a_table()
+    {
+        // A one-word value fills its column whenever it is the widest, which is no sign of text wrapping to the next row.
+        var md = Md("""
+            <style>body{font-family:sans-serif;font-size:11pt} td,th{padding:2px 12px;text-align:left}</style>
+            <table><tr><th>Name</th><th>Status</th><th>Region</th></tr>
+            <tr><td>Alice Brown</td><td>active</td><td>North</td></tr><tr><td>Bob Smith</td><td>pending</td><td>South</td></tr>
+            <tr><td>Carol White</td><td>closed</td><td>East</td></tr><tr><td>Dan Green</td><td>active</td><td>West</td></tr></table>
+            """);
+        Assert.Equal("| Name | Status | Region |\n| --- | --- | --- |\n| Alice Brown | active | North |\n| Bob Smith | pending | South |\n"
+            + "| Carol White | closed | East |\n| Dan Green | active | West |\n", md);
+    }
+
     [Fact]
     public void Two_header_rows_are_joined_column_by_column()
     {

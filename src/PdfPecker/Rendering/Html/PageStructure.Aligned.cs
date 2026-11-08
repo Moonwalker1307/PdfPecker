@@ -524,14 +524,22 @@ internal static partial class PageStructure
         }
 
         // Columns of running text are read one after the other rather than as a table: lines of several words, or lines
-        // that fill their column and go on in lower case on the next.
+        // that fill their column and go on in lower case on the next. A word alone fills its column when it is the
+        // column's widest entry, as "pending" does in a column of states, so only a line of words wraps, and only in a
+        // column wider than its widest single word.
+        var widestWord = new double[bands.Count];
+        foreach (var cell in rows.SelectMany(r => r))
+            if (cell.ColumnSpan == 1)
+                foreach (var line in cell.Lines)
+                    if (line.Words.Count == 1) widestWord[cell.Column] = Math.Max(widestWord[cell.Column], line.X1 - line.X0);
         int wraps = 0;
         for (int r = 0; r + 1 < rows.Count; r++)
             foreach (var cell in rows[r])
             {
                 var next = rows[r + 1].Find(c => c.Column == cell.Column && c.ColumnSpan == cell.ColumnSpan);
                 var band = bands[cell.Column];
-                if (next != null && cell.ColumnSpan == 1 && cell.Lines[^1].X1 - cell.Lines[^1].X0 >= 0.7 * (band.X1 - band.X0)
+                if (next != null && cell.ColumnSpan == 1 && cell.Lines[^1] is { Words.Count: >= 2 } last
+                    && last.X1 - last.X0 >= 0.7 * (band.X1 - band.X0) && band.X1 - band.X0 > widestWord[cell.Column] + AlignTolerance
                     && next.Lines[0].Words[0].Text is { Length: > 0 } t && char.IsLower(t[0]))
                     wraps++;
             }
