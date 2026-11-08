@@ -234,7 +234,7 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
   text, as in Chrome), images and gradients in `::before` and `::after` content, inline SVG (with
   percentage coordinates and sizes, as in Bootstrap's placeholder images, `cx`, `cy`, `r`, `rx`, `ry`, `x`, `y`, `width`, `height`, `d: path()` and `stop-color` set from style sheets, HTML in `<foreignObject>`, and icons drawn
-  with `<use>` from a sprite of symbols that is itself hidden, as in Bootstrap's icon sprites; also CSS `transform` with `transform-box` and
+  with `<use>` from a sprite of symbols that is itself hidden, in the `currentColor` where they are used, as in Bootstrap's icon sprites; lengths in mm, cm, in, pt and em; nested `<svg>` viewports with `preserveAspectRatio` and clipping; also CSS `transform` with `transform-box` and
   `transform-origin` on SVG elements, such as a gauge needle turning about its own centre, and `vector-effect: non-scaling-stroke`
   for hairlines in a scaled chart, though markers still scale) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
   `image-set()`,

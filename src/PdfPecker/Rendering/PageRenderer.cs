@@ -35,6 +35,7 @@ internal sealed partial class PageRenderer
 
     private readonly PdfFile _file;
     private readonly RenderCache _cache;
+    private readonly PageCacheUse _cacheUse = new(); // the shared cache entries this page has used and been charged for
     private readonly CancellationToken _cancel;
     private Canvas _canvas;
     private readonly Rasterizer _raster = new();
@@ -247,7 +248,9 @@ internal sealed partial class PageRenderer
             {
                 if (_ignoreColor || n < 1) break;
                 bool stroke = p.Op == "CS";
-                var cs = ops[0].Name is string csName ? ColorSpace.Parse(_file, PdfName.Get(csName), res) : null;
+                // Content often sets the colour space before every fill, so it is parsed once and kept: a Separation's
+                // sampled tint transform decoded again each time used up the page's decode budget.
+                var cs = ops[0].Name is string csName ? _cache.GetColorSpace(_file, csName, res, _cacheUse) : null;
                 cs ??= ColorSpace.Gray;
                 var init = cs.InitialColor();
                 if (stroke) { _gs.StrokeSpace = cs; _gs.StrokeComps = init; _gs.StrokePattern = null; _gs.StrokeRgb = cs is PatternSpace ? 0 : cs.ToRgb(init); }
@@ -621,7 +624,7 @@ internal sealed partial class PageRenderer
                 case "Font":
                     if (v is PdfArray fa && fa.Count >= 2 && _file.Resolve(fa[0]) is PdfDict fd)
                     {
-                        _gs.Font = _cache.GetFont(_file, fd);
+                        _gs.Font = _cache.GetFont(_file, fd, _cacheUse);
                         _gs.FontSize = _file.Num(fa[1], 1);
                     }
                     break;
@@ -781,7 +784,7 @@ internal sealed partial class PageRenderer
         if (luminosity)
         {
             // Backdrop color in the group's color space (default black).
-            var groupCs = ColorSpace.Parse(_file, _file.GetDict(g, "Group")?["CS"], null) ?? ColorSpace.RgbSpace;
+            var groupCs = _cache.GetColorSpace(_file, _file.GetDict(g, "Group")?["CS"], _cacheUse) ?? ColorSpace.RgbSpace;
             var bc = _file.GetNumbers(sm, "BC");
             if (bc != null && bc.Length >= groupCs.Components)
                 backdrop = groupCs.ToRgb(bc.Select(x => (float)x).ToArray());
@@ -810,7 +813,7 @@ internal sealed partial class PageRenderer
             _patternBase = savedBase;
         }
         var tr = _file.Resolve(sm["TR"]);
-        PdfFunction? fn = tr is PdfName ? null : PdfFunction.Create(_file, tr);
+        PdfFunction? fn = tr is PdfName ? null : _cache.GetFunction(_file, tr, _cacheUse);
         byte[]? lut = null;
         if (fn != null)
         {
@@ -897,7 +900,7 @@ internal sealed partial class PageRenderer
     private Fonts.PdfFont? LoadFont(string name, PdfDict? res)
     {
         var dict = _file.GetDict(_file.GetDict(res, "Font"), name);
-        return dict == null ? null : _cache.GetFont(_file, dict);
+        return dict == null ? null : _cache.GetFont(_file, dict, _cacheUse);
     }
 }
 

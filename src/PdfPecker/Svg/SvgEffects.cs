@@ -194,8 +194,8 @@ internal sealed partial class SvgImage
         var (outerFill, outerStroke) = (_contextFill, _contextStroke);
         var pts = path.Points.ToArray();
         Bounds(pts, out float minX, out float minY, out float maxX, out float maxY);
-        (_contextFill, _contextStroke) = (Context(s.SvgFill, s.SvgFillUrl, minX, minY, maxX, maxY, ctm),
-            Context(s.SvgStroke, s.SvgStrokeUrl, minX, minY, maxX, maxY, ctm));
+        (_contextFill, _contextStroke) = (Context(s.SvgFillColor, s.SvgFillUrl, minX, minY, maxX, maxY, ctm),
+            Context(s.SvgStrokeColor, s.SvgStrokeUrl, minX, minY, maxX, maxY, ctm));
         try
         {
             for (int i = 0; i < vertices.Count; i++)

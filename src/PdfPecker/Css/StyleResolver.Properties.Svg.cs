@@ -10,18 +10,16 @@ internal sealed partial class StyleResolver
 
     private static void ApplyFill(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
-        ParsePaint(d.Value, s, d.Inherit ? parent.SvgFill : null, d.Inherit ? parent.SvgFillUrl : null, d.Inherit,
-            out var color, out var url, s.SvgFill, s.SvgFillUrl);
-        s.SvgFill = color;
-        s.SvgFillUrl = url;
+        if (d.Inherit) { (s.SvgFill, s.SvgFillUrl, s.SvgFillCurrent) = (parent.SvgFill, parent.SvgFillUrl, parent.SvgFillCurrent); return; }
+        ParsePaint(d.Value, s, out var color, out var url, out bool current, s.SvgFill, s.SvgFillUrl, s.SvgFillCurrent);
+        (s.SvgFill, s.SvgFillUrl, s.SvgFillCurrent) = (color, url, current);
     }
 
     private static void ApplyStroke(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
-        ParsePaint(d.Value, s, d.Inherit ? parent.SvgStroke : null, d.Inherit ? parent.SvgStrokeUrl : null, d.Inherit,
-            out var color, out var url, s.SvgStroke, s.SvgStrokeUrl);
-        s.SvgStroke = color;
-        s.SvgStrokeUrl = url;
+        if (d.Inherit) { (s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeCurrent) = (parent.SvgStroke, parent.SvgStrokeUrl, parent.SvgStrokeCurrent); return; }
+        ParsePaint(d.Value, s, out var color, out var url, out bool current, s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeCurrent);
+        (s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeCurrent) = (color, url, current);
     }
 
     /// <summary>stroke-width: a plain number is in user units (CSS pixels); a length is converted to them.</summary>

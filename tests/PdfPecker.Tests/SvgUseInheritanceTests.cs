@@ -70,4 +70,53 @@ public class SvgUseInheritanceTests
         Color(0, 0, 255, At(pdf, 50, 50));
         Color(0, 170, 0, At(pdf, 200, 50));
     }
+
+    [Fact]
+    public void Current_color_in_a_sprite_symbol_is_the_colour_where_it_is_used()
+    {
+        // The icon-sprite pattern: a hidden sprite of symbols painted currentColor, used in text of different colours.
+        var pdf = HtmlToPdf.Convert("<body style='margin:0'>"
+            + "<svg style='display:none'><symbol id='i' viewBox='0 0 10 10'><path fill='currentColor' d='M0 0H10V10H0Z'/></symbol></svg>"
+            + "<div style='color:#f00'><svg width='40' height='40' style='display:block'><use href='#i'/></svg></div>"
+            + "<div style='color:#00f'><svg width='40' height='40' style='display:block'><use href='#i'/></svg></div></body>", NoMargins);
+        Color(255, 0, 0, Pixel(pdf, 15, 15));
+        Color(0, 0, 255, Pixel(pdf, 15, 45));
+    }
+
+    [Fact]
+    public void Every_way_of_setting_the_colour_of_a_use_reaches_current_color()
+    {
+        var pdf = Svg("<defs><symbol id='s' viewBox='0 0 10 10'><rect width='10' height='10' fill='currentColor'/></symbol>"
+            + "<rect id='r' width='50' height='50' fill='currentColor'/><rect id='p' width='50' height='50'/></defs>"
+            + "<use href='#s' width='50' height='50' style='color:#f00'/>"
+            + "<use href='#s' x='60' width='50' height='50' color='#00f'/>"
+            + "<g style='color:#0a0'><use href='#s' x='120' width='50' height='50'/></g>"
+            + "<use href='#r' x='180' style='color:#f80'/>"
+            + "<use href='#p' x='240' style='fill:currentColor;color:#808'/>", "color:#888");
+        Color(255, 0, 0, At(pdf, 25, 25));
+        Color(0, 0, 255, At(pdf, 85, 25));
+        Color(0, 170, 0, At(pdf, 145, 25));
+        Color(255, 136, 0, At(pdf, 205, 25));
+        Color(136, 0, 136, At(pdf, 265, 25));
+    }
+
+    [Fact]
+    public void A_used_shape_that_sets_its_own_colour_keeps_it()
+    {
+        var pdf = Svg("<defs><symbol id='s' viewBox='0 0 10 10'><g color='#0a0'><rect width='10' height='10' fill='currentColor'/></g>"
+            + "<rect width='5' height='5' fill='none' stroke='currentColor' stroke-width='2'/></symbol></defs>"
+            + "<use href='#s' width='100' height='100' style='color:#f00'/>");
+        Color(0, 170, 0, At(pdf, 75, 75));
+        Color(255, 0, 0, At(pdf, 50, 25));
+    }
+
+    [Fact]
+    public void Current_color_is_inherited_as_the_keyword()
+    {
+        // fill: currentColor on the svg is resolved where each shape is drawn, against that shape's own colour.
+        var html = HtmlToPdf.Convert("<body style='margin:0;color:#00f'><svg width='400' height='400' fill='currentColor' style='display:block'>"
+            + "<g style='color:#0a0'><rect width='100' height='100'/></g><rect x='150' width='100' height='100'/></svg></body>", NoMargins);
+        Color(0, 170, 0, At(html, 50, 50));
+        Color(0, 0, 255, At(html, 200, 50));
+    }
 }

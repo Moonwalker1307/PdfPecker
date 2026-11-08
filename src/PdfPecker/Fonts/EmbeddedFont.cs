@@ -88,7 +88,7 @@ internal sealed class EmbeddedFont : TextFont
 
     /// <summary>The advance of a code point in thousandths of the program's em, before size-adjust.</summary>
     public int CharUnits(int codePoint)
-        => (uint)codePoint < 0x10000 ? _widths[codePoint] : Program.Advance1000(Program.GlyphId(codePoint));
+        => IsHidden(codePoint) ? 0 : (uint)codePoint < 0x10000 ? _widths[codePoint] : Program.Advance1000(Program.GlyphId(codePoint));
 
     public override bool HasKerning => !_noKerning && Program.Kerning != null;
 
@@ -284,7 +284,7 @@ internal sealed class EmbeddedFont : TextFont
     {
         glyphs.Clear();
         var lig = _ligatures;
-        bool ligate = false;
+        bool ligate = false, hidden = false;
         int prev = -1;
         for (int i = start, end = start + length; i < end; i++)
         {
@@ -293,11 +293,28 @@ internal sealed class EmbeddedFont : TextFont
             int gid = Program.GlyphId(cp);
             if (rtl && Text.UnicodeTables.Mirror(cp) is int m && m != cp && Program.GlyphId(m) is int mg && mg != 0) gid = mg;
             if (lig != null && !ligate && prev >= 0 && lig.StartsLigature(prev, gid)) ligate = true;
+            hidden |= IsHidden(cp);
             glyphs.Add(new ShapedGlyph(gid, i, n));
             prev = gid;
             i += n - 1;
         }
         if (ligate) lig!.Apply(glyphs);
+        if (hidden) RemoveHidden(s, glyphs);
+    }
+
+    // Default ignorable characters draw nothing, not .notdef nor the visible glyph some fonts give joiners and bidi
+    // marks. They are taken out after the ligatures, so that a zero width non-joiner still keeps two letters apart.
+    private static void RemoveHidden(string s, List<ShapedGlyph> glyphs)
+    {
+        int kept = 0;
+        for (int k = 0; k < glyphs.Count; k++)
+        {
+            var g = glyphs[k];
+            int cp = g.Length == 2 && char.IsHighSurrogate(s[g.Start]) ? char.ConvertToUtf32(s[g.Start], s[g.Start + 1]) : s[g.Start];
+            if ((g.Length == 1 || cp >= 0x10000) && IsHidden(cp)) continue;
+            glyphs[kept++] = g;
+        }
+        glyphs.RemoveRange(kept, glyphs.Count - kept);
     }
 
     [ThreadStatic] private static List<ShapedGlyph>? t_glyphs;
@@ -316,12 +333,10 @@ internal sealed class EmbeddedFont : TextFont
         for (int i = start, end = start + length; i < end; i++)
         {
             int cp = s[i];
-            if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1]))
-            {
-                cp = char.ConvertToUtf32(s[i], s[++i]);
-                total += CharUnits(cp);
-            }
-            else total += w[cp];
+            if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1])) cp = char.ConvertToUtf32(s[i], s[++i]);
+            // Drawn as nothing, so the letters around it kern as a pair.
+            if (IsHidden(cp)) continue;
+            total += cp < 0x10000 ? w[cp] : CharUnits(cp);
             if (kern)
             {
                 if (prev >= 0) total += Program.Kern1000(Program.GlyphId(prev), Program.GlyphId(cp));
@@ -483,7 +498,8 @@ internal sealed class EmbeddedFont : TextFont
         return true;
     }
 
-    public override float CharWidth(char c, float size) => SizeAdjust == 1 ? _widths[c] * size / 1000f : _widths[c] * size * SizeAdjust / 1000f;
+    public override float CharWidth(char c, float size)
+        => IsHidden(c) ? 0 : SizeAdjust == 1 ? _widths[c] * size / 1000f : _widths[c] * size * SizeAdjust / 1000f;
 }
 
 /// <summary>
@@ -557,6 +573,9 @@ internal sealed class FontChain : TextFont
             }
         }
         previous = cp;
+        // A default ignorable character draws nothing in any font, so it stays in the run it is in rather than start one
+        // of a font that has it: that would split the text around it and embed a font for nothing.
+        if (IsHidden(cp)) return current ?? _primary;
         return stays && Covers(current!, cp) ? current! : Pick(cp);
     }
 
