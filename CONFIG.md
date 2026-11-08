@@ -38,6 +38,7 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 | `codeql.yml` | PRs, pushes and a schedule | CodeQL analysis. |
 | `perf.yml` | Nightly | Benchmark on main, run twice keeping each case's better time, against the previous run for allocation and the median of the three previous runs on the same processor for time. |
 | `fuzz.yml` | Nightly | Fuzzes every target, including `fluent`, the fluent package's generative fuzzer. |
+| `vulnerability-scan.yml` | Daily, and PRs that change it | OSV-Scanner checks every NuGet package (transitive ones too, from lock files the restore writes) and the veraPDF Maven project against osv.dev and reports to Security → Code scanning, failing the run when something is affected. A second job opens an issue for each new .NET security release of a supported version, since the Native AOT tool and the Python, Node and Rust packages carry the runtime they were built with. |
 | `dependabot-auto-merge.yml` | Dependabot PRs | Turns on auto-merge (squash) for patch and minor updates, so GitHub merges them once the required checks pass. Major updates and veraPDF updates wait for a person. |
 
 Each push to main gets its own run, while a newer push to a PR cancels that PR's older run. Package and coverage
@@ -51,6 +52,10 @@ Every job that restores packages caches `~/.nuget/packages` through `setup-dotne
 without the cache every job counted as a download of that release on nuget.org. The builds of a published release are
 the exception: the build job and the command-line tool's per-platform packs restore from nuget.org without the cache,
 so the packages it publishes never depend on a cache an earlier run saved.
+
+Repository settings the vulnerability scan works with, under Settings → Advanced Security: Dependabot alerts (which
+also cover the pinned actions), Dependabot security updates, and secret scanning with push protection. Code scanning
+alerts from the scan appear without any setting.
 
 Repository settings Dependabot auto-merge relies on: "Allow auto-merge" under Settings → General, and a branch
 ruleset (or branch protection) on `main` that requires the status checks `build`, `windows`, `native-aot` and
