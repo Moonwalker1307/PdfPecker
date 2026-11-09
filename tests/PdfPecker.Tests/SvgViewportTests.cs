@@ -132,4 +132,39 @@ public class SvgViewportTests
         Assert.Contains("1 0 0 -1 75.591 40 Tm (Cm)", content);
         Assert.Contains("1 0 0 -1 200 366 Tm (ten)", content);
     }
+
+    [Fact]
+    public void A_symbol_clips_to_the_viewport_its_use_gives_it_unless_its_overflow_is_visible()
+    {
+        // The viewport is the use element's width and height from its x and y, not the fitted viewBox; Chrome clips
+        // alike, and leaves the content whole when overflow is visible or auto, by attribute or by CSS.
+        var pdf = Svg("<symbol id='s' viewBox='0 0 10 10'><rect x='-5' y='-5' width='20' height='20' fill='#f00'/></symbol>"
+            + "<use href='#s' x='50' y='50' width='100' height='100'/>"
+            + "<symbol id='w' viewBox='0 0 10 10'><rect x='-5' y='-5' width='20' height='20' fill='#00f'/></symbol>"
+            + "<use href='#w' x='200' y='50' width='100' height='50'/>"
+            + "<symbol id='n'><rect x='-20' y='-20' width='80' height='80' fill='#0a0'/></symbol>"
+            + "<use href='#n' x='50' y='250' width='40' height='40'/>"
+            + "<symbol id='v' viewBox='0 0 10 10' overflow='visible'><rect x='-5' y='-5' width='20' height='20' fill='#808'/></symbol>"
+            + "<use href='#v' x='250' y='250' width='50' height='50'/>"
+            + "<symbol id='a' viewBox='0 0 10 10' style='overflow:auto'><rect x='-5' y='-5' width='20' height='20' fill='#f80'/></symbol>"
+            + "<use href='#a' x='250' y='150' width='50' height='50'/>");
+        Color(255, 0, 0, At(pdf, 55, 55));
+        Assert.Equal(White, At(pdf, 45, 100));
+        Assert.Equal(White, At(pdf, 100, 155));
+        Color(0, 0, 255, At(pdf, 205, 55));
+        Color(0, 0, 255, At(pdf, 295, 95));
+        Assert.Equal(White, At(pdf, 250, 105));
+        Color(0, 170, 0, At(pdf, 85, 285));
+        Assert.Equal(White, At(pdf, 45, 270));
+        Assert.Equal(White, At(pdf, 95, 270));
+        Color(136, 0, 136, At(pdf, 240, 240));
+        Color(255, 136, 0, At(pdf, 240, 140));
+    }
+
+    [Fact]
+    public void A_use_of_a_symbol_with_no_width_draws_nothing()
+    {
+        var pdf = Svg("<symbol id='s'><rect width='100' height='100' fill='#f00'/></symbol><use href='#s' width='0'/>");
+        Assert.Equal(White, At(pdf, 50, 50));
+    }
 }
