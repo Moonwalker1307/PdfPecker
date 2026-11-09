@@ -1,4 +1,6 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace PdfPecker.Rendering.Graphics;
 
@@ -107,14 +109,34 @@ internal sealed partial class Painter
     {
         uint solid = Color;
         bool hasShader = !shaded.IsEmpty;
-        for (int i = 0; i < pixels.Length; i++)
+        int i = 0;
+        if (hasShader && Vector128.IsHardwareAccelerated)
         {
-            int c = coverage[i];
-            if (c == 0) continue;
-            uint source = hasShader ? shaded[i] : solid;
-            if (c != FullCoverage) source = Canvas.Scale(source, ToScaleFactor(c));
-            pixels[i] = Canvas.Over(source, pixels[i]);
+            // An opaque image covering whole pixels, as a scan does, replaces what is below: four pixels at a time where
+            // all four are, and one at a time otherwise.
+            var opaque = Vector128.Create(0xFF000000u);
+            for (; i + 4 <= pixels.Length; i += 4)
+            {
+                var source = Vector128.Create(shaded.Slice(i, 4));
+                if (MemoryMarshal.Read<uint>(coverage.Slice(i)) == uint.MaxValue && (source & opaque) == opaque)
+                {
+                    source.CopyTo(pixels.Slice(i));
+                    continue;
+                }
+                for (int k = i; k < i + 4; k++) CompositeUnmaskedPixel(pixels, coverage, shaded, solid, k);
+            }
         }
+        for (; i < pixels.Length; i++) CompositeUnmaskedPixel(pixels, coverage, shaded, solid, i);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void CompositeUnmaskedPixel(Span<uint> pixels, ReadOnlySpan<byte> coverage, ReadOnlySpan<uint> shaded, uint solid, int i)
+    {
+        int c = coverage[i];
+        if (c == 0) return;
+        uint source = !shaded.IsEmpty ? shaded[i] : solid;
+        if (c != FullCoverage) source = Canvas.Scale(source, ToScaleFactor(c));
+        pixels[i] = Canvas.Over(source, pixels[i]);
     }
 
     private void CompositeMasked(Span<uint> pixels, ReadOnlySpan<byte> coverage, ReadOnlySpan<byte> clipMask, ReadOnlySpan<byte> softMask, ReadOnlySpan<uint> shaded)

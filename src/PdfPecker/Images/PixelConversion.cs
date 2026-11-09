@@ -53,21 +53,47 @@ internal static class PixelConversion
                 ToRgb(pixels, destination, mr, mg, mb);
                 return;
             case ImagePixelFormat.Gray:
-                for (int i = 0; i < pixels.Length; i++)
-                {
-                    uint p = pixels[i];
-                    uint r = p & 255, g = (p >> 8) & 255, b = (p >> 16) & 255, uncovered = 255 - (p >> 24);
-                    if (uncovered == 0 && r == g && g == b)
-                    {
-                        destination[i] = (byte)r;
-                        continue;
-                    }
-                    destination[i] = (byte)Luma(Over(r, mr, uncovered), Over(g, mg, uncovered), Over(b, mb, uncovered));
-                }
+                ToGray(pixels, destination, mr, mg, mb);
                 return;
             default:
                 throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown pixel format.");
         }
+    }
+
+    /// <summary>
+    /// Premultiplied pixels to grey on the matte. Scanned and text pages are mostly opaque grey, whose level is the red
+    /// byte: four pixels at a time where vectors are fast, each run of four with a coloured or translucent pixel one by one.
+    /// </summary>
+    private static void ToGray(ReadOnlySpan<uint> pixels, Span<byte> gray, uint mr, uint mg, uint mb)
+    {
+        int i = 0;
+        if (Vector128.IsHardwareAccelerated)
+        {
+            var low = Vector128.Create(0xFFu);
+            var opaque = Vector128.Create(0xFF000000u);
+            var spread = Vector128.Create(0x010101u);
+            var pack = Vector128.Create((byte)0, 4, 8, 12, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80);
+            ref uint src = ref MemoryMarshal.GetReference(pixels);
+            for (; i + 4 <= pixels.Length; i += 4)
+            {
+                var v = Vector128.LoadUnsafe(ref src, (nuint)i);
+                // Grey and opaque: the red byte copied to green and blue, with alpha 255.
+                if (v == ((v & low) * spread | opaque))
+                {
+                    MemoryMarshal.Write(gray.Slice(i), Vector128.Shuffle(v.AsByte(), pack).AsUInt32().ToScalar());
+                    continue;
+                }
+                for (int k = i; k < i + 4; k++) gray[k] = GrayOf(pixels[k], mr, mg, mb);
+            }
+        }
+        for (; i < pixels.Length; i++) gray[i] = GrayOf(pixels[i], mr, mg, mb);
+    }
+
+    private static byte GrayOf(uint p, uint mr, uint mg, uint mb)
+    {
+        uint r = p & 255, g = (p >> 8) & 255, b = (p >> 16) & 255, uncovered = 255 - (p >> 24);
+        if (uncovered == 0 && r == g && g == b) return (byte)r;
+        return (byte)Luma(Over(r, mr, uncovered), Over(g, mg, uncovered), Over(b, mb, uncovered));
     }
 
     /// <summary>

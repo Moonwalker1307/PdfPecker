@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using PdfPecker.Rendering.Graphics;
 using PdfPecker.Rendering.Images;
 using PdfPecker.Rendering.Parsing;
@@ -158,6 +160,10 @@ internal sealed class ImageShader : IShader
     // The image columns and horizontal weight of each canvas pixel of the last row shaded without rotation or skew,
     // which every row of an upright image shares: the same row start gives the same steps.
     private int[] _left = Array.Empty<int>(), _right = Array.Empty<int>(), _weight = Array.Empty<int>();
+    // The horizontal weights again, and 256 minus them, once for each of a pixel's four channels, for the vector loop.
+    private ushort[] _channelWeight = Array.Empty<ushort>(), _channelRest = Array.Empty<ushort>();
+    // Whether every weight is 0 to 255, which the vector loop needs; coordinates beyond int's range can give others.
+    private bool _weightsInRange;
     private double _columnsStart = double.NaN;
     private int _columnsCount;
 
@@ -176,9 +182,12 @@ internal sealed class ImageShader : IShader
                 _left = new int[n];
                 _right = new int[n];
                 _weight = new int[n];
+                _channelWeight = new ushort[4 * n];
+                _channelRest = new ushort[4 * n];
             }
             _columnsStart = u;
             _columnsCount = n;
+            _weightsInRange = true;
             for (int i = 0; i < n; i++, u += du)
             {
                 double su = u - 0.5;
@@ -186,6 +195,9 @@ internal sealed class ImageShader : IShader
                 _weight[i] = (int)((su - iu) * 256);
                 _left[i] = Math.Clamp(iu, 0, w - 1);
                 _right[i] = Math.Clamp(iu + 1, 0, w - 1);
+                _weightsInRange &= _weight[i] is >= 0 and <= 255;
+                _channelWeight.AsSpan(4 * i, 4).Fill((ushort)_weight[i]);
+                _channelRest.AsSpan(4 * i, 4).Fill((ushort)(256 - _weight[i]));
             }
         }
         double sv = v - 0.5;
@@ -197,14 +209,52 @@ internal sealed class ImageShader : IShader
         var left = _left.AsSpan(0, n);
         var right = _right.AsSpan(0, n);
         var weight = _weight.AsSpan(0, n);
-        for (int i = 0; i < colors.Length; i++)
+        int at = 0;
+        if (Vector128.IsHardwareAccelerated && _weightsInRange && wv is >= 0 and <= 255) at = ShadeRowVector(top, bottom, left, right, wv, colors);
+        for (; at < colors.Length; at++)
         {
-            int u0 = left[i], u1 = right[i];
+            int u0 = left[at], u1 = right[at];
             uint a = top[u0], b = top[u1], c = bottom[u0], d = bottom[u1];
-            if (a == b && c == d && a == c) { colors[i] = a; continue; }
-            int wu = weight[i];
-            colors[i] = Lerp(Lerp(a, b, wu), Lerp(c, d, wu), wv);
+            if (a == b && c == d && a == c) { colors[at] = a; continue; }
+            int wu = weight[at];
+            colors[at] = Lerp(Lerp(a, b, wu), Lerp(c, d, wu), wv);
         }
+    }
+
+    /// <summary>
+    /// The loop of <see cref="ShadeRow"/> four pixels at a time, with each channel in 16 bits: the same products and
+    /// shifts as <see cref="Lerp"/>, whose sums stay below 65,536, so every pixel comes out as the scalar loop makes it
+    /// (four equal samples included, which interpolate to themselves). Returns the pixels done.
+    /// </summary>
+    private int ShadeRowVector(ReadOnlySpan<uint> top, ReadOnlySpan<uint> bottom, ReadOnlySpan<int> left, ReadOnlySpan<int> right, int wv,
+        Span<uint> colors)
+    {
+        var down = Vector128.Create((ushort)wv);
+        var stay = Vector128.Create((ushort)(256 - wv));
+        ref ushort weight = ref MemoryMarshal.GetArrayDataReference(_channelWeight);
+        ref ushort rest = ref MemoryMarshal.GetArrayDataReference(_channelRest);
+        int i = 0;
+        for (; i + 4 <= colors.Length; i += 4)
+        {
+            int l0 = left[i], l1 = left[i + 1], l2 = left[i + 2], l3 = left[i + 3];
+            int r0 = right[i], r1 = right[i + 1], r2 = right[i + 2], r3 = right[i + 3];
+            var (aLow, aHigh) = Vector128.Widen(Vector128.Create(top[l0], top[l1], top[l2], top[l3]).AsByte());
+            var (bLow, bHigh) = Vector128.Widen(Vector128.Create(top[r0], top[r1], top[r2], top[r3]).AsByte());
+            var (cLow, cHigh) = Vector128.Widen(Vector128.Create(bottom[l0], bottom[l1], bottom[l2], bottom[l3]).AsByte());
+            var (dLow, dHigh) = Vector128.Widen(Vector128.Create(bottom[r0], bottom[r1], bottom[r2], bottom[r3]).AsByte());
+            var wLow = Vector128.LoadUnsafe(ref weight, (nuint)(4 * i));
+            var wHigh = Vector128.LoadUnsafe(ref weight, (nuint)(4 * i + 8));
+            var rLow = Vector128.LoadUnsafe(ref rest, (nuint)(4 * i));
+            var rHigh = Vector128.LoadUnsafe(ref rest, (nuint)(4 * i + 8));
+            var upperLow = (aLow * rLow + bLow * wLow) >> 8;
+            var upperHigh = (aHigh * rHigh + bHigh * wHigh) >> 8;
+            var lowerLow = (cLow * rLow + dLow * wLow) >> 8;
+            var lowerHigh = (cHigh * rHigh + dHigh * wHigh) >> 8;
+            var low = (upperLow * stay + lowerLow * down) >> 8;
+            var high = (upperHigh * stay + lowerHigh * down) >> 8;
+            Vector128.Narrow(low, high).AsUInt32().CopyTo(colors.Slice(i));
+        }
+        return i;
     }
 
     private static uint Lerp(uint a, uint b, int t)
