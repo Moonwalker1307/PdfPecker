@@ -59,6 +59,20 @@ internal static partial class SaslPrep
         return Refusal.None;
     }
 
+    /// <summary>
+    /// The first code point of <paramref name="s"/> that Unicode 3.2 did not assign, or -1. Mapping and normalization leave
+    /// such code points as they are, so this names the character that makes a stored string refused.
+    /// </summary>
+    public static int FirstUnassigned(string s)
+    {
+        for (int i = 0; i < s.Length;)
+        {
+            int cp = CodePointAt(s, ref i);
+            if (In(UnassignedRanges, cp)) return cp;
+        }
+        return -1;
+    }
+
     private static bool IsPrintableAscii(string s)
     {
         foreach (char c in s)

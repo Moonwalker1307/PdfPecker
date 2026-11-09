@@ -68,6 +68,8 @@ public class SaslPrepTests
         Assert.Equal(SaslPrep.Refusal.None, SaslPrep.Prepare("\U0001F100\u00AA", stored: false, out var digit));
         Assert.Equal("\U0001F100a", digit);
         Assert.Equal(SaslPrep.Refusal.Unassigned, SaslPrep.Prepare("\U0001F100", stored: true, out _));
+        Assert.Equal(0x1F100, SaslPrep.FirstUnassigned("a\u00AA\U0001F100\U0001F600"));
+        Assert.Equal(-1, SaslPrep.FirstUnassigned("a\u00AA\uFB01"));
         // The prohibited characters and the bidi rule apply to queries too.
         Assert.Equal(SaslPrep.Refusal.Prohibited, SaslPrep.Prepare("\u0007", stored: false, out _));
         Assert.Equal(SaslPrep.Refusal.Bidirectional, SaslPrep.Prepare("\u0627\u0031", stored: false, out _));

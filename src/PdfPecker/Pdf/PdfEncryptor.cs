@@ -71,7 +71,9 @@ internal sealed class PdfEncryptor : IPdfObjectEncryption, IDisposable
 
     /// <summary>
     /// Passwords are UTF-8 after SASLprep, at most 127 bytes (ISO 32000-2 section 7.6.4.3.3). A password being set is a
-    /// stored string, which must not hold code points that Unicode 3.2 did not assign.
+    /// stored string, which must not hold code points that Unicode 3.2 did not assign (RFC 3454 section 7), as PDFBox
+    /// refuses them too. PdfPecker 1.23 accepted them; opening, which prepares a password as a query, still accepts them,
+    /// so files encrypted with such a password stay readable.
     /// </summary>
     private static byte[] PasswordBytes(string? password, string which)
         => string.IsNullOrEmpty(password) ? Array.Empty<byte>() : Decryptor.Truncate(Encoding.UTF8.GetBytes(Prepare(password, which, "security")));
@@ -79,15 +81,20 @@ internal sealed class PdfEncryptor : IPdfObjectEncryption, IDisposable
     private static string Prepare(string password, string which, string paramName)
     {
         string? prepared;
-        string? problem = SaslPrep.Prepare(password, stored: true, out prepared) switch
+        var refusal = SaslPrep.Prepare(password, stored: true, out prepared);
+        string? problem = refusal switch
         {
             SaslPrep.Refusal.Prohibited => "has a character that SASLprep prohibits, such as a control, private-use or bidi control character",
             SaslPrep.Refusal.Bidirectional => "mixes right-to-left and left-to-right letters, or does not begin and end with its right-to-left letters, which SASLprep refuses",
-            SaslPrep.Refusal.Unassigned => "has a character that Unicode 3.2 did not have, such as most emoji, which SASLprep refuses in a password being set",
+            SaslPrep.Refusal.Unassigned => $"contains U+{SaslPrep.FirstUnassigned(password):X4}, a character that Unicode 3.2 did not have, as most "
+                + "emoji did not. RFC 4013 (SASLprep), which PDF 2.0 uses to prepare AES-256 passwords, does not allow such characters "
+                + "in a password being set, so PdfPecker no longer encrypts with them, although version 1.23 did. Files that were "
+                + "encrypted with such a password still open with it. Choose a password without this character",
             _ => prepared!.Length == 0 ? "has only characters that SASLprep removes, so it would protect nothing" : null,
         };
         if (problem != null)
-            throw new ArgumentException($"The {which} password {problem} (PDF 2.0 prepares AES-256 passwords with SASLprep, RFC 4013).", paramName);
+            throw new ArgumentException(refusal == SaslPrep.Refusal.Unassigned ? $"The {which} password {problem}."
+                : $"The {which} password {problem} (PDF 2.0 prepares AES-256 passwords with SASLprep, RFC 4013).", paramName);
         return prepared!;
     }
 

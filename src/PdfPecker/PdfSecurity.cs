@@ -44,7 +44,9 @@ public sealed class PdfSecurity
     /// fails with <see cref="ArgumentException"/> when SASLprep refuses a password: one with control, private-use,
     /// non-character or bidi control characters, one that mixes right-to-left and left-to-right letters, one with
     /// characters that Unicode 3.2 did not have, such as most emoji, or one made only of characters that SASLprep drops.
-    /// Opening accepts any password, and also tries it unprepared, as some other tools write it.
+    /// PdfPecker 1.23 encrypted with passwords that contained such characters; RFC 4013 does not allow them in a password
+    /// being set. Opening accepts any password, including those, and also tries it unprepared, as some other tools write
+    /// it, so files encrypted with them stay readable.
     /// </remarks>
     public string? UserPassword { get; set; }
 

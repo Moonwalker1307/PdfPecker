@@ -160,6 +160,14 @@ public class ProtectorTests
             var e = Assert.Throws<ArgumentException>(() => PdfProtector.Encrypt(Source.Value, security));
             Assert.Equal("security", e.ParamName);
             Assert.Contains("SASLprep", e.Message, StringComparison.Ordinal);
+            if (password.Contains("\U0001F600", StringComparison.Ordinal))
+            {
+                // The message names the character and says why a password that version 1.23 accepted is refused now.
+                Assert.Contains("U+1F600", e.Message, StringComparison.Ordinal);
+                Assert.Contains("Unicode 3.2", e.Message, StringComparison.Ordinal);
+                Assert.Contains("1.23", e.Message, StringComparison.Ordinal);
+                Assert.Contains("still open", e.Message, StringComparison.Ordinal);
+            }
             Assert.Equal("security", Assert.Throws<ArgumentException>(() => PdfLinearizer.Linearize(Source.Value, security, null)).ParamName);
             Assert.Equal("options", Assert.Throws<ArgumentException>(() => HtmlToPdf.Convert("<p>x</p>", new PdfOptions { Security = security })).ParamName);
             Assert.Equal("options", Assert.Throws<ArgumentException>(
@@ -197,6 +205,8 @@ public class ProtectorTests
     [InlineData("I\u00ADX", "I\u00ADX")] // the same, with a password SASLprep changes
     [InlineData("IX\u00AD", "\u2168\u00AD")] // PdfPecker 1.23 and earlier, which applied NFKC alone
     [InlineData("a b", "a\u200Bb")] // libidn and PDFBox, which make the zero width space a space
+    [InlineData("smile\U0001F600fi", "smile\U0001F600\uFB01")] // PdfPecker 1.23 with an emoji, which it encrypted with
+    [InlineData("smile\U0001F600", "smile\U0001F600")] // pypdf, which falls back to plain UTF-8 for a password with an emoji
     public void Files_whose_passwords_were_prepared_otherwise_still_open(string written, string typed)
     {
         var rekeyed = WithUserPasswordBytes(PdfProtector.Encrypt(Source.Value, Security()), "open", Encoding.UTF8.GetBytes(written));
