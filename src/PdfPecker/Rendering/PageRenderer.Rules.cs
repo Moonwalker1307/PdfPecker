@@ -164,7 +164,8 @@ internal sealed partial class PageRenderer
                 {
                     level.Add((x0, y0, x1, y1));
                     area += lx * sy - sx * ly;
-                    turns.Add(Math.Sign(area));
+                    // A point at infinity leaves the area NaN, which has no sign; such a subpath is taken to run neither way.
+                    turns.Add(double.IsNaN(area) ? 0 : Math.Sign(area));
                 }
                 if (i == verbs.Count) break;
                 open = false;

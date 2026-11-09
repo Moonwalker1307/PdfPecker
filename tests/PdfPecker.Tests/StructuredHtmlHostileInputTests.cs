@@ -286,6 +286,18 @@ public class StructuredHtmlHostileInputTests
         Convert(pdf);
     }
 
+    [Fact]
+    public void A_nonzero_clip_with_a_point_at_infinity_is_read_without_failing()
+    {
+        // A number too large for a double reads as infinity, which makes the subpath's area NaN. Found by the fuzzer:
+        // targets pdf-text, pdf-markdown and pdf-html-structured, exception-d795baf9.
+        var content = "q 0 0 m 10 0 l 1E999 10 l 0 10 l h 1 1 m 2 1 l 2 2 l h W n 0.9 g 0 0 5 5 re f Q\n"
+            + Text(72, 700, 12, "After the clip");
+        var pdf = Page(content);
+        Assert.Contains("After the clip", Extract(pdf), StringComparison.Ordinal);
+        Convert(pdf);
+    }
+
     private static string Extract(byte[] pdf)
     {
         var task = Task.Run(() =>
