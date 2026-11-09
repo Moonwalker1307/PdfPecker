@@ -248,8 +248,9 @@ public class Css3LayoutTests
     [Fact]
     public void A_table_header_repeats_at_the_top_of_a_column_that_a_break_in_the_border_spacing_starts()
     {
-        // In 300-point columns, the sixth row ends 5 points before the end of the first and the spacing is 10 points:
-        // the seventh row starts the second column under the repeated header, without the spacing, as in Chrome.
+        // In 300-point columns, the sixth row ends 6.75 points before the end of the first and the spacing is 10 points,
+        // which Chrome keeps as 13 whole pixels (9.75 points): the seventh row starts the second column under the
+        // repeated header, without the spacing, as in Chrome.
         string rows = string.Concat(Enumerable.Range(1, 9).Select(i => $"<tr><td style='height: 30pt; padding: 0'>r{i}x</td></tr>"));
         var ops = Layout("<div style='columns: 2; column-gap: 0; column-fill: auto; height: 300pt; font: 8pt/10pt sans-serif'>"
                          + "<table style='border-spacing: 0 10pt'><thead><tr><th style='height: 45pt; padding: 0'>headx</th></tr></thead>"
@@ -257,7 +258,7 @@ public class Css3LayoutTests
         var heads = ops.OfType<TextOp>().Where(t => t.Text.Contains("headx")).OrderBy(t => t.X).ToList();
         Assert.Equal(2, heads.Count);
         Assert.True(heads[1].X >= 250);
-        Near(heads[0].LineTop - 10, heads[1].LineTop);
+        Near(heads[0].LineTop - 9.75f, heads[1].LineTop);
         var seventh = ops.OfType<TextOp>().Single(t => t.Text.Contains("r7x"));
         Assert.True(seventh.X >= 250);
     }

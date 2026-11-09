@@ -399,6 +399,21 @@ public class BrowserMatchTests
         Assert.Matches(@"(^|\n)84\.75 [\d.]+ 0\.75 [\d.]+ re f", content);
     }
 
+    [Theory]
+    [InlineData("style='border-spacing: 2pt 10pt'", 2, 13)] // 2.67px and 13.33px
+    [InlineData("cellspacing='2.5'", 2, 2)]
+    [InlineData("style='border-spacing: 0.5em; font-size: 13px'", 6, 6)] // 6.5px
+    [InlineData("style='border-spacing: 2.9px 0.9px'", 2, 0)]
+    public void Border_spacing_is_rounded_down_to_whole_pixels(string table, int h, int v)
+    {
+        // Chrome keeps border spacing in whole CSS pixels and drops the fraction, so with 10pt the rows are 13px apart,
+        // not 13.33px, and they do not drift a pixel away from Chrome's every third row.
+        static string Cell(string colour) => $"<td style='padding: 0; width: 20px; height: 20px; background: {colour}'></td>";
+        var ops = Layout($"<table {table}><tr>{Cell("#f00")}{Cell("#0f0")}</tr><tr>{Cell("#00f")}<td></td></tr></table>");
+        Near((20 + h) * 0.75f, Box(ops, "#0f0").X - Box(ops, "#f00").X);
+        Near((20 + v) * 0.75f, Box(ops, "#00f").Y - Box(ops, "#f00").Y);
+    }
+
     [Fact]
     public void A_column_with_a_width_keeps_it_next_to_a_column_of_long_text()
     {
