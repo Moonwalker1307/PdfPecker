@@ -24,10 +24,16 @@ internal static class PngFilters
         switch (filter)
         {
             case Sub:
-                for (int i = bytesPerPixel; i < row.Length; i++) row[i] += row[i - bytesPerPixel];
+                UndoSub(row, bytesPerPixel);
                 break;
             case Up:
-                for (int i = 0; i < row.Length; i++) row[i] += above[i];
+                int at = 0;
+                if (Vector.IsHardwareAccelerated)
+                {
+                    for (; at + Vector<byte>.Count <= row.Length; at += Vector<byte>.Count)
+                        (new Vector<byte>(row.Slice(at)) + new Vector<byte>(above.Slice(at))).CopyTo(row.Slice(at));
+                }
+                for (; at < row.Length; at++) row[at] += above[at];
                 break;
             case Average:
                 for (int i = 0; i < first; i++) row[i] += (byte)(above[i] >> 1);
@@ -39,6 +45,54 @@ internal static class PngFilters
                 for (int i = first; i < row.Length; i++)
                     row[i] += (byte)PaethPredictor(row[i - bytesPerPixel], above[i], above[i - bytesPerPixel]);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Undoes the Sub filter, a running sum per channel. The sums are kept in registers for one, three and four bytes per
+    /// pixel (grey, RGB, RGBA): reading each sum back from the byte just written waits for that store on every byte.
+    /// </summary>
+    private static void UndoSub(Span<byte> row, int bytesPerPixel)
+    {
+        int n = row.Length;
+        switch (bytesPerPixel)
+        {
+            case 1 when n > 0:
+            {
+                byte sum = row[0];
+                for (int i = 1; i < n; i++) row[i] = sum += row[i];
+                return;
+            }
+            case 3 when n >= 3:
+            {
+                byte r = row[0], g = row[1], b = row[2];
+                int i = 3;
+                for (; i + 3 <= n; i += 3)
+                {
+                    row[i] = r += row[i];
+                    row[i + 1] = g += row[i + 1];
+                    row[i + 2] = b += row[i + 2];
+                }
+                for (; i < n; i++) row[i] += row[i - 3];
+                return;
+            }
+            case 4 when n >= 4:
+            {
+                byte r = row[0], g = row[1], b = row[2], a = row[3];
+                int i = 4;
+                for (; i + 4 <= n; i += 4)
+                {
+                    row[i] = r += row[i];
+                    row[i + 1] = g += row[i + 1];
+                    row[i + 2] = b += row[i + 2];
+                    row[i + 3] = a += row[i + 3];
+                }
+                for (; i < n; i++) row[i] += row[i - 4];
+                return;
+            }
+            default:
+                for (int i = bytesPerPixel; i < n; i++) row[i] += row[i - bytesPerPixel];
+                return;
         }
     }
 
