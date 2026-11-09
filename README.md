@@ -346,7 +346,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **Photo privacy**: `PdfOptions.StripImageMetadata` removes EXIF (GPS location included), XMP, IPTC and comments
   from embedded JPEGs while keeping their pixels and colours.
 - **PDF to image**: renders any PDF page to PNG, JPEG or WebP, or a whole PDF to a multi-page TIFF, and
-  `HtmlToImage` goes from HTML to images in one call. [More](https://pdfpecker.net/docs/pdf-to-image/)
+  `HtmlToImage` goes from HTML to images in one call. `PdfRenderer.RenderPage(page, buffer, ImagePixelFormat.Gray)`
+  renders a page straight into a buffer of yours as grey, RGB or RGBA pixels, sized by `GetPixelSize`, for OCR and image
+  processing. [More](https://pdfpecker.net/docs/pdf-to-image/)
 - **Image decoding**: `ImageDecoder.Decode(image)` reads a PNG, JPEG, GIF, WebP, BMP or TIFF file (any page of a
   multi-page TIFF) straight to grey, RGB or RGBA pixels, with the same colour conversions, EXIF orientation and size
   limits as `ImageToPdf` and without making a PDF of it: for OCR, image analysis and thumbnails.

@@ -4,7 +4,9 @@ using PdfPecker.Images;
 namespace PdfPecker;
 
 /// <summary>
-/// The byte layout of pixels from <see cref="ImageDecoder"/>: 8 bits per channel, rows from the top without padding.
+/// The byte layout of pixels from <see cref="ImageDecoder"/> and
+/// <see cref="PdfRenderer.RenderPage(int, Span{byte}, ImagePixelFormat, ImageOptions?, CancellationToken)"/>: 8 bits
+/// per channel, rows from the top without padding.
 /// </summary>
 public enum ImagePixelFormat
 {

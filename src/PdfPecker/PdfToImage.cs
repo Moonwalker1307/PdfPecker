@@ -343,9 +343,63 @@ public sealed class PdfRenderer
     {
         CheckIndex(pageIndex);
         options ??= new ImageOptions();
+        var (w, h, dpi) = PixelSize(pageIndex, options);
+        return RenderSized(pageIndex, w, h, options, dpi, cancellationToken, buffers?.Take(checked(w * h)));
+    }
+
+    /// <summary>
+    /// The size in pixels that <see cref="RenderPage(int, ImageOptions?, CancellationToken)"/> gives the page at
+    /// <paramref name="pageIndex"/> (0-based) with <paramref name="options"/>: what a buffer for
+    /// <see cref="RenderPage(int, Span{byte}, ImagePixelFormat, ImageOptions?, CancellationToken)"/> holds, at 1, 3 or 4
+    /// bytes per pixel.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageIndex"/> is not a page of the document, or <see cref="ImageOptions.Dpi"/> is not positive.</exception>
+    public (int Width, int Height) GetPixelSize(int pageIndex, ImageOptions? options = null)
+    {
+        CheckIndex(pageIndex);
+        var (w, h, _) = PixelSize(pageIndex, options ?? new ImageOptions());
+        return (w, h);
+    }
+
+    /// <summary>
+    /// Renders one page into <paramref name="destination"/> as <paramref name="format"/> pixels, rows from the top
+    /// without padding, instead of into a new <see cref="RenderedImage"/>: for callers that keep their own pixel
+    /// buffers, or need grey or RGB rather than RGBA. The page is drawn as
+    /// <see cref="RenderPage(int, ImageOptions?, CancellationToken)"/> draws it, at the size
+    /// <see cref="GetPixelSize"/> gives. <see cref="ImagePixelFormat.Rgba"/> has straight alpha, as
+    /// <see cref="RenderedImage.Rgba"/>; grey and RGB flatten a transparent background onto
+    /// <see cref="ImageOptions.BackgroundColor"/> (over white), as JPEG output does. <paramref name="pageIndex"/> is
+    /// 0-based (the first page is 0).
+    /// </summary>
+    /// <returns>The size of the image written, in pixels.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="pageIndex"/> is not a page of the document, <see cref="ImageOptions.Dpi"/> is not positive, or
+    /// <paramref name="format"/> is not a defined value.
+    /// </exception>
+    /// <exception cref="ArgumentException"><paramref name="destination"/> is shorter than the image.</exception>
+    /// <exception cref="InvalidDataException">The page cannot be rendered, for example because it is too complex.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public (int Width, int Height) RenderPage(int pageIndex, Span<byte> destination, ImagePixelFormat format, ImageOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        CheckIndex(pageIndex);
+        int bytesPerPixel = Images.PixelConversion.BytesPerPixel(format);
+        options ??= new ImageOptions();
+        var (w, h, _) = PixelSize(pageIndex, options);
+        long needed = (long)w * h * bytesPerPixel;
+        if (destination.Length < needed)
+            throw new ArgumentException(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"The page is {w} x {h} pixels, which takes {needed} bytes, but the destination has {destination.Length}."), nameof(destination));
+        var pixels = RenderPixels(pageIndex, w, h, options, cancellationToken, null);
+        Images.PixelConversion.FromPremultiplied(pixels, destination[..(int)needed], format, Images.PixelConversion.Matte(options.BackgroundColor));
+        return (w, h);
+    }
+
+    /// <summary>The pixel size of a page with the options' size, resolution and limit, and the resolution recorded for it.</summary>
+    private (int Width, int Height, double? Dpi) PixelSize(int pageIndex, ImageOptions options)
+    {
         var (pw, ph) = _doc.PageSize(pageIndex);
         double sx, sy;
-        int w, h;
         if (options.Width is int ow && options.Height is int oh)
         {
             double s = Math.Min(ow / pw, oh / ph);
@@ -363,9 +417,7 @@ public sealed class PdfRenderer
         // A requested Dpi is recorded as given, not as the slightly stretched scale below.
         double? dpi = options.Width == null && options.Height == null && limit >= 1 ? options.Dpi : null;
         if (limit < 1) { sx *= limit; sy *= limit; }
-        w = Math.Max(1, (int)Math.Round(pw * sx));
-        h = Math.Max(1, (int)Math.Round(ph * sy));
-        return RenderSized(pageIndex, w, h, options, dpi, cancellationToken, buffers?.Take(checked(w * h)));
+        return (Math.Max(1, (int)Math.Round(pw * sx)), Math.Max(1, (int)Math.Round(ph * sy)), dpi);
     }
 
     /// <summary>
@@ -380,6 +432,15 @@ public sealed class PdfRenderer
     }
 
     private RenderedImage RenderSized(int pageIndex, int w, int h, ImageOptions options, double? dpi, CancellationToken cancellationToken, uint[]? reuse)
+    {
+        var (pw, ph) = _doc.PageSize(pageIndex);
+        double sx = w / pw, sy = h / ph;
+        var pixels = RenderPixels(pageIndex, w, h, options, cancellationToken, reuse);
+        return new RenderedImage(w, h, pixels, options, dpi ?? sx * 72, dpi ?? sy * 72);
+    }
+
+    /// <summary>Draws a page onto <paramref name="w"/> × <paramref name="h"/> premultiplied pixels, on <paramref name="reuse"/> when it has that many.</summary>
+    private uint[] RenderPixels(int pageIndex, int w, int h, ImageOptions options, CancellationToken cancellationToken, uint[]? reuse)
     {
         var (pw, ph) = _doc.PageSize(pageIndex);
         // Stretch slightly so the page fills the rounded pixel size exactly.
@@ -398,7 +459,7 @@ public sealed class PdfRenderer
         {
             throw new InvalidDataException(ex.Message, ex);
         }
-        return new RenderedImage(w, h, canvas.Pixels, options, dpi ?? sx * 72, dpi ?? sy * 72);
+        return canvas.Pixels;
     }
 
     /// <summary>Renders one page and encodes it as PNG. <paramref name="pageIndex"/> is 0-based (the first page is 0).</summary>
