@@ -210,7 +210,7 @@ public class ImageToPixelsTests
 
 /// <summary>Image files that are damaged or claim more than they hold.</summary>
 [Collection(HostileInputCollection.Name)]
-public class ImageDecoderHostileInputTests
+public class ImageToPixelsHostileInputTests
 {
     [Fact]
     public void A_header_that_claims_more_pixels_than_allowed_fails_before_inflating()
