@@ -271,6 +271,75 @@ public class CssEffectTests
         Assert.Contains("/Group << /S /Transparency >>", Latin1(Pdf("<div style='opacity:0.5'><div style='background:blue'>x</div></div>")));
     }
 
+    // ---- bounding boxes of groups ----
+
+    private static readonly string NotoSans = "@font-face{font-family:N;src:url(data:font/woff2;base64,"
+        + Convert.ToBase64String(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSans-Subset.woff2"))) + ")}";
+
+    [Fact]
+    public void A_translucent_box_has_a_bounding_box_round_what_it_paints()
+    {
+        // A viewer gives a group a buffer the size of its bounding box: the whole plane costs a page-sized one per box.
+        var pdf = Latin1(Pdf("<div style='margin:50px;width:100px;height:20px;background:red;opacity:0.5'></div>"));
+        var box = Regex.Match(pdf, @"/Subtype /Form /BBox \[(\S+) (\S+) (\S+) (\S+)\] /Group");
+        Assert.True(box.Success, "No transparency group");
+        // The box is 37.5 to 112.5 points across and 789.39 to 804.39 up the A4 page, grown by two points to whole points.
+        Assert.Equal(["35", "787", "115", "807"], box.Groups.Values.Skip(1).Select(g => g.Value));
+        Assert.DoesNotContain("32767", pdf);
+    }
+
+    [Fact]
+    public void A_translucent_box_with_a_filter_inside_keeps_the_whole_plane_as_its_bounding_box()
+    {
+        // A blur paints beyond what it blurs, which the ops do not say.
+        var pdf = Latin1(Pdf("<div style='opacity:0.5'><div style='filter:blur(4px);width:50px;height:20px;background:red'></div></div>"));
+        Assert.Contains("/BBox [-32767 -32767 32767 32767] /Group", pdf);
+    }
+
+    [Fact]
+    public void Mask_image_groups_are_bounded_by_what_the_mask_paints()
+    {
+        var pdf = Latin1(Pdf("<div style='margin:50px;width:100px;height:40px;background:blue;"
+            + "mask-image:linear-gradient(black, transparent), radial-gradient(circle, black 40%, transparent 41%);mask-composite:exclude'></div>"));
+        Assert.Contains("/S /Luminosity", pdf);
+        Assert.DoesNotContain("32767", pdf);
+    }
+
+    [Theory]
+    [InlineData("<div style='font:30px N;height:2px;margin-top:150px'>Z&#x300;&#x301;&#x302;&#x303;&#x304;&#x306;&#x307;&#x308;&#x30a;&#x30b;&#x30c;&#x311;&#x313;&#x314;</div>")]
+    [InlineData("<div style='font:20px N;-webkit-text-stroke:30px black;height:2px;margin-top:40px'>Wide gjy</div>")]
+    [InlineData("<div style='font:120px N;line-height:10px;height:10px;margin-top:100px'>\u00c5gjy</div>")]
+    [InlineData("<div style='font:italic 700 50px N;height:2px;margin-top:40px'>Wolf</div>")]
+    [InlineData("<div style='height:10px'><div style='transform:rotate(30deg) translateX(60px);width:150px;height:10px;background:black'></div></div>")]
+    [InlineData("<div style='width:60px;height:10px;outline:6px solid black;outline-offset:20px'></div>")]
+    [InlineData("<div style='width:60px;height:10px;box-shadow:40px 30px 0 8px black'></div>")]
+    [InlineData("<ul style='margin:0;padding:0;font:20px N'><li>Marker outside the box</li></ul>")]
+    [InlineData("<div style='font:20px N;text-shadow:60px 40px 0 black;height:2px'>Far shadow</div>")]
+    public void A_translucent_box_is_drawn_whole_however_far_its_content_reaches(string content)
+    {
+        byte[] Page(string opacity) => Pdf($"<style>{NotoSans}</style><div style='margin:80px 120px;opacity:{opacity}'>{content}</div>");
+        // The ink reaches as far as it does without the group: the group's bounding box cuts none of it off.
+        var opaque = Ink(Render(Page("1")));
+        var translucent = Ink(Render(Page("0.5")));
+        Assert.True(Math.Abs(opaque.Left - translucent.Left) <= 1 && Math.Abs(opaque.Top - translucent.Top) <= 1
+            && Math.Abs(opaque.Right - translucent.Right) <= 1 && Math.Abs(opaque.Bottom - translucent.Bottom) <= 1,
+            $"Ink without the group {opaque}, in it {translucent}");
+    }
+
+    /// <summary>The box round every pixel that is not white.</summary>
+    private static (int Left, int Top, int Right, int Bottom) Ink(RenderedImage img)
+    {
+        int left = int.MaxValue, top = int.MaxValue, right = -1, bottom = -1;
+        for (int y = 0; y < img.Height; y++)
+            for (int x = 0; x < img.Width; x++)
+            {
+                int i = (y * img.Width + x) * 4;
+                if (img.Rgba[i] == 255 && img.Rgba[i + 1] == 255 && img.Rgba[i + 2] == 255) continue;
+                (left, top, right, bottom) = (Math.Min(left, x), Math.Min(top, y), Math.Max(right, x), Math.Max(bottom, y));
+            }
+        return (left, top, right, bottom);
+    }
+
     [Fact]
     public void Background_blend_mode_blends_layers_with_the_background_colour_only()
     {
