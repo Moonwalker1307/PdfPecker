@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using PdfPecker.Rendering.Graphics;
 using PdfPecker.Rendering.Html;
 
@@ -53,9 +54,15 @@ internal readonly struct TextTurn
     public static TextTurn Of(List<TextGlyph> glyphs, double width, double height, int rotate)
     {
         Span<int> counts = stackalloc int[4];
-        foreach (var g in glyphs)
+        foreach (ref readonly var g in CollectionsMarshal.AsSpan(glyphs))
         {
             if (string.IsNullOrWhiteSpace(g.Text)) continue;
+            // Most text runs along the x axis, which is upright without working out its angle.
+            if (g.DirY == 0 && g.DirX > 0)
+            {
+                counts[0]++;
+                continue;
+            }
             double angle = Math.Atan2(g.DirY, g.DirX) * 180 / Math.PI;
             int quarter = (int)Math.Round(angle / 90);
             // Text at an angle between the quarters, such as a stamp at 30 degrees, is read as it is.

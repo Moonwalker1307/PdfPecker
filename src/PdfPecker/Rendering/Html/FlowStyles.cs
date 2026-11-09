@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace PdfPecker.Rendering.Html;
@@ -33,6 +34,26 @@ internal sealed class FlowStyles
     private readonly Dictionary<string, string> _classes = new(StringComparer.Ordinal);
     private readonly StringBuilder _css = new();
 
+    // The font last asked for and its family: words in a row mostly share their font, and a page is written on one thread.
+    private string? _font, _family;
+
+    // The styles met while some words are counted, in the order met, with their letters; the index finds a style among
+    // many, as a page that sets each word in a size of its own has.
+    private readonly List<TextStyle> _styles = new();
+    private readonly List<int> _letters = new();
+    private Dictionary<TextStyle, int>? _styleIndex;
+    private bool _indexed;
+    private int _last; // the index of the style counted last, which the next word mostly shares
+
+    private (double Start, double End)[] _spans = new (double, double)[16]; // the pieces of a line being measured
+    private Dictionary<(double Width, bool Dashed, uint Color), string>? _borderValues;
+
+    // The vertical border found last, as a table cell asks for its right side just before the cell on its right asks
+    // for its left.
+    private (double Side, double From, double To, double Start, double End) _lastAt;
+    private PageRule? _lastBorder;
+    private bool _hasLast;
+
     /// <summary>The page's usual text: the font, size and colour most of its letters have, which the page section sets.</summary>
     public readonly TextStyle Base;
 
@@ -45,13 +66,13 @@ internal sealed class FlowStyles
         _width = width;
         _height = height;
         _fills = fills?.FindAll(f => (f.X1 - f.X0) * (f.Y1 - f.Y0) < PageFill * width * height) ?? new List<PageFill>();
-        _horizontal = (rules ?? new List<PageRule>()).Where(r => r.Horizontal && !r.Edge).OrderBy(r => r.Position).ToArray();
-        _vertical = (rules ?? new List<PageRule>()).Where(r => !r.Horizontal && !r.Edge).OrderBy(r => r.Position).ToArray();
-        var words = new List<FlowWord>();
+        _horizontal = ByPosition(rules, horizontal: true);
+        _vertical = ByPosition(rules, horizontal: false);
         double left = double.MaxValue, right = double.MinValue;
+        StartCount();
         foreach (var line in AllLines(blocks))
         {
-            words.AddRange(line.Words);
+            foreach (var w in line.Words) Count(w);
             left = Math.Min(left, line.X0);
             right = Math.Max(right, line.X1);
         }
@@ -61,7 +82,67 @@ internal sealed class FlowStyles
             right = Math.Max(right, image.X1);
         }
         (Left, Right) = left < right ? (left, right) : (0, width);
-        Base = Usual(words) ?? new TextStyle("", 12, 0);
+        Base = Usual() ?? new TextStyle("", 12, 0);
+    }
+
+    /// <summary>
+    /// The lines across or down the page, not the edges of filled areas, by their position, those at one position in
+    /// the order the page draws them.
+    /// </summary>
+    private static PageRule[] ByPosition(List<PageRule>? rules, bool horizontal)
+    {
+        if (rules == null) return Array.Empty<PageRule>();
+        // The lines are read in place, as copying each of them out of the list costs more than sorting them.
+        var all = CollectionsMarshal.AsSpan(rules);
+        int n = 0;
+        bool sorted = true;
+        double last = 0;
+        foreach (ref readonly var r in all)
+        {
+            if (r.Horizontal != horizontal || r.Edge) continue;
+            if (n > 0 && r.Position.CompareTo(last) < 0) sorted = false;
+            last = r.Position;
+            n++;
+        }
+        var lines = new PageRule[n];
+        if (sorted)
+        {
+            n = 0;
+            foreach (ref readonly var r in all)
+                if (r.Horizontal == horizontal && !r.Edge) lines[n++] = r;
+            return lines;
+        }
+        // The positions are sorted as integers that keep their order, and the lines at one position are put back in the
+        // order the page draws them, as a stable sort leaves them.
+        var keys = new long[n];
+        var order = new int[n];
+        n = 0;
+        for (int i = 0; i < all.Length; i++)
+        {
+            if (all[i].Horizontal != horizontal || all[i].Edge) continue;
+            keys[n] = SortKey(all[i].Position);
+            order[n++] = i;
+        }
+        Array.Sort(keys, order);
+        for (int i = 0; i < n;)
+        {
+            int j = i + 1;
+            while (j < n && keys[j] == keys[i]) j++;
+            if (j - i > 1) Array.Sort(order, i, j - i);
+            i = j;
+        }
+        for (int i = 0; i < n; i++) lines[i] = all[order[i]];
+        return lines;
+    }
+
+    /// <summary>
+    /// An integer for a position that sorts as <see cref="double.CompareTo(double)"/> does: NaN first, and 0 and -0 as one.
+    /// </summary>
+    private static long SortKey(double position)
+    {
+        if (double.IsNaN(position)) return long.MinValue;
+        long bits = BitConverter.DoubleToInt64Bits(position == 0 ? 0.0 : position);
+        return bits >= 0 ? bits : bits ^ long.MaxValue;
     }
 
     /// <summary>The class of the given declarations, made the first time they are asked for.</summary>
@@ -92,24 +173,92 @@ internal sealed class FlowStyles
         return d.ToString();
     }
 
-    /// <summary>The style most of the letters of some words have, or null for no words.</summary>
-    public static TextStyle? Usual(List<FlowWord> words)
+    /// <summary>How a word looks: the family of its font, its size to the half point and its colour.</summary>
+    public TextStyle StyleOf(FlowWord w)
     {
-        var counts = new Dictionary<TextStyle, int>();
-        foreach (var w in words)
+        if (_family == null || !ReferenceEquals(w.Font, _font))
         {
-            var s = TextStyle.Of(w);
-            counts[s] = counts.GetValueOrDefault(s) + w.Text.Length;
+            _family = Family(w.Font);
+            _font = w.Font;
         }
-        if (counts.Count == 0) return null;
-        // Ties go to the first style met, so the output does not depend on the dictionary's order.
+        return new TextStyle(_family, Math.Round(w.Size * 2) / 2, w.Color & 0xFFFFFF);
+    }
+
+    /// <summary>
+    /// The style most of the letters of some lines' words have, or null for no words, with the number of words and of
+    /// bold words.
+    /// </summary>
+    public TextStyle? Usual(List<FlowLine> lines, out int words, out int bold)
+    {
+        words = bold = 0;
+        StartCount();
+        foreach (var line in lines)
+        {
+            foreach (var w in line.Words)
+            {
+                Count(w);
+                if (w.Bold) bold++;
+            }
+            words += line.Words.Count;
+        }
+        return Usual();
+    }
+
+    private void StartCount()
+    {
+        // Only the last count's styles are taken out of the index. Clearing it whole would cost its capacity, which the
+        // count of every word on the page makes as large as the page's styles, and a page that sets each word in a colour
+        // of its own would then pay for all of them again in every block.
+        if (_indexed)
+            foreach (var style in _styles) _styleIndex!.Remove(style);
+        _styles.Clear();
+        _letters.Clear();
+        _indexed = false;
+        _last = 0;
+    }
+
+    private void Count(FlowWord w)
+    {
+        var style = StyleOf(w);
+        int i = -1;
+        if (_last < _styles.Count && Same(_styles[_last], style)) i = _last;
+        else if (_indexed)
+        {
+            if (!_styleIndex!.TryGetValue(style, out i)) i = -1;
+        }
+        else
+        {
+            for (int k = 0; k < _styles.Count && i < 0; k++)
+                if (Same(_styles[k], style)) i = k;
+        }
+        if (i < 0)
+        {
+            i = _styles.Count;
+            _styles.Add(style);
+            _letters.Add(0);
+            if (_indexed) _styleIndex![style] = i;
+            else if (_styles.Count > 16)
+            {
+                // Past a few styles, looking each one up is cheaper than comparing with all.
+                _styleIndex ??= new Dictionary<TextStyle, int>();
+                for (int k = 0; k < _styles.Count; k++) _styleIndex[_styles[k]] = k;
+                _indexed = true;
+            }
+        }
+        _letters[i] += w.Text.Length;
+        _last = i;
+    }
+
+    /// <summary>Whether two styles are equal, as the record's own equality says, with the cheap comparisons first.</summary>
+    private static bool Same(in TextStyle a, in TextStyle b) => a.Color == b.Color && a.Size.Equals(b.Size) && string.Equals(a.Family, b.Family);
+
+    /// <summary>The style of the words counted that most letters have, ties going to the first style met.</summary>
+    private TextStyle? Usual()
+    {
         TextStyle? best = null;
         int most = 0;
-        foreach (var w in words)
-        {
-            var s = TextStyle.Of(w);
-            if (counts[s] > most) (best, most) = (s, counts[s]);
-        }
+        for (int i = 0; i < _styles.Count; i++)
+            if (_letters[i] > most) (best, most) = (_styles[i], _letters[i]);
         return best;
     }
 
@@ -161,20 +310,56 @@ internal sealed class FlowStyles
     /// </summary>
     public PageRule? Border(bool horizontal, (double Side, double From, double To) at, double from, double to)
     {
+        if (horizontal) return FindBorder(true, at, from, to);
+        var key = (at.Side, at.From, at.To, from, to);
+        if (!_hasLast || !key.Equals(_lastAt))
+        {
+            _lastBorder = FindBorder(false, at, from, to);
+            _lastAt = key;
+            _hasLast = true;
+        }
+        return _lastBorder;
+    }
+
+    private PageRule? FindBorder(bool horizontal, (double Side, double From, double To) at, double from, double to)
+    {
         var rules = horizontal ? _horizontal : _vertical;
         PageRule? found = null;
         double place = double.NaN; // the last position looked at, as lines at one place come together
-        for (int i = First(rules, at.From); i < rules.Length && rules[i].Position <= at.To; i++)
+        for (int i = First(rules, at.From); i < rules.Length && rules[i].Position <= at.To; i = NextPlace(rules, i, place))
         {
-            var r = rules[i];
-            if (Math.Abs(r.Position - place) <= 0.5) continue;
-            place = r.Position;
-            if (found != null && Math.Abs(r.Position - at.Side) >= Math.Abs(found.Value.Position - at.Side)) continue;
-            if (Covered(rules, r.Position, from, to, out int pieces) < 0.6 * (to - from)) continue;
+            double position = rules[i].Position;
+            place = position;
+            if (found != null && Math.Abs(position - at.Side) >= Math.Abs(found.Value.Position - at.Side)) continue;
+            if (Covered(rules, position, from, to, out int pieces) < 0.6 * (to - from)) continue;
             // A line drawn as many short pieces, as a dashed or dotted border often is, is one dashed line.
-            found = pieces >= 4 ? r with { Dashed = true } : r;
+            found = pieces >= 4 ? rules[i] with { Dashed = true } : rules[i];
         }
         return found;
+    }
+
+    /// <summary>
+    /// The index of the first line after <paramref name="i"/> more than half a point past <paramref name="place"/>, the
+    /// position of line <paramref name="i"/>. The lines from there on only grow in position, so those at the place come
+    /// in one run, which can be as long as a table has rows.
+    /// </summary>
+    private static int NextPlace(PageRule[] rules, int i, double place)
+    {
+        int lo = i, hi = i + 1, step = 1;
+        while (hi < rules.Length && Math.Abs(rules[hi].Position - place) <= 0.5)
+        {
+            lo = hi;
+            hi += step;
+            if (step < 1 << 20) step *= 2;
+        }
+        hi = Math.Min(hi, rules.Length);
+        while (hi - lo > 1)
+        {
+            int mid = lo + (hi - lo) / 2;
+            if (Math.Abs(rules[mid].Position - place) <= 0.5) lo = mid;
+            else hi = mid;
+        }
+        return hi;
     }
 
     /// <summary>The index of the first line at or past a position.</summary>
@@ -194,11 +379,16 @@ internal sealed class FlowStyles
     /// How much of the span from <paramref name="from"/> to <paramref name="to"/> the lines at one place cover, and in
     /// how many pieces. Only the first few hundred pieces count, which is plenty to tell.
     /// </summary>
-    private static double Covered(PageRule[] rules, double position, double from, double to, out int pieces)
+    private double Covered(PageRule[] rules, double position, double from, double to, out int pieces)
     {
-        var spans = new List<(double Start, double End)>();
-        for (int i = First(rules, position - 0.5); i < rules.Length && rules[i].Position <= position + 0.5 && spans.Count < 500; i++)
-            if (rules[i].End > from && rules[i].Start < to) spans.Add((Math.Max(from, rules[i].Start), Math.Min(to, rules[i].End)));
+        int n = 0;
+        for (int i = First(rules, position - 0.5); i < rules.Length && rules[i].Position <= position + 0.5 && n < 500; i++)
+        {
+            if (!(rules[i].End > from && rules[i].Start < to)) continue;
+            if (n == _spans.Length) Array.Resize(ref _spans, n * 2);
+            _spans[n++] = (Math.Max(from, rules[i].Start), Math.Min(to, rules[i].End));
+        }
+        var spans = _spans.AsSpan(0, n);
         spans.Sort((a, b) => a.Start.CompareTo(b.Start));
         double covered = 0, reach = double.MinValue;
         pieces = 0;
@@ -231,11 +421,11 @@ internal sealed class FlowStyles
         {
             if (c.Lines.Count == 0) continue;
             int last = Math.Min(n - 1, c.Column + c.ColumnSpan - 1), end = Math.Min(m - 1, c.Row + c.RowSpan - 1);
-            lo[c.Column] = Math.Min(lo[c.Column], Math.Min(c.X0, c.Lines.Min(l => l.X0)));
-            hi[last] = Math.Max(hi[last], Math.Max(c.X1, c.Lines.Max(l => l.X1)));
-            top[c.Row] = Math.Min(top[c.Row], c.Lines.Min(l => l.Top));
-            bottom[end] = Math.Max(bottom[end], c.Lines.Max(l => l.Bottom));
-            size = Math.Max(size, c.Lines.Max(l => l.Size));
+            lo[c.Column] = Math.Min(lo[c.Column], Math.Min(c.X0, Min(c.Lines, l => l.X0)));
+            hi[last] = Math.Max(hi[last], Math.Max(c.X1, Max(c.Lines, l => l.X1)));
+            top[c.Row] = Math.Min(top[c.Row], Min(c.Lines, l => l.Top));
+            bottom[end] = Math.Max(bottom[end], Max(c.Lines, l => l.Bottom));
+            size = Math.Max(size, Max(c.Lines, l => l.Size));
         }
         if (size <= 0) size = 10;
         FillGaps(lo, hi);
@@ -288,8 +478,8 @@ internal sealed class FlowStyles
                 foreach (var part in group.Parts)
                 {
                     var lines = AllLines(part).ToList();
-                    if (lines.Count == 0 || cx < lines.Min(l => l.X0) - 4 || cx > lines.Max(l => l.X1) + 4 || !Below(lines.Min(l => l.Top))) continue;
-                    image.Top = lines.Min(l => l.Top) - 0.01;
+                    if (lines.Count == 0 || cx < Min(lines, l => l.X0) - 4 || cx > Max(lines, l => l.X1) + 4 || !Below(Min(lines, l => l.Top))) continue;
+                    image.Top = Min(lines, l => l.Top) - 0.01;
                     image.Nested = true;
                     int k = 0;
                     while (k < part.Count && part[k].Top <= image.Top) k++;
@@ -306,7 +496,7 @@ internal sealed class FlowStyles
                     // The first row whose text starts under the picture.
                     foreach (var cell in table.Cells.Where(t => t.Column <= c && c < t.Column + t.ColumnSpan && t.Lines.Count > 0).OrderBy(t => t.Row))
                     {
-                        if (!Below(cell.Lines.Min(l => l.Top))) continue;
+                        if (!Below(Min(cell.Lines, l => l.Top))) continue;
                         image.Nested = true;
                         (cell.Images ??= new List<ImageBlock>()).Add(image);
                         return;
@@ -320,8 +510,59 @@ internal sealed class FlowStyles
     }
 
     /// <summary>A border declaration for a line: as thick as it is drawn, at least a hairline, in its colour.</summary>
-    public static string BorderValue(PageRule rule)
-        => Pt(Math.Max(0.5, Math.Min(rule.Width > 0 ? rule.Width : 1, 6))) + (rule.Dashed ? " dashed " : " solid ") + Hex(rule.Color);
+    public string BorderValue(PageRule rule)
+    {
+        // A table's lines mostly look alike, so each look is written once.
+        _borderValues ??= new Dictionary<(double Width, bool Dashed, uint Color), string>();
+        if (!_borderValues.TryGetValue((rule.Width, rule.Dashed, rule.Color), out var value))
+        {
+            value = Pt(Math.Max(0.5, Math.Min(rule.Width > 0 ? rule.Width : 1, 6))) + (rule.Dashed ? " dashed " : " solid ") + Hex(rule.Color);
+            _borderValues[(rule.Width, rule.Dashed, rule.Color)] = value;
+        }
+        return value;
+    }
+
+    /// <summary>
+    /// The least of a value over some lines, as <see cref="Enumerable.Min{TSource}(IEnumerable{TSource}, Func{TSource, double})"/> gives
+    /// it, NaN when any is NaN, without the enumerator it takes for a list.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">There are no lines.</exception>
+    public static double Min(List<FlowLine> lines, Func<FlowLine, double> value)
+    {
+        if (lines.Count == 0) throw new InvalidOperationException("Sequence contains no elements");
+        double min = value(lines[0]);
+        if (double.IsNaN(min)) return min;
+        for (int i = 1; i < lines.Count; i++)
+        {
+            double x = value(lines[i]);
+            if (x < min) min = x;
+            else if (double.IsNaN(x)) return x;
+        }
+        return min;
+    }
+
+    /// <summary>
+    /// The greatest of a value over some lines, as <see cref="Enumerable.Max{TSource}(IEnumerable{TSource}, Func{TSource, double})"/>
+    /// gives it, NaN only when all are NaN.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">There are no lines.</exception>
+    public static double Max(List<FlowLine> lines, Func<FlowLine, double> value)
+    {
+        if (lines.Count == 0) throw new InvalidOperationException("Sequence contains no elements");
+        int i = 0;
+        double max = value(lines[0]);
+        while (double.IsNaN(max))
+        {
+            if (++i == lines.Count) return max;
+            max = value(lines[i]);
+        }
+        for (i++; i < lines.Count; i++)
+        {
+            double x = value(lines[i]);
+            if (x > max) max = x;
+        }
+        return max;
+    }
 
     /// <summary>Every line of text in some blocks, those in tables and side-by-side parts included.</summary>
     public static IEnumerable<FlowLine> AllLines(IEnumerable<FlowBlock> blocks)
@@ -346,8 +587,17 @@ internal sealed class FlowStyles
     }
 
     public static string Hex(uint color)
-        => "#" + (color & 0xFF).ToString("x2", CultureInfo.InvariantCulture) + ((color >> 8) & 0xFF).ToString("x2", CultureInfo.InvariantCulture)
-            + ((color >> 16) & 0xFF).ToString("x2", CultureInfo.InvariantCulture);
+        => string.Create(7, color, static (chars, c) =>
+        {
+            const string digits = "0123456789abcdef";
+            chars[0] = '#';
+            for (int i = 0; i < 3; i++)
+            {
+                uint b = (c >> (8 * i)) & 0xFF;
+                chars[1 + 2 * i] = digits[(int)(b >> 4)];
+                chars[2 + 2 * i] = digits[(int)(b & 0xF)];
+            }
+        });
 
     public static string Pt(double points) => HtmlPageWriter.Number(Math.Round(points * 2) / 2) + "pt";
 
@@ -421,7 +671,4 @@ internal sealed class FlowStyles
 internal sealed record TableGrid((double Side, double From, double To)[] X, (double Side, double From, double To)[] Y);
 
 /// <summary>How a run of text looks: its CSS font family, size in points to the half point, and colour.</summary>
-internal readonly record struct TextStyle(string Family, double Size, uint Color)
-{
-    public static TextStyle Of(FlowWord w) => new(FlowStyles.Family(w.Font), Math.Round(w.Size * 2) / 2, w.Color & 0xFFFFFF);
-}
+internal readonly record struct TextStyle(string Family, double Size, uint Color);

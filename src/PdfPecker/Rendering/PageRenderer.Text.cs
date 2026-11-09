@@ -61,14 +61,13 @@ internal sealed partial class PageRenderer
         {
             int code = font.NextCode(span, ref pos, out bool isSpace);
             double w0 = font.Width(code);
-            // Text rendering matrix without translation of the glyph origin: [fs*Th 0 0 fs 0 rise] × Tm × CTM.
-            var trm = new Matrix(fs * th, 0, 0, fs, 0, gs.Rise).Multiply(_tm).Multiply(gs.Ctm);
             double vx = 0, vy = 0, w1 = 0;
-            if (vertical)
-            {
-                (w1, vx, vy) = font.VerticalMetrics(code);
-                trm = Matrix.Translation(-vx * fs * th, -vy * fs).Multiply(new Matrix(fs * th, 0, 0, fs, 0, gs.Rise)).Multiply(_tm).Multiply(gs.Ctm);
-            }
+            if (vertical) (w1, vx, vy) = font.VerticalMetrics(code);
+            // Text rendering matrix without translation of the glyph origin: [fs*Th 0 0 fs 0 rise] × Tm × CTM. Collecting
+            // text works out its own, so only drawing needs it.
+            var trm = _text != null ? default
+                : vertical ? Matrix.Translation(-vx * fs * th, -vy * fs).Multiply(new Matrix(fs * th, 0, 0, fs, 0, gs.Rise)).Multiply(_tm).Multiply(gs.Ctm)
+                : new Matrix(fs * th, 0, 0, fs, 0, gs.Rise).Multiply(_tm).Multiply(gs.Ctm);
 
             if (_text != null)
             {

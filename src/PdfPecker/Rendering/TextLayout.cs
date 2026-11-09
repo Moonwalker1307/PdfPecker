@@ -10,40 +10,79 @@ namespace PdfPecker.Rendering;
 /// </summary>
 internal static class TextLayout
 {
+    // The flags sit beside the index, so that an item takes 40 bytes rather than 48.
     private struct Item
     {
         public int Glyph; // index into the page's glyphs, or -1 for a space this layout inserts
-        public double U0, U1, V, Size;
         public bool Cursive; // an Arabic letter, which cursive attachment can lift or lower off its line's baseline
+        public bool RightToLeft; // a glyph of bidi class R or AL; no mark has either class, so joining marks keeps it
+        public bool Space; // in a line's visual order, a glyph whose text is white space
+        public double U0, U1, V, Size;
     }
 
+    /// <summary>
+    /// The items of a line. Most lines are a run of their group's items, sorted by baseline, and share that array rather
+    /// than copy it; a line that is split off has an array of its own, and so does one that gains an item.
+    /// </summary>
     private sealed class Line
     {
-        public readonly List<Item> Items;
+        private Item[] _items;
+        private int _start, _count;
+        private bool _owned; // whether the array is the line's alone, so it may grow into the rest of it
         public double V, Size;
 
-        public Line() => Items = new List<Item>();
+        /// <summary>A line of the <paramref name="count"/> items from <paramref name="start"/> of an array lines share.</summary>
+        public Line(Item[] items, int start, int count) => (_items, _start, _count) = (items, start, count);
 
-        public Line(List<Item> items) => Items = items;
+        /// <summary>A line of all of <paramref name="items"/>, an array of its own.</summary>
+        public Line(Item[] items) => (_items, _count, _owned) = (items, items.Length, true);
+
+        public Span<Item> Items => _items.AsSpan(_start, _count);
+
+        public void Insert(int index, Item item)
+        {
+            if (!_owned || _count == _items.Length)
+            {
+                var grown = new Item[Math.Max(4, 2 * _count)];
+                Items.CopyTo(grown);
+                (_items, _start, _owned) = (grown, 0, true);
+            }
+            Array.Copy(_items, index, _items, index + 1, _count - index);
+            _items[index] = item;
+            _count++;
+        }
     }
 
     public static PdfTextPage Build(List<TextGlyph> glyphs, int pageNumber, double width, double height, bool expandLigatures,
         CancellationToken cancellationToken = default)
     {
-        // Glyphs whose baselines point the same way, give or take a scan's skew, are laid out together; rotated text gets
-        // its own lines.
-        var groups = AngleGroups(glyphs);
+        var all = CollectionsMarshal.AsSpan(glyphs);
+        bool drawsSpaces = false, upright = all.Length > 0;
+        foreach (ref readonly var g in all)
+        {
+            if (!drawsSpaces && g.Text.Length > 0 && IsSpace(g.Text)) drawsSpaces = true;
+            // Text along the x axis, which is nearly all text, needs no arc tangent.
+            upright &= g.DirY == 0 && g.DirX > 0;
+            if (drawsSpaces && !upright) break;
+        }
 
         var lines = new List<PdfTextLine>();
         var sb = new StringBuilder();
         var attached = new MarkTargets(glyphs);
-        bool drawsSpaces = glyphs.Exists(g => g.Text.Length > 0 && IsSpace(g.Text));
         var scratch = new Scratch();
-        foreach (var group in groups)
+        // Glyphs whose baselines point the same way, give or take a scan's skew, are laid out together; rotated text gets
+        // its own lines. A page that sets all its text upright is one group of all its glyphs, as the grouping would give.
+        if (upright) AddGroup(0, 0, null);
+        else
+            foreach (var group in AngleGroups(glyphs)) AddGroup(group.Angle, group.Frame, group.Glyphs);
+        return new PdfTextPage(pageNumber, width, height, sb.ToString(), lines);
+
+        // Lays out the glyphs of one group, all of them when indices is null, along the frame's direction in degrees, and
+        // adds their lines to the page.
+        void AddGroup(int angle, double frame, List<int>? indices)
         {
-            int angle = group.Angle;
-            double rad = group.Frame * Math.PI / 180, cx = Math.Cos(rad), cy = Math.Sin(rad);
-            var groupLines = BuildLines(glyphs, group.Glyphs, cx, cy, attached, cancellationToken);
+            double rad = frame * Math.PI / 180, cx = Math.Cos(rad), cy = Math.Sin(rad);
+            var groupLines = BuildLines(glyphs, indices, cx, cy, attached, cancellationToken);
             Line? previous = null;
             var directions = new LineDirections(glyphs, groupLines);
             foreach (var line in groupLines)
@@ -62,7 +101,6 @@ internal static class TextLayout
                 previous = line;
             }
         }
-        return new PdfTextPage(pageNumber, width, height, sb.ToString(), lines);
     }
 
     /// <summary>
@@ -150,33 +188,65 @@ internal static class TextLayout
     internal static bool ParagraphBreak(double previousV, double previousSize, double v, double size)
         => v - previousV > 1.75 * Math.Min(size, previousSize);
 
-    /// <summary>Clusters glyphs into lines by baseline, top to bottom, each sorted along the baseline.</summary>
-    private static List<Line> BuildLines(List<TextGlyph> glyphs, List<int> indices, double cx, double cy, MarkTargets attached,
+    /// <summary>
+    /// Clusters glyphs into lines by baseline, top to bottom, each sorted along the baseline. <paramref name="indices"/>
+    /// are the glyphs to lay out, or null for all of them.
+    /// </summary>
+    private static List<Line> BuildLines(List<TextGlyph> glyphs, List<int>? indices, double cx, double cy, MarkTargets attached,
         CancellationToken cancellationToken)
     {
-        var items = new List<Item>(indices.Count);
-        foreach (int i in indices)
+        var all = CollectionsMarshal.AsSpan(glyphs);
+        int count = indices?.Count ?? all.Length;
+        // The lines are runs of the items sorted by baseline, and share this array. Every item is written before it is
+        // read, so the array need not be cleared.
+        var array = GC.AllocateUninitializedArray<Item>(count);
+        int n = 0;
+        List<Item>? marks = null;
+        for (int k = 0; k < count; k++)
         {
-            var g = glyphs[i];
+            int i = indices == null ? k : indices[k];
+            ref readonly var g = ref all[i];
             // Line space: u along the baseline, v across it, growing down the page for unrotated text.
             double u0 = g.X * cx + g.Y * cy, u1 = g.EndX * cx + g.EndY * cy, v = -g.X * cy + g.Y * cx;
             if (u1 < u0) (u0, u1) = (u1, u0);
-            items.Add(new Item { Glyph = i, U0 = u0, U1 = u1, V = v, Size = Math.Max(g.Size, 1e-3), Cursive = ClassOf(g.Text) == BidiClass.AL });
+            var cls = GlyphClass(g.Text);
+            var item = new Item
+            {
+                Glyph = i, U0 = u0, U1 = u1, V = v, Size = Math.Max(g.Size, 1e-3), Cursive = cls == BidiClass.AL,
+                RightToLeft = cls is BidiClass.R or BidiClass.AL,
+            };
+            // Combining marks (Arabic vowel signs, Hebrew points, accents drawn on their own) are often placed above or
+            // below their letter, off its baseline; they are joined to the letter they sit on after the lines are built.
+            if (IsMark(g.Text)) (marks ??= new List<Item>()).Add(item);
+            else array[n++] = item;
         }
-        // Combining marks (Arabic vowel signs, Hebrew points, accents drawn on their own) are often placed above or
-        // below their letter, off its baseline; they are joined to the letter they sit on after the lines are built.
-        var marks = items.Where(it => IsMark(glyphs[it.Glyph].Text)).ToList();
-        if (marks.Count > 0 && marks.Count < items.Count) items.RemoveAll(it => IsMark(glyphs[it.Glyph].Text));
-        else marks.Clear();
-        items.Sort((a, b) => a.V != b.V ? a.V.CompareTo(b.V) : a.U0.CompareTo(b.U0));
+        // Text that is all marks has no letters to join them to, and is laid out as it is.
+        if (n == 0 && marks != null)
+        {
+            marks.CopyTo(array);
+            n = marks.Count;
+            marks = null;
+        }
+        var items = array.AsSpan(0, n);
+        Item[]? buffer = null;
+        // As Sort does, but merging the items themselves rather than a copy: they were made in order of glyph index, so
+        // where two compare equal, that order can be restored for the sort to place them as it always has.
+        if (!Ascending<Across>(items))
+        {
+            MergeRuns<Across>(items, buffer = GC.AllocateUninitializedArray<Item>(n));
+            if (!Ascending<Across>(items))
+            {
+                items.Sort(static (a, b) => a.Glyph.CompareTo(b.Glyph));
+                items.Sort(static (a, b) => Across.Compare(a, b));
+            }
+        }
 
         var lines = new List<Line>();
-        // A line's items are taken once the line is complete, so that its list is allocated at its size, not grown.
         int first = 0;
         double lineV = 0, lineSize = 0;
-        for (int k = 0; k < items.Count; k++)
+        for (int k = 0; k < items.Length; k++)
         {
-            var it = items[k];
+            ref readonly var it = ref items[k];
             // Superscripts and subscripts sit within about half a font size of their line's baseline. Naskh and other
             // Arabic styles join letters by cursive attachment, which can put a letter, such as a final noon after a
             // mim, more than half a size below the letter it joins.
@@ -185,31 +255,123 @@ internal static class TextLayout
                 if (it.Size > lineSize) { lineSize = it.Size; lineV = it.V; }
                 continue;
             }
-            if (k > 0) lines.Add(new Line(Range(items, first, k)) { V = lineV, Size = lineSize });
+            if (k > 0) lines.Add(new Line(array, first, k - first) { V = lineV, Size = lineSize });
             first = k;
             lineV = it.V;
             lineSize = it.Size;
         }
-        if (items.Count > 0) lines.Add(new Line(Range(items, first, items.Count)) { V = lineV, Size = lineSize });
-        lines = SeparateBaselines(lines);
-        foreach (var line in lines) line.Items.Sort((a, b) => a.U0 != b.U0 ? a.U0.CompareTo(b.U0) : a.Glyph.CompareTo(b.Glyph));
-        marks.Sort((a, b) => a.Glyph.CompareTo(b.Glyph));
-        for (int m = 0; m < marks.Count; m++)
+        if (items.Length > 0) lines.Add(new Line(array, first, items.Length - first) { V = lineV, Size = lineSize });
+        lines = SeparateBaselines(lines, ref buffer);
+        foreach (var line in lines) Sort<Along>(line.Items, ref buffer);
+        if (marks != null)
         {
-            if ((m & 0xFFF) == 0) cancellationToken.ThrowIfCancellationRequested();
-            if (!AttachToNeighbour(glyphs, marks[m], cx, cy, attached)) AttachMark(glyphs, lines, marks[m], attached);
+            marks.Sort((a, b) => a.Glyph.CompareTo(b.Glyph));
+            for (int m = 0; m < marks.Count; m++)
+            {
+                if ((m & 0xFFF) == 0) cancellationToken.ThrowIfCancellationRequested();
+                if (!AttachToNeighbour(glyphs, marks[m], cx, cy, attached)) AttachMark(glyphs, lines, marks[m], attached);
+            }
         }
         // The lines of this group are written out next, so they must see the marks joined to their letters.
         attached.Flush();
         return lines;
     }
 
-    /// <summary>The items from <paramref name="start"/> up to <paramref name="end"/>, in a list of their size.</summary>
-    private static List<Item> Range(List<Item> items, int start, int end)
+    /// <summary>An order that items are sorted in.</summary>
+    private interface IItemOrder
     {
-        var range = new List<Item>(end - start);
-        range.AddRange(CollectionsMarshal.AsSpan(items)[start..end]);
-        return range;
+        static abstract int Compare(in Item a, in Item b);
+    }
+
+    /// <summary>Across lines: by baseline, then along it.</summary>
+    private struct Across : IItemOrder
+    {
+        public static int Compare(in Item a, in Item b) => a.V != b.V ? a.V.CompareTo(b.V) : a.U0.CompareTo(b.U0);
+    }
+
+    /// <summary>Along a line, ties broken by glyph index.</summary>
+    private struct Along : IItemOrder
+    {
+        public static int Compare(in Item a, in Item b) => a.U0 != b.U0 ? a.U0.CompareTo(b.U0) : a.Glyph.CompareTo(b.Glyph);
+    }
+
+    /// <summary>Along a line by start alone, as a line is split by baseline.</summary>
+    private struct ByStart : IItemOrder
+    {
+        public static int Compare(in Item a, in Item b) => a.U0.CompareTo(b.U0);
+    }
+
+    /// <summary>
+    /// Sorts items into the order that <see cref="List{T}.Sort(Comparison{T})"/> gives them, but faster. Pages mostly
+    /// draw their glyphs in reading order, so items are often sorted already, or come in a few ascending runs that
+    /// merge in a few passes. Items in strictly ascending order are in the only order any sort can give them, so where no
+    /// two compare equal the merge gives the same result; where some do, the sort places them as it always has.
+    /// </summary>
+    private static void Sort<T>(Span<Item> items, ref Item[]? buffer) where T : struct, IItemOrder
+    {
+        if (Ascending<T>(items)) return;
+        int n = items.Length;
+        // The buffer at least doubles when it grows. SeparateBaselines sorts a line that grows a little at a time, and a
+        // buffer only as long as each step needs would be allocated again on every step, which a damaged page with
+        // thousands of baselines in one line turns into gigabytes of garbage. Doubling keeps it under four times the
+        // longest line.
+        if (buffer == null || buffer.Length < 2 * n)
+            buffer = GC.AllocateUninitializedArray<Item>(Math.Max(Math.Max(2 * n, 64), 2 * (buffer?.Length ?? 0)));
+        // The merge works on a copy, so that the items are still in their first order if the sort is needed.
+        var copy = buffer.AsSpan(0, n);
+        items.CopyTo(copy);
+        MergeRuns<T>(copy, buffer.AsSpan(n, n));
+        if (Ascending<T>(copy)) copy.CopyTo(items);
+        else items.Sort(static (a, b) => T.Compare(a, b));
+    }
+
+    /// <summary>Whether the items are in strictly ascending order.</summary>
+    private static bool Ascending<T>(ReadOnlySpan<Item> items) where T : struct, IItemOrder
+    {
+        for (int i = 1; i < items.Length; i++)
+            if (T.Compare(items[i - 1], items[i]) >= 0) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Sorts items by merging their ascending runs two at a time, back and forth between them and <paramref name="aux"/>,
+    /// which is as long. Each pass halves the number of runs, so it takes O(n log n) time at most.
+    /// </summary>
+    private static void MergeRuns<T>(Span<Item> items, Span<Item> aux) where T : struct, IItemOrder
+    {
+        int n = items.Length;
+        // Where each run starts, and then the end of the last.
+        var starts = new List<int> { 0 };
+        for (int i = 1; i < n; i++)
+            if (T.Compare(items[i - 1], items[i]) > 0) starts.Add(i);
+        starts.Add(n);
+        var source = items;
+        var target = aux[..n];
+        while (starts.Count > 2)
+        {
+            int merged = 0;
+            for (int k = 0; k + 1 < starts.Count; k += 2)
+            {
+                int start = starts[k], middle = starts[k + 1], end = k + 2 < starts.Count ? starts[k + 2] : middle;
+                Merge<T>(source[start..middle], source[middle..end], target[start..end]);
+                starts[merged++] = start;
+            }
+            starts[merged++] = n;
+            starts.RemoveRange(merged, starts.Count - merged);
+            var pass = source;
+            source = target;
+            target = pass;
+        }
+        if (source != items) source.CopyTo(items);
+    }
+
+    /// <summary>Merges two ascending runs into <paramref name="into"/>, taking from the left one where items compare equal.</summary>
+    private static void Merge<T>(ReadOnlySpan<Item> left, ReadOnlySpan<Item> right, Span<Item> into) where T : struct, IItemOrder
+    {
+        int i = 0, j = 0, k = 0;
+        while (i < left.Length && j < right.Length) into[k++] = T.Compare(right[j], left[i]) < 0 ? right[j++] : left[i++];
+        left[i..].CopyTo(into[k..]);
+        right[j..].CopyTo(into[(k + left.Length - i)..]);
     }
 
     /// <summary>
@@ -218,7 +380,7 @@ internal static class TextLayout
     /// interleave letter by letter. The glyphs of each baseline stay with the line while they overlap none of its
     /// glyphs, so a superscript between words stays in its line; a baseline that overlaps goes to a line of its own.
     /// </summary>
-    private static List<Line> SeparateBaselines(List<Line> lines)
+    private static List<Line> SeparateBaselines(List<Line> lines, ref Item[]? buffer)
     {
         List<Line>? result = null;
         for (int l = 0; l < lines.Count; l++)
@@ -228,16 +390,27 @@ internal static class TextLayout
             List<List<Item>>? groups = null;
             // Arabic letters off the baseline by cursive attachment are not a baseline of their own.
             double minV = double.MaxValue, maxV = double.MinValue;
-            foreach (var it in line.Items)
+            foreach (ref readonly var it in line.Items)
                 if (!it.Cursive) { minV = Math.Min(minV, it.V); maxV = Math.Max(maxV, it.V); }
             if (maxV - minV > 0.1 * line.Size)
             {
-                var sorted = line.Items.OrderBy(it => it.V).ToList();
-                groups = new List<List<Item>> { new() { sorted[0] } };
-                for (int i = 1; i < sorted.Count; i++)
+                // The line is a run of items sorted by baseline, so its items are in order across it already and each of
+                // its baselines is a run of them. The baselines are counted first, as most such lines have only one.
+                var sorted = line.Items;
+                int count = 1;
+                for (int i = 1; i < sorted.Length; i++)
+                    if (Gap(sorted, i)) count++;
+                if (count > 1)
                 {
-                    if (sorted[i].V - sorted[i - 1].V > 0.2 * Math.Min(sorted[i].Size, sorted[i - 1].Size)) groups.Add(new List<Item>());
-                    groups[^1].Add(sorted[i]);
+                    groups = new List<List<Item>>(count);
+                    for (int i = 1, start = 0; i <= sorted.Length; i++)
+                    {
+                        if (i < sorted.Length && !Gap(sorted, i)) continue;
+                        var group = new List<Item>(i - start);
+                        group.AddRange(sorted[start..i]);
+                        groups.Add(group);
+                        start = i;
+                    }
                 }
             }
             if (groups == null || groups.Count < 2)
@@ -251,21 +424,18 @@ internal static class TextLayout
             while (groups.Count > 0)
             {
                 var kept = new List<Item>(groups[0]);
-                kept.Sort((a, b) => a.U0.CompareTo(b.U0));
+                Sort<ByStart>(CollectionsMarshal.AsSpan(kept), ref buffer);
                 var deferred = new List<List<Item>>();
                 for (int g = 1; g < groups.Count; g++)
                 {
                     if (Overlaps(kept, groups[g])) { deferred.Add(groups[g]); continue; }
                     kept.AddRange(groups[g]);
-                    kept.Sort((a, b) => a.U0.CompareTo(b.U0));
+                    Sort<ByStart>(CollectionsMarshal.AsSpan(kept), ref buffer);
                 }
-                var split = new Line(new List<Item>(kept.Count));
+                var split = new Line(kept.ToArray());
                 double size = 0;
                 foreach (var it in kept)
-                {
-                    split.Items.Add(it);
                     if (it.Size > size) { size = it.Size; split.V = it.V; }
-                }
                 split.Size = size;
                 result.Add(split);
                 groups = deferred;
@@ -274,6 +444,9 @@ internal static class TextLayout
         if (result == null) return lines;
         result.Sort((a, b) => a.V.CompareTo(b.V));
         return result;
+
+        // Whether the item at i is on another baseline than the one before it.
+        static bool Gap(ReadOnlySpan<Item> items, int i) => items[i].V - items[i - 1].V > 0.2 * Math.Min(items[i].Size, items[i - 1].Size);
 
         // Whether any glyph of the group covers more than a third of a glyph of the line, sorted along it.
         static bool Overlaps(List<Item> line, List<Item> group)
@@ -306,10 +479,11 @@ internal static class TextLayout
     {
         int prev = attached.PreviousLetter(mark.Glyph), next = attached.NextLetter(mark.Glyph);
         bool rtl = next < glyphs.Count && attached.ClassOf(next) is BidiClass.R or BidiClass.AL;
-        foreach (int target in rtl ? new[] { next, prev } : new[] { prev, next })
+        for (int k = 0; k < 2; k++)
         {
+            int target = (k == 0) == rtl ? next : prev;
             if (target < 0 || target >= glyphs.Count) continue;
-            var g = glyphs[target];
+            ref readonly var g = ref CollectionsMarshal.AsSpan(glyphs)[target];
             double u0 = g.X * cx + g.Y * cy, u1 = g.EndX * cx + g.EndY * cy, v = -g.X * cy + g.Y * cx;
             if (u1 < u0) (u0, u1) = (u1, u0);
             double centre = (mark.U0 + mark.U1) / 2;
@@ -342,9 +516,9 @@ internal static class TextLayout
             // nearer, and looking at every letter for every mark is quadratic on a line of many marks.
             var items = best.Items;
             int end = FirstAfter(items, centre);
-            for (int k = Math.Max(0, end - MarkWindow); k <= end && k < items.Count; k++)
+            for (int k = Math.Max(0, end - MarkWindow); k <= end && k < items.Length; k++)
             {
-                var it = items[k];
+                ref readonly var it = ref items[k];
                 double d = centre < it.U0 ? it.U0 - centre : centre > it.U1 ? centre - it.U1 : 0;
                 if (d < bestDistance) { bestDistance = d; target = it.Glyph; }
             }
@@ -353,8 +527,8 @@ internal static class TextLayout
         if (target < 0)
         {
             // A mark with no letter near it is kept as a character of its own on the nearest line.
-            if (best == null) lines.Add(best = new Line { V = mark.V, Size = mark.Size });
-            best.Items.Insert(FirstAfter(best.Items, mark.U0), mark);
+            if (best == null) lines.Add(best = new Line(Array.Empty<Item>()) { V = mark.V, Size = mark.Size });
+            best.Insert(FirstAfter(best.Items, mark.U0), mark);
             return;
         }
         attached.Append(target, mark.Glyph);
@@ -364,9 +538,9 @@ internal static class TextLayout
     private const int MarkWindow = 32;
 
     /// <summary>The index of the first of <paramref name="items"/>, sorted by start, that starts after <paramref name="u"/>.</summary>
-    private static int FirstAfter(List<Item> items, double u)
+    private static int FirstAfter(ReadOnlySpan<Item> items, double u)
     {
-        int lo = 0, hi = items.Count;
+        int lo = 0, hi = items.Length;
         while (lo < hi)
         {
             int mid = (lo + hi) / 2;
@@ -381,24 +555,19 @@ internal static class TextLayout
     /// the letter's bidi class and whether it is a space are kept up to date as marks arrive, so reading them never
     /// rescans that text. The nearest letters on either side of each glyph are found once, in one pass each way, so a
     /// long run of marks is not walked again for every mark in it. Whether a glyph is a mark never changes, as glyphs
-    /// always have text and adding marks to a letter leaves it a letter.
+    /// always have text and adding marks to a letter leaves it a letter. Most pages have no marks, so nothing is
+    /// allocated until the first one is looked at.
     /// </summary>
     private sealed class MarkTargets
     {
         private readonly List<TextGlyph> _glyphs;
-        private readonly StringBuilder?[] _text;
-        private readonly BidiClass?[] _class;
-        private readonly bool?[] _space;
-        private readonly List<int> _pending = new();
+        private StringBuilder?[]? _text;
+        private BidiClass?[]? _class;
+        private bool?[]? _space;
+        private List<int>? _pending;
         private int[]? _previous, _next;
 
-        public MarkTargets(List<TextGlyph> glyphs)
-        {
-            _glyphs = glyphs;
-            _text = new StringBuilder?[glyphs.Count];
-            _class = new BidiClass?[glyphs.Count];
-            _space = new bool?[glyphs.Count];
-        }
+        public MarkTargets(List<TextGlyph> glyphs) => _glyphs = glyphs;
 
         /// <summary>The nearest glyph before <paramref name="i"/> that is not a mark, or -1.</summary>
         public int PreviousLetter(int i)
@@ -416,9 +585,10 @@ internal static class TextLayout
 
         private void FindLetters()
         {
-            int n = _glyphs.Count;
+            var glyphs = CollectionsMarshal.AsSpan(_glyphs);
+            int n = glyphs.Length;
             var isMark = new bool[n];
-            for (int i = 0; i < n; i++) isMark[i] = IsMark(_glyphs[i].Text);
+            for (int i = 0; i < n; i++) isMark[i] = IsMark(glyphs[i].Text);
             _previous = new int[n];
             _next = new int[n];
             for (int i = 0, last = -1; i < n; i++)
@@ -433,9 +603,9 @@ internal static class TextLayout
             }
         }
 
-        public BidiClass ClassOf(int i) => _class[i] ??= TextLayout.ClassOf(Text(i));
+        public BidiClass ClassOf(int i) => (_class ??= new BidiClass?[_glyphs.Count])[i] ??= TextLayout.ClassOf(Text(i));
 
-        public bool IsSpace(int i) => _space[i] ??= TextLayout.IsSpace(Text(i));
+        public bool IsSpace(int i) => (_space ??= new bool?[_glyphs.Count])[i] ??= TextLayout.IsSpace(Text(i));
 
         /// <summary>Joins the text of the mark glyph <paramref name="mark"/> to glyph <paramref name="target"/>.</summary>
         public void Append(int target, int mark)
@@ -443,38 +613,43 @@ internal static class TextLayout
             string text = Text(mark);
             var cls = ClassOf(target);
             bool space = IsSpace(target);
+            _text ??= new StringBuilder?[_glyphs.Count];
             if (_text[target] is not { } sb)
             {
                 _text[target] = sb = new StringBuilder(_glyphs[target].Text);
-                _pending.Add(target);
+                (_pending ??= new List<int>()).Add(target);
             }
             sb.Append(text);
             // Reading on from where the letter's own text left off gives the class of the joined text.
-            _class[target] = TextLayout.ClassOf(text, cls);
-            _space[target] = space && TextLayout.IsSpace(text);
+            _class![target] = TextLayout.ClassOf(text, cls);
+            _space![target] = space && TextLayout.IsSpace(text);
         }
 
         /// <summary>Writes the marks gathered so far into the text of their letters.</summary>
         public void Flush()
         {
+            if (_pending == null) return;
             foreach (int i in _pending)
             {
                 var g = _glyphs[i];
-                g.Text = _text[i]!.ToString();
+                g.Text = _text![i]!.ToString();
                 _glyphs[i] = g;
                 _text[i] = null;
             }
             _pending.Clear();
         }
 
-        private string Text(int i) => _text[i] is { } sb ? sb.ToString() : _glyphs[i].Text;
+        private string Text(int i) => _text?[i] is { } sb ? sb.ToString() : CollectionsMarshal.AsSpan(_glyphs)[i].Text;
     }
 
-    private static bool IsMark(string text)
+    // Marks start at U+0300, so the text of most glyphs is told from a mark by its first character.
+    private static bool IsMark(string text) => text.Length > 0 && text[0] >= 0x0300 && AllMarks(text);
+
+    private static bool AllMarks(string text)
     {
         foreach (char c in text)
             if (!UnicodeTables.IsMark(c)) return false;
-        return text.Length > 0;
+        return true;
     }
 
     private static bool IsSpace(string s)
@@ -487,6 +662,7 @@ internal static class TextLayout
     private sealed class Scratch
     {
         public readonly List<Item> Visual = new();
+        public readonly List<PdfTextWord> Words = new();
         public readonly StringBuilder Line = new(), Word = new();
     }
 
@@ -495,17 +671,23 @@ internal static class TextLayout
     {
         // Visual order with spaces: a glyph drawn twice in the same place (fake bold) counts once, and a gap wider than
         // a fraction of the font's space becomes a space when the PDF does not draw one.
+        var all = CollectionsMarshal.AsSpan(glyphs);
+        var items = line.Items;
         var visual = scratch.Visual;
         visual.Clear();
-        Item? prev = null;
-        foreach (var it in line.Items)
+        int prev = -1;
+        bool prevBlank = false, rightToLeft = false;
+        for (int k = 0; k < items.Length; k++)
         {
-            var g = glyphs[it.Glyph];
-            if (prev is Item p)
+            ref readonly var it = ref items[k];
+            ref readonly var g = ref all[it.Glyph];
+            bool blank = IsSpace(g.Text);
+            if (prev >= 0)
             {
-                var pg = glyphs[p.Glyph];
-                if (pg.Text == g.Text && Math.Abs(it.U0 - p.U0) < 0.1 * it.Size && Math.Abs(it.V - p.V) < 0.1 * it.Size) continue;
-                bool spaceDrawn = IsSpace(pg.Text) || IsSpace(g.Text);
+                ref readonly var p = ref items[prev];
+                ref readonly var pg = ref all[p.Glyph];
+                if (Math.Abs(it.U0 - p.U0) < 0.1 * it.Size && Math.Abs(it.V - p.V) < 0.1 * it.Size && pg.Text == g.Text) continue;
+                bool spaceDrawn = prevBlank || blank;
                 double size = Math.Min(it.Size, p.Size);
                 double space = Math.Min(pg.SpaceWidth > 0 ? pg.SpaceWidth : double.MaxValue, g.SpaceWidth > 0 ? g.SpaceWidth : double.MaxValue);
                 double threshold = space < double.MaxValue ? Math.Clamp(0.5 * space, 0.08 * size, 0.2 * size) : 0.15 * size;
@@ -518,13 +700,21 @@ internal static class TextLayout
                 if (!spaceDrawn && it.U0 - p.U1 > threshold)
                     visual.Add(new Item { Glyph = -1, U0 = p.U1, U1 = it.U0, V = it.V, Size = size });
             }
-            visual.Add(it);
-            prev = it;
+            var item = it;
+            item.Space = blank;
+            visual.Add(item);
+            prev = k;
+            prevBlank = blank;
+            rightToLeft |= it.RightToLeft;
         }
 
-        var order = LogicalOrder(glyphs, visual, directions, out bool rtl);
+        var visible = CollectionsMarshal.AsSpan(visual);
+        // Most lines have no right-to-left letters and are read as they are drawn.
+        bool rtl = false;
+        var order = rightToLeft ? LogicalOrder(all, visible, directions, out rtl) : null;
 
-        var words = new List<PdfTextWord>();
+        var words = scratch.Words;
+        words.Clear();
         var lineText = scratch.Line.Clear();
         var word = scratch.Word.Clear();
         double wu0 = double.MaxValue, wu1 = double.MinValue, wv = 0, wsize = 0;
@@ -537,7 +727,8 @@ internal static class TextLayout
         {
             if (word.Length == 0) return;
             var (x, y, w, h) = Box(wu0, wu1, wv, wsize, cx, cy);
-            words.Add(new PdfTextWord(word.ToString(), x, y, w, h, wsize, font)
+            string text = word.ToString();
+            words.Add(new PdfTextWord(text, x, y, w, h, wsize, font)
             {
                 OriginX = wu0 * cx - wv * cy,
                 OriginY = wu0 * cy + wv * cx,
@@ -547,16 +738,16 @@ internal static class TextLayout
             });
             colors = null;
             if (lineText.Length > 0) lineText.Append(' ');
-            lineText.Append(word);
+            lineText.Append(text);
             word.Clear();
             wu0 = double.MaxValue; wu1 = double.MinValue; wsize = 0;
         }
 
-        for (int i = 0; i < visual.Count; i++)
+        for (int i = 0; i < visible.Length; i++)
         {
-            var it = visual[order == null ? i : order[i]];
-            if (it.Glyph < 0 || IsSpace(glyphs[it.Glyph].Text)) { Flush(); continue; }
-            var g = glyphs[it.Glyph];
+            ref readonly var it = ref visible[order == null ? i : order[i]];
+            if (it.Glyph < 0 || it.Space) { Flush(); continue; }
+            ref readonly var g = ref all[it.Glyph];
             if (word.Length == 0) { font = g.Font; color = g.Color; wv = it.V; }
             else if (g.Color != (colors is { Count: > 0 } ? colors[^1].Item2 : color) && (colors?.Count ?? 0) < 64)
                 (colors ??= new List<(int, uint)>()).Add((word.Length, g.Color));
@@ -568,7 +759,11 @@ internal static class TextLayout
         Flush();
         if (words.Count == 0) return null;
         var (lx, ly, lw, lh) = Box(lu0, lu1, line.V, lsize, cx, cy);
-        return new PdfTextLine(lineText.ToString(), words, lx, ly, lw, lh, angle == 0 ? 0 : 360 - angle, rtl) { Baseline = line.V, Size = line.Size };
+        // The words are gathered in a list kept from line to line, and copied into a list of just their size.
+        return new PdfTextLine(lineText.ToString(), new List<PdfTextWord>(words), lx, ly, lw, lh, angle == 0 ? 0 : 360 - angle, rtl)
+        {
+            Baseline = line.V, Size = line.Size,
+        };
     }
 
     /// <summary>The page box, in points from the top left, of a run from u0 to u1 on the baseline v of the line frame.</summary>
@@ -607,14 +802,14 @@ internal static class TextLayout
     /// letters is given bidi levels from its strong characters, and reordering by those levels (rule L2, which undoes
     /// itself) turns visual order back into logical order. Null when that is the visual order.
     /// </summary>
-    private static int[]? LogicalOrder(List<TextGlyph> glyphs, List<Item> visual, LineDirections directions, out bool rtl)
+    private static int[]? LogicalOrder(ReadOnlySpan<TextGlyph> glyphs, ReadOnlySpan<Item> visual, LineDirections directions, out bool rtl)
     {
-        int n = visual.Count;
+        int n = visual.Length;
         int rCount = 0, lCount = 0;
         BidiClass first = BidiClass.ON, last = BidiClass.ON;
         for (int i = 0; i < n; i++)
         {
-            var c = visual[i].Glyph < 0 ? BidiClass.WS : ClassOf(glyphs[visual[i].Glyph].Text);
+            var c = visual[i].Glyph < 0 ? BidiClass.WS : GlyphClass(glyphs[visual[i].Glyph].Text);
             if (c is BidiClass.R or BidiClass.AL) rCount++;
             else if (c == BidiClass.L) lCount++;
             else continue;
@@ -686,6 +881,11 @@ internal static class TextLayout
         }
         return Bidi.VisualOrder(levels);
     }
+
+    /// <summary>The bidi class of a glyph's text, as <see cref="ClassOf"/> gives it.</summary>
+    private static BidiClass GlyphClass(string text)
+        // Most glyphs are Latin letters, which are left to right; they need no lookup.
+        => text.Length > 0 && char.IsAsciiLetter(text[0]) ? BidiClass.L : ClassOf(text);
 
     /// <summary>
     /// The direction a line's own letters give it: right to left (true) when only reading from its rightmost letter

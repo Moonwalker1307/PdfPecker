@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using PdfPecker.Rendering.Html;
 
@@ -35,6 +36,12 @@ internal static class TextReadingOrder
     /// <summary>The most words of a page covering more than <see cref="MaxCells"/> squares.</summary>
     private const int MaxLarge = 256;
 
+    /// <summary>
+    /// The squares a page's words may span and still be filed in one array, more than a letter or A4 page has; words
+    /// spread further apart are filed by square in a dictionary instead.
+    /// </summary>
+    private const int MinArraySquares = 4096;
+
     public static PdfTextPage Arrange(PdfTextPage page, List<FlowBlock> blocks, bool tagged, CancellationToken cancellationToken)
     {
         var parts = new List<List<FlowWord>>();
@@ -43,7 +50,7 @@ internal static class TextReadingOrder
         else Layout(blocks, parts);
         if (parts.Count < 2) return page;
 
-        var grid = new Dictionary<(int, int), List<(FlowWord Word, int Part)>>();
+        var grid = new WordGrid();
         var large = new List<(FlowWord Word, int Part)>();
         for (int p = 0; p < parts.Count; p++)
         {
@@ -58,14 +65,10 @@ internal static class TextReadingOrder
                     large.Add((w, p));
                     continue;
                 }
-                for (int r = r0; r <= r1; r++)
-                    for (int c = c0; c <= c1; c++)
-                    {
-                        if (!grid.TryGetValue((c, r), out var list)) grid[(c, r)] = list = new List<(FlowWord, int)>();
-                        list.Add((w, p));
-                    }
+                grid.Add(w, p, c0, r0, c1, r1);
             }
         }
+        grid.Build();
 
         // The part each word of the page's upright lines is in; text in other directions stays after it, as it was.
         var lines = page.Lines;
@@ -155,7 +158,14 @@ internal static class TextReadingOrder
                 pieceRanks.Add(wordRanks == null ? 0 : least);
             }
         }
-        var sorted = pieces.Select((piece, i) => (piece, i)).OrderBy(e => e.piece.Part)
+        // Most often the pieces are in order already, as the lines of one part are, and sorting them would change nothing.
+        bool ordered = true;
+        for (int k = 1; k < pieces.Count && ordered; k++)
+        {
+            int byPart = pieces[k - 1].Part.CompareTo(pieces[k].Part);
+            ordered = byPart < 0 || byPart == 0 && pieceRanks[k - 1] <= pieceRanks[k];
+        }
+        var sorted = ordered ? pieces : pieces.Select((piece, i) => (piece, i)).OrderBy(e => e.piece.Part)
             .ThenBy(e => pieceRanks[e.i])
             .ThenBy(e => e.i).Select(e => e.piece).ToList();
         bool unchanged = true;
@@ -200,8 +210,7 @@ internal static class TextReadingOrder
             }
             for (int r = r0; r <= r1; r++)
                 for (int c = c0; c <= c1; c++)
-                    if (grid.TryGetValue((c, r), out var list))
-                        foreach (var (w, p) in list) Consider(w, p);
+                    foreach (var (w, p) in grid.Filed(c, r)) Consider(w, p);
             foreach (var (w, p) in large) Consider(w, p);
             match = bestWord;
             return best;
@@ -212,6 +221,79 @@ internal static class TextReadingOrder
                 if (overlap > most || (overlap == most && overlap > 0 && p < best)) { most = overlap; best = p; bestWord = w; }
             }
         }
+    }
+
+    /// <summary>
+    /// The blocks' words filed under the squares they cover, each square's words in the order they were filed. On a page
+    /// the squares of the words' extent are one array that points into another holding each square's words in a run, a
+    /// few allocations where a list per square would take hundreds.
+    /// </summary>
+    private sealed class WordGrid
+    {
+        private readonly List<(FlowWord Word, int Part, int C0, int R0, int C1, int R1)> _filed = new();
+        private int _c0 = int.MaxValue, _r0 = int.MaxValue, _c1 = int.MinValue, _r1 = int.MinValue, _columns;
+        private long _entries;
+        private int[]? _starts;
+        private (FlowWord Word, int Part)[]? _words;
+        private Dictionary<(int, int), List<(FlowWord Word, int Part)>>? _squares;
+
+        public void Add(FlowWord word, int part, int c0, int r0, int c1, int r1)
+        {
+            _filed.Add((word, part, c0, r0, c1, r1));
+            _c0 = Math.Min(_c0, c0);
+            _r0 = Math.Min(_r0, r0);
+            _c1 = Math.Max(_c1, c1);
+            _r1 = Math.Max(_r1, r1);
+            _entries += (long)(c1 - c0 + 1) * (r1 - r0 + 1);
+        }
+
+        public void Build()
+        {
+            if (_filed.Count == 0) return;
+            long columns = (long)_c1 - _c0 + 1, squares = columns * ((long)_r1 - _r0 + 1);
+            if (squares > Math.Max(MinArraySquares, 2 * _entries))
+            {
+                _squares = new Dictionary<(int, int), List<(FlowWord, int)>>();
+                foreach (var (w, p, c0, r0, c1, r1) in _filed)
+                    for (int r = r0; r <= r1; r++)
+                        for (int c = c0; c <= c1; c++)
+                        {
+                            if (!_squares.TryGetValue((c, r), out var list)) _squares[(c, r)] = list = new List<(FlowWord, int)>();
+                            list.Add((w, p));
+                        }
+                return;
+            }
+            _columns = (int)columns;
+            // Count each square's words after its start, sum the counts into starts, then file each word at its square's
+            // start, which moves that start on to the next square's; shifting the starts back undoes that.
+            var starts = new int[squares + 1];
+            foreach (var (_, _, c0, r0, c1, r1) in _filed)
+                for (int r = r0; r <= r1; r++)
+                    for (int c = c0; c <= c1; c++) starts[Index(c, r) + 1]++;
+            for (int i = 1; i < starts.Length; i++) starts[i] += starts[i - 1];
+            var words = new (FlowWord, int)[_entries];
+            foreach (var (w, p, c0, r0, c1, r1) in _filed)
+                for (int r = r0; r <= r1; r++)
+                    for (int c = c0; c <= c1; c++) words[starts[Index(c, r)]++] = (w, p);
+            for (int i = starts.Length - 1; i > 0; i--) starts[i] = starts[i - 1];
+            starts[0] = 0;
+            _starts = starts;
+            _words = words;
+        }
+
+        /// <summary>The words filed under a square, in the order they were filed.</summary>
+        public ReadOnlySpan<(FlowWord Word, int Part)> Filed(int c, int r)
+        {
+            if (_starts != null)
+            {
+                if (c < _c0 || c > _c1 || r < _r0 || r > _r1) return default;
+                int i = Index(c, r);
+                return _words.AsSpan(_starts[i], _starts[i + 1] - _starts[i]);
+            }
+            return _squares != null && _squares.TryGetValue((c, r), out var list) ? CollectionsMarshal.AsSpan(list) : default;
+        }
+
+        private int Index(int c, int r) => (r - _r0) * _columns + (c - _c0);
     }
 
     /// <summary>The square a position is in; a position that is not a number, as a damaged PDF can give, counts as 0.</summary>
@@ -257,10 +339,13 @@ internal static class TextReadingOrder
                 foreach (var part in Parts(g)) Layout(part, parts);
                 continue;
             }
+            if (current != null)
+            {
+                AddWords(block, current);
+                continue;
+            }
             var words = Words(block);
-            if (words.Count == 0) continue;
-            if (current == null) parts.Add(current = new List<FlowWord>());
-            current.AddRange(words);
+            if (words.Count > 0) parts.Add(current = words);
         }
     }
 
@@ -396,13 +481,34 @@ internal static class TextReadingOrder
         }
     }
 
-    private static List<FlowWord> Words(FlowBlock block) => block switch
+    private static List<FlowWord> Words(FlowBlock block)
     {
-        TextBlock t => t.Lines.SelectMany(l => l.Words).ToList(),
-        TableBlock t => t.Cells.SelectMany(c => c.Lines).SelectMany(l => l.Words).ToList(),
-        GroupBlock g => g.Parts.SelectMany(p => p).SelectMany(Words).ToList(),
-        _ => new List<FlowWord>(),
-    };
+        var words = new List<FlowWord>();
+        AddWords(block, words);
+        return words;
+    }
+
+    /// <summary>Adds the words of a block to <paramref name="words"/>, line by line, cell by cell, part by part.</summary>
+    private static void AddWords(FlowBlock block, List<FlowWord> words)
+    {
+        switch (block)
+        {
+            // Word by word, as a table's lines hold a word or two each, too few for a range to copy faster.
+            case TextBlock t:
+                foreach (var line in t.Lines)
+                    foreach (var w in line.Words) words.Add(w);
+                break;
+            case TableBlock t:
+                foreach (var cell in t.Cells)
+                    foreach (var line in cell.Lines)
+                        foreach (var w in line.Words) words.Add(w);
+                break;
+            case GroupBlock g:
+                foreach (var part in g.Parts)
+                    foreach (var b in part) AddWords(b, words);
+                break;
+        }
+    }
 
     /// <summary>
     /// Whether a group the layout sets side by side is read one part after the other. Every part needs a few lines of

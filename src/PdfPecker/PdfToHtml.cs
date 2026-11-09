@@ -381,6 +381,7 @@ public static class PdfToHtml
             cancellationToken);
         FlowStyles? styles = null;
         if (options.IncludeStyles) styles = new FlowStyles(index + 1, turn.Width, turn.Height, collected.Fills, collected.Rules, blocks);
+        doc.Recycle(collected);
         var sb = new StringBuilder(4096);
         FlowHtmlWriter.WritePage(sb, id, blocks, pageIds, styles);
         return sb.ToString();

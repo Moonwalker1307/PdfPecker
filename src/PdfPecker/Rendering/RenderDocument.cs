@@ -23,6 +23,13 @@ internal sealed class RenderDocument
     // page's list starts a little larger than that instead of growing from empty through copies of a large struct.
     private int _glyphsPerPage;
 
+    // The glyph and rule lists of pages that are done with them, for the next pages to fill. A page's glyph list is large
+    // enough to go on the large object heap, which only a full collection frees, so a list per page made reading a
+    // document take several full collections; reused, the lists grow to the largest page's once.
+    private readonly Stack<List<TextGlyph>> _spareGlyphs = new();
+    private readonly Stack<List<PageRule>> _spareRules = new();
+    private const int MaxSpareLists = 64;
+
     public RenderDocument(byte[] data, string? password)
     {
         File = PdfFile.Open(data, password);
@@ -102,13 +109,55 @@ internal sealed class RenderDocument
     public TextCollector CollectText(int index, bool annotations, bool rules, CancellationToken cancel)
     {
         var p = Pages[index];
-        int expected = Volatile.Read(ref _glyphsPerPage);
-        var collector = new TextCollector(rules, expected + expected / 8);
+        var collector = new TextCollector(Take(_spareGlyphs) ?? NewGlyphList(), rules ? Take(_spareRules) ?? new List<PageRule>() : null);
         var r = new PageRenderer(File, _cache, collector, cancel);
         using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, PageMatrix(p, p.UserUnit, p.UserUnit), annotations);
         Volatile.Write(ref _glyphsPerPage, collector.Glyphs.Count);
         VerticalText.Apply(collector.Glyphs);
         return collector;
+    }
+
+    /// <summary>A list for a page's glyphs sized for a page like the last one read.</summary>
+    private List<TextGlyph> NewGlyphList()
+    {
+        int expected = Volatile.Read(ref _glyphsPerPage);
+        return new List<TextGlyph>(Math.Clamp(expected + expected / 8, 0, TextCollector.MaxGlyphs));
+    }
+
+    /// <summary>
+    /// Takes back the glyph list <see cref="CollectText(int, bool, CancellationToken)"/> gave for a page, for a later
+    /// page to fill, once nothing reads the glyphs any more.
+    /// </summary>
+    public void Recycle(List<TextGlyph> glyphs) => Give(_spareGlyphs, glyphs);
+
+    /// <summary>
+    /// Takes back the glyph and rule lists of what <see cref="CollectText(int, bool, bool, CancellationToken)"/> collected
+    /// on a page, for a later page to fill, once nothing reads them any more.
+    /// </summary>
+    public void Recycle(TextCollector collected)
+    {
+        Give(_spareGlyphs, collected.Glyphs);
+        if (collected.Rules != null) Give(_spareRules, collected.Rules);
+    }
+
+    private static List<T>? Take<T>(Stack<List<T>> spares)
+    {
+        lock (spares)
+        {
+            return spares.Count > 0 ? spares.Pop() : null;
+        }
+    }
+
+    private static void Give<T>(Stack<List<T>> spares, List<T> list)
+    {
+        // Each page gives its lists back once, after which nothing reads them. A list that is waiting here already is left
+        // as it is, so a second give cannot clear it or hand it to two pages.
+        lock (spares)
+        {
+            if (spares.Count >= MaxSpareLists || spares.Contains(list)) return;
+            list.Clear();
+            spares.Push(list);
+        }
     }
 
     /// <summary>

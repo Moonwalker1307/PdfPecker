@@ -133,12 +133,12 @@ internal static class FlowHtmlWriter
         {
             var d = new StringBuilder();
             around = TextDeclarations(d, styles, block.Lines, styles.Base, block.Kind == TextKind.Heading);
-            double x0 = block.Lines.Min(l => l.X0), x1 = block.Lines.Max(l => l.X1);
+            double x0 = FlowStyles.Min(block.Lines, l => l.X0), x1 = FlowStyles.Max(block.Lines, l => l.X1);
             // One line at the right of the page, or in its middle, keeps its place.
             if (!right && !centred && block.Lines.Count == 1 && x0 > (styles.Left + styles.Right) / 2 && styles.Right - x1 < 6) right = true;
             if (!right && !centred && block.Lines.Count == 1 && x0 - styles.Left > 24
                 && Math.Abs((x0 + x1) / 2 - (styles.Left + styles.Right) / 2) < 6) centred = true;
-            double top = block.Lines.Min(l => l.Top), bottom = block.Lines.Max(l => l.Bottom);
+            double top = FlowStyles.Min(block.Lines, l => l.Top), bottom = FlowStyles.Max(block.Lines, l => l.Bottom);
             if (styles.Background(x0, top, x1, bottom) is { } fill)
             {
                 // A box filled around the text, such as a banner, or a badge only as wide as its text.
@@ -171,16 +171,19 @@ internal static class FlowHtmlWriter
             // A line drawn across the text just above it, such as one that sets a footnote apart.
             double size = block.Lines[0].Size;
             if (styles.Border(true, (top, top - 2.2 * size, top - 0.1 * size), x0, x1) is { } line)
-                d.Append("border-top:").Append(FlowStyles.BorderValue(line)).Append(";padding-top:").Append(FlowStyles.Pt(Math.Max(0, top - line.Position))).Append(';');
+                d.Append("border-top:").Append(styles.BorderValue(line)).Append(";padding-top:").Append(FlowStyles.Pt(Math.Max(0, top - line.Position))).Append(';');
             if (d.Length > 0) sb.Append(" class=\"").Append(styles.Class(d.ToString())).Append('"');
         }
         if (block.Kind == TextKind.Numbered) sb.Append(" value=\"").Append(block.Number.ToString(CultureInfo.InvariantCulture)).Append('"');
-        if (block.Lines.Count(l => l.RightToLeft) * 2 > block.Lines.Count) sb.Append(" dir=\"rtl\"");
+        int rightToLeft = 0;
+        foreach (var line in block.Lines)
+            if (line.RightToLeft) rightToLeft++;
+        if (rightToLeft * 2 > block.Lines.Count) sb.Append(" dir=\"rtl\"");
         sb.Append('>');
         // A list item's marker is the list's own.
         int skip = block.Kind is TextKind.Bullet or TextKind.Numbered ? block.MarkerWords : 0;
         bool aligned = block.Lines.Count >= 2 && (right || centred);
-        WriteLines(sb, block.Lines, aligned ? double.MaxValue : block.Lines.Max(l => l.X1), skip, block.Kind != TextKind.Heading, false, pageIds,
+        WriteLines(sb, block.Lines, aligned ? double.MaxValue : FlowStyles.Max(block.Lines, l => l.X1), skip, block.Kind != TextKind.Heading, false, pageIds,
             styles, around);
         sb.Append("</").Append(tag).Append(">\n");
     }
@@ -188,13 +191,14 @@ internal static class FlowHtmlWriter
     /// <summary>Whether lines end at one edge but start at different places, or share a centre.</summary>
     internal static (bool Right, bool Centred) Alignment(List<FlowLine> lines)
     {
-        bool ragged = lines.Count >= 2 && lines.Max(l => l.X0) - lines.Min(l => l.X0) > 4;
-        return (ragged && lines.Max(l => l.X1) - lines.Min(l => l.X1) <= 2, ragged && lines.Max(l => l.X0 + l.X1) - lines.Min(l => l.X0 + l.X1) <= 4);
+        bool ragged = lines.Count >= 2 && FlowStyles.Max(lines, l => l.X0) - FlowStyles.Min(lines, l => l.X0) > 4;
+        return (ragged && FlowStyles.Max(lines, l => l.X1) - FlowStyles.Min(lines, l => l.X1) <= 2,
+            ragged && FlowStyles.Max(lines, l => l.X0 + l.X1) - FlowStyles.Min(lines, l => l.X0 + l.X1) <= 4);
     }
 
     /// <summary>Where the lines of a table cell could reach on the right: as far from its right side as its text starts from the left.</summary>
     internal static double CellReach(TableCell cell)
-        => Math.Max(cell.X1 - Math.Max(0, cell.Lines.Min(l => l.X0) - cell.X0), cell.Lines.Max(l => l.X1));
+        => Math.Max(cell.X1 - Math.Max(0, FlowStyles.Min(cell.Lines, l => l.X0) - cell.X0), FlowStyles.Max(cell.Lines, l => l.X1));
 
     private static void WriteTable(StringBuilder sb, TableBlock table, Func<int, int> pageIds, FlowStyles? styles)
     {
@@ -290,7 +294,8 @@ internal static class FlowHtmlWriter
         // A cell's fill is found under the whole cell or, where the grid is wider than the fill, under its text.
         var fill = styles.Background(x0, y0, x1, y1);
         if (fill == null && cell.Lines.Count > 0)
-            fill = styles.Background(cell.Lines.Min(l => l.X0), cell.Lines.Min(l => l.Top), cell.Lines.Max(l => l.X1), cell.Lines.Max(l => l.Bottom));
+            fill = styles.Background(FlowStyles.Min(cell.Lines, l => l.X0), FlowStyles.Min(cell.Lines, l => l.Top), FlowStyles.Max(cell.Lines, l => l.X1),
+                FlowStyles.Max(cell.Lines, l => l.Bottom));
         if (fill is { } f) d.Append("background:").Append(FlowStyles.Hex(f.Color)).Append(';');
         Side("border-top", true, grid.Y[cell.Row], x0, x1);
         Side("border-bottom", true, grid.Y[end], x0, x1);
@@ -298,8 +303,8 @@ internal static class FlowHtmlWriter
         Side(table.RightToLeft ? "border-left" : "border-right", false, grid.X[last], y0, y1);
         if (cell.Lines.Count > 0)
         {
-            double left = cell.Lines.Min(l => l.X0) - x0, right = x1 - cell.Lines.Max(l => l.X1);
-            bool flush = cell.Lines.Max(l => l.X1) - cell.Lines.Min(l => l.X1) <= 2;
+            double left = FlowStyles.Min(cell.Lines, l => l.X0) - x0, right = x1 - FlowStyles.Max(cell.Lines, l => l.X1);
+            bool flush = FlowStyles.Max(cell.Lines, l => l.X1) - FlowStyles.Min(cell.Lines, l => l.X1) <= 2;
             if (left > 4 && Math.Abs(left - right) <= 3) d.Append("text-align:center;");
             else if (left > 4 && flush && right < left / 2 && !table.RightToLeft) d.Append("text-align:right;");
         }
@@ -308,7 +313,7 @@ internal static class FlowHtmlWriter
 
         void Side(string property, bool horizontal, (double Side, double From, double To) at, double from, double to)
         {
-            if (styles.Border(horizontal, at, from, to) is { } rule) d.Append(property).Append(':').Append(FlowStyles.BorderValue(rule)).Append(';');
+            if (styles.Border(horizontal, at, from, to) is { } rule) d.Append(property).Append(':').Append(styles.BorderValue(rule)).Append(';');
         }
     }
 
@@ -319,12 +324,12 @@ internal static class FlowHtmlWriter
     /// </summary>
     private static TextStyle TextDeclarations(StringBuilder d, FlowStyles styles, List<FlowLine> lines, TextStyle around, bool boldByDefault)
     {
-        var words = lines.SelectMany(l => l.Words).ToList();
-        var style = FlowStyles.Usual(words) ?? around;
-        if (FlowStyles.Light(style.Color) && styles.Background(lines.Min(l => l.X0), lines.Min(l => l.Top), lines.Max(l => l.X1), lines.Max(l => l.Bottom)) == null)
+        var style = styles.Usual(lines, out int words, out int bold) ?? around;
+        if (FlowStyles.Light(style.Color) && styles.Background(FlowStyles.Min(lines, l => l.X0), FlowStyles.Min(lines, l => l.Top), FlowStyles.Max(lines, l => l.X1),
+                FlowStyles.Max(lines, l => l.Bottom)) == null)
             style = style with { Color = around.Color };
         FlowStyles.Text(d, style, around);
-        if (boldByDefault && words.Count(w => w.Bold) * 2 < words.Count) d.Append("font-weight:normal;");
+        if (boldByDefault && bold * 2 < words) d.Append("font-weight:normal;");
         return style;
     }
 
@@ -399,7 +404,9 @@ internal static class FlowHtmlWriter
     /// </summary>
     internal static List<(FlowWord Word, string Before)> Words(List<FlowLine> lines, double right, int skip, bool cell)
     {
-        var words = new List<(FlowWord Word, string Before)>();
+        int count = 0;
+        foreach (var line in lines) count += line.Words.Count;
+        var words = new List<(FlowWord Word, string Before)>(count);
         FlowLine? previous = null;
         foreach (var line in lines)
         {
@@ -435,13 +442,13 @@ internal static class FlowHtmlWriter
         {
             var w = words[i].Word;
             bool b = bold && w.Bold;
-            TextStyle? style = styles != null ? TextStyle.Of(w) : null;
+            TextStyle? style = styles?.StyleOf(w);
             // Text too light to see keeps the colour around it, as the element's own colour does.
             if (style is { } light && around is { } a && FlowStyles.Light(light.Color) && !FlowStyles.Light(a.Color)) style = light with { Color = a.Color };
             int j = i + 1;
             while (j < words.Count && (bold && words[j].Word.Bold) == b && words[j].Word.Italic == w.Italic
                 && words[j].Word.Href == w.Href && words[j].Word.LinkPage == w.LinkPage
-                && (style == null || Same(TextStyle.Of(words[j].Word), style.Value))) j++;
+                && (style == null || Same(styles!.StyleOf(words[j].Word), style.Value))) j++;
             sb.Append(words[i].Before);
             string? href = w.Href;
             if (href == null && w.LinkPage >= 0 && pageIds(w.LinkPage) is int page and > 0)
