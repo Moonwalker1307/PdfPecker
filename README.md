@@ -347,6 +347,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   from embedded JPEGs while keeping their pixels and colours.
 - **PDF to image**: renders any PDF page to PNG, JPEG or WebP, or a whole PDF to a multi-page TIFF, and
   `HtmlToImage` goes from HTML to images in one call. [More](https://pdfpecker.net/docs/pdf-to-image/)
+- **Image decoding**: `ImageDecoder.Decode(image)` reads a PNG, JPEG, GIF, WebP, BMP or TIFF file (any page of a
+  multi-page TIFF) straight to grey, RGB or RGBA pixels, with the same colour conversions, EXIF orientation and size
+  limits as `ImageToPdf` and without making a PDF of it: for OCR, image analysis and thumbnails.
 - **PDF to HTML**: `PdfToHtml` turns any PDF into one script-free HTML file that looks like the PDF, with text you can
   select, search and copy. `PdfHtmlMode.Structured` writes the text instead as flowing headings, paragraphs, lists and
   real `<table>` elements in reading order, with nothing placed at a fixed position, for search indexes and language

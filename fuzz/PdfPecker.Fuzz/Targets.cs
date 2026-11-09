@@ -453,6 +453,24 @@ internal static class Targets
             Image("webp", ".webp", c => c.ImageFiles(".webp").Concat(c.RenderedImages().Where(i => i.Ext == ".webp").Select(i => (i.Name, i.Data))), d => PdfImage.FromBytes(d)),
             Image("bmp", ".bmp", c => c.ImageFiles(".bmp"), d => PdfImage.FromBytes(d)),
             Image("tiff", ".tif", c => c.ImageFiles(".tif", ".tiff"), d => PdfImage.FromBytes(d)),
+            new()
+            {
+                // The public decoder: every frame of a multi-page TIFF (up to three) in each pixel format. Unlike the
+                // internal decoders it may throw only what it documents.
+                Name = "image-decoder", Extension = ".img", MaxSize = 256 * 1024,
+                Seeds = c => c.ImageFiles(".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff")
+                    .Concat(c.RenderedImages().Select(i => (i.Name, i.Data))),
+                Run = (d, ct) =>
+                {
+                    int frames = Math.Min(3, ImageDecoder.GetFrameCount(d));
+                    for (int frame = 0; frame < frames; frame++)
+                    {
+                        var format = (ImagePixelFormat)((d.Length + frame) % 3);
+                        ImageDecoder.Decode(d, new ImageDecodeOptions { Frame = frame, Format = format, MaxPixels = 20_000_000 }, ct);
+                    }
+                    ImageDecoder.Decode(d, new ImageDecodeOptions { ApplyOrientation = false }, ct);
+                },
+            },
             Image("jpx", ".jp2", c => c.Files("tests/PdfPecker.Tests/Fixtures/codecs", 2_000_000, ".jp2", ".j2k"), d => JpxDecoder.Decode(d)),
             new()
             {

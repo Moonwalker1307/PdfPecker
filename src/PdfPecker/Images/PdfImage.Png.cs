@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.IO.Compression;
 
 namespace PdfPecker.Images;
 
@@ -48,7 +49,54 @@ internal sealed partial class PdfImage
                 ColorSpace = png.ColorType == Grayscale ? DeviceGray : png.ColorType == Truecolor ? DeviceRgb : IndexedColorSpace(png.Palette!),
             };
         }
-        return DecodePng(png, idat.ToArray(), colors, hasAlpha);
+        return FromPlanes(DecodePng(png, idat.ToArray(), colors, hasAlpha));
+    }
+
+    /// <summary>
+    /// The PNG's pixels as 8-bit grey or RGB planes with an alpha plane, as <see cref="FromBytes"/> embeds them, without
+    /// compressing them for a PDF. Null when the file is not a readable PNG, has more than <paramref name="maxPixels"/>
+    /// pixels, or is one that <see cref="FromBytes"/> passes on to PDF readers in another form (a palette, or another
+    /// depth than 8 bits, without transparency), which <see cref="DecodeRgb"/> then reads as the renderer does.
+    /// </summary>
+    internal static ImagePlanes? PngPlanes(byte[] d, long maxPixels)
+    {
+        if (!IsPng(d)) return null;
+        var png = new PngInfo();
+        using var idat = new MemoryStream();
+        ReadChunks(d, ref png, idat);
+        if (png.Width <= 0 || png.Height <= 0 || idat.Length == 0 || (long)png.Width * png.Height > Math.Min(maxPixels, MaxPixels)) return null;
+
+        int colors = png.ColorType switch { Grayscale => 1, Truecolor => 3, Indexed => 1, GrayscaleAlpha => 2, TruecolorAlpha => 4, _ => 0 };
+        if (colors == 0 || png.BitDepth is not (1 or 2 or 4 or 8 or 16)) return null;
+        if (png.ColorType == Indexed && png.Palette == null) return null;
+
+        bool hasAlpha = png.ColorType is GrayscaleAlpha or TruecolorAlpha || png.Transparency != null;
+        if (hasAlpha || png.Interlace != 0) return DecodePng(png, idat.ToArray(), colors, hasAlpha);
+        if (png.BitDepth != 8 || png.ColorType == Indexed) return null;
+
+        // The common grey or RGB image: each row is inflated straight into its place in the pixels and unfiltered there,
+        // so the pixels are the only large allocation.
+        int width = png.Width, height = png.Height, stride = width * colors;
+        var pixels = GC.AllocateUninitializedArray<byte>(stride * height);
+        var above = new byte[stride]; // the row above the first is zeros
+        Span<byte> filter = stackalloc byte[1];
+        try
+        {
+            using var z = new ZLibStream(new MemoryStream(idat.GetBuffer(), 0, (int)idat.Length), CompressionMode.Decompress);
+            for (int y = 0; y < height; y++)
+            {
+                var row = pixels.AsSpan(y * stride, stride);
+                // Rows cut off by the end of the data or by damage are left to the renderer, which draws what there is.
+                if (z.ReadAtLeast(filter, 1, throwOnEndOfStream: false) < 1 || z.ReadAtLeast(row, stride, throwOnEndOfStream: false) < stride) return null;
+                PngFilters.Undo(filter[0], row, y == 0 ? above : pixels.AsSpan((y - 1) * stride, stride), colors);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
+        {
+            // Damaged zlib data (ZLibException is an IOException).
+            return null;
+        }
+        return new ImagePlanes(width, height, pixels, colors, null);
     }
 
     /// <summary>
@@ -81,7 +129,7 @@ internal sealed partial class PdfImage
     }
 
     /// <summary>Full decode: needed to split the alpha channel into a soft mask, and for interlaced images.</summary>
-    private static PdfImage DecodePng(in PngInfo png, byte[] zlib, int colors, bool hasAlpha)
+    private static ImagePlanes DecodePng(in PngInfo png, byte[] zlib, int colors, bool hasAlpha)
     {
         int width = png.Width, height = png.Height;
         // The pixel data can be no longer than its rows plus their filter bytes (a little more when interlaced): stop
@@ -115,10 +163,7 @@ internal sealed partial class PdfImage
             }
         }
 
-        var result = new PdfImage { Width = width, Height = height, BitsPerComponent = 8, ColorSpace = outColors == 1 ? DeviceGray : DeviceRgb, Data = Deflate(color) };
-        if (alpha != null && HasTransparency(alpha))
-            result.SMask = new PdfImage { Width = width, Height = height, BitsPerComponent = 8, ColorSpace = DeviceGray, Data = Deflate(alpha) };
-        return result;
+        return new ImagePlanes(width, height, color, outColors, alpha);
     }
 
     /// <summary>The common 8-bit grey with alpha and RGBA images: unfiltered in place, then split into colour and alpha.</summary>
