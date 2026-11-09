@@ -30,7 +30,8 @@ public static class PdfProtector
     /// <returns>The encrypted PDF.</returns>
     /// <exception cref="PdfPasswordException"><paramref name="pdf"/> is encrypted and <paramref name="password"/> does not open it.</exception>
     /// <exception cref="ArgumentException"><paramref name="pdf"/> is digitally signed, or claims PDF/A conformance; or it claims
-    /// PDF/UA and <paramref name="security"/> does not allow <see cref="PdfPermissions.ExtractForAccessibility"/>.</exception>
+    /// PDF/UA and <paramref name="security"/> does not allow <see cref="PdfPermissions.ExtractForAccessibility"/>; or
+    /// <paramref name="security"/> has a password that SASLprep refuses (see <see cref="PdfSecurity.UserPassword"/>).</exception>
     /// <exception cref="InvalidDataException"><paramref name="pdf"/> is not a readable PDF.</exception>
     /// <exception cref="NotSupportedException"><paramref name="pdf"/> uses an encryption handler other than the standard one.</exception>
     public static byte[] Encrypt(byte[] pdf, PdfSecurity security, string? password = null)
@@ -49,6 +50,7 @@ public static class PdfProtector
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
         if (security == null) throw new ArgumentNullException(nameof(security));
+        PdfEncryptor.CheckPasswords(security, nameof(security));
         return EncryptCore(pdf, security, password, cancellationToken).Span.ToArray();
     }
 
@@ -73,6 +75,7 @@ public static class PdfProtector
     {
         CheckStreams(input, output);
         if (security == null) throw new ArgumentNullException(nameof(security));
+        PdfEncryptor.CheckPasswords(security, nameof(security));
         var result = EncryptCore(PdfMerger.ReadAll(input), security, password, cancellationToken);
         output.Write(result.RawBuffer, 0, result.Length);
     }

@@ -21,10 +21,10 @@ internal sealed class PdfEncryptor : IPdfObjectEncryption, IDisposable
     public PdfEncryptor(PdfSecurity security)
     {
         _aes.Key = _fileKey;
-        var user = PasswordBytes(security.UserPassword);
+        var user = PasswordBytes(security.UserPassword, "user");
         var owner = string.IsNullOrEmpty(security.OwnerPassword)
             ? RandomNumberGenerator.GetBytes(32) // nobody can lift the permissions
-            : PasswordBytes(security.OwnerPassword);
+            : PasswordBytes(security.OwnerPassword, "owner");
 
         // Algorithms 8 and 9: U, UE, O and OE. The revision 6 hash is deliberately slow (about 1.3 ms each), so the
         // independent pairs run in parallel: the owner hashes need the finished U.
@@ -60,14 +60,42 @@ internal sealed class PdfEncryptor : IPdfObjectEncryption, IDisposable
     }
 
     /// <summary>
-    /// Passwords are UTF-8 after NFKC normalization (an approximation of SASLprep), at most 127 bytes. The library's own
-    /// normalization gives the same key on every host, ICU or not.
+    /// Checks that SASLprep accepts the passwords, without the work of encrypting; the constructor checks them too.
     /// </summary>
-    private static byte[] PasswordBytes(string? password)
+    /// <exception cref="ArgumentException">SASLprep refuses a password, or maps it to nothing.</exception>
+    internal static void CheckPasswords(PdfSecurity security, string paramName)
     {
-        if (string.IsNullOrEmpty(password)) return Array.Empty<byte>();
-        var b = Encoding.UTF8.GetBytes(UnicodeNormalization.Normalize(password, NormalizationForm.FormKC));
-        return b.Length > 127 ? b.AsSpan(0, 127).ToArray() : b;
+        if (!string.IsNullOrEmpty(security.UserPassword)) Prepare(security.UserPassword, "user", paramName);
+        if (!string.IsNullOrEmpty(security.OwnerPassword)) Prepare(security.OwnerPassword, "owner", paramName);
+    }
+
+    /// <summary>
+    /// Passwords are UTF-8 after SASLprep, at most 127 bytes (ISO 32000-2 section 7.6.4.3.3). A password being set is a
+    /// stored string, which must not hold code points that Unicode 3.2 did not assign (RFC 3454 section 7), as PDFBox
+    /// refuses them too. PdfPecker 1.23 accepted them; opening, which prepares a password as a query, still accepts them,
+    /// so files encrypted with such a password stay readable.
+    /// </summary>
+    private static byte[] PasswordBytes(string? password, string which)
+        => string.IsNullOrEmpty(password) ? Array.Empty<byte>() : Decryptor.Truncate(Encoding.UTF8.GetBytes(Prepare(password, which, "security")));
+
+    private static string Prepare(string password, string which, string paramName)
+    {
+        string? prepared;
+        var refusal = SaslPrep.Prepare(password, stored: true, out prepared);
+        string? problem = refusal switch
+        {
+            SaslPrep.Refusal.Prohibited => "has a character that SASLprep prohibits, such as a control, private-use or bidi control character",
+            SaslPrep.Refusal.Bidirectional => "mixes right-to-left and left-to-right letters, or does not begin and end with its right-to-left letters, which SASLprep refuses",
+            SaslPrep.Refusal.Unassigned => $"contains U+{SaslPrep.FirstUnassigned(password):X4}, a character that Unicode 3.2 did not have, as most "
+                + "emoji did not. RFC 4013 (SASLprep), which PDF 2.0 uses to prepare AES-256 passwords, does not allow such characters "
+                + "in a password being set, so PdfPecker no longer encrypts with them, although version 1.23 did. Files that were "
+                + "encrypted with such a password still open with it. Choose a password without this character",
+            _ => prepared!.Length == 0 ? "has only characters that SASLprep removes, so it would protect nothing" : null,
+        };
+        if (problem != null)
+            throw new ArgumentException(refusal == SaslPrep.Refusal.Unassigned ? $"The {which} password {problem}."
+                : $"The {which} password {problem} (PDF 2.0 prepares AES-256 passwords with SASLprep, RFC 4013).", paramName);
+        return prepared!;
     }
 
     /// <summary>The file key encrypted with an intermediate key: AES-256, no padding, zero IV.</summary>

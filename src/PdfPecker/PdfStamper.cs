@@ -129,6 +129,7 @@ public static class PdfStamper
     /// <exception cref="InvalidDataException">A PDF is not readable, has no pages, or decodes to more data than allowed.</exception>
     /// <exception cref="InvalidOperationException">The PDF is digitally signed and <see cref="PdfStampOptions.InvalidateSignatures"/> is not set.</exception>
     /// <exception cref="ArgumentOutOfRangeException">An option is out of range, such as a <see cref="PdfStampOptions.StampPage"/> the stamp PDF does not have.</exception>
+    /// <exception cref="ArgumentException"><see cref="PdfStampOptions.Security"/> has a password that SASLprep refuses (see <see cref="PdfSecurity.UserPassword"/>).</exception>
     /// <exception cref="NotSupportedException">A PDF uses an encryption handler other than the standard one.</exception>
     public static byte[] Stamp(byte[] pdf, byte[] stampPdf, PdfStampOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -160,6 +161,7 @@ public static class PdfStamper
     /// <exception cref="InvalidDataException">A PDF is not readable, has no pages, or decodes to more data than allowed.</exception>
     /// <exception cref="InvalidOperationException">The PDF is digitally signed and <see cref="PdfStampOptions.InvalidateSignatures"/> is not set.</exception>
     /// <exception cref="ArgumentOutOfRangeException">An option is out of range, such as a <see cref="PdfStampOptions.StampPage"/> the stamp PDF does not have.</exception>
+    /// <exception cref="ArgumentException"><see cref="PdfStampOptions.Security"/> has a password that SASLprep refuses (see <see cref="PdfSecurity.UserPassword"/>).</exception>
     /// <exception cref="NotSupportedException">A PDF uses an encryption handler other than the standard one.</exception>
     /// <exception cref="IOException">
     /// An input file cannot be read (it does not exist, for example) or the output file cannot be written.
