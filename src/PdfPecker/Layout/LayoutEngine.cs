@@ -1921,7 +1921,7 @@ internal sealed partial class LayoutEngine
                 text = text.Substring(0, end);
                 if (text.Length == 0) return;
             }
-            float tw = font.Measure(text, size) + s.LetterSpacing * text.Length;
+            float tw = font.Measure(text, size) + s.LetterSpacing * Fonts.TextFont.SpacedCharacters(text, 0, text.Length);
             // The item's direction puts the marker before its content; the marker's own direction orders its text, and
             // the suffix's space goes at the marker's end in that direction, as in Chrome: ".1Item" for a ::marker
             // { direction: rtl } in a left-to-right item, "Item1." for a left-to-right marker in a right-to-left one.
@@ -1982,7 +1982,7 @@ internal sealed partial class LayoutEngine
                 gap = (text.Length - end) * s.Font.CharWidth(' ', size);
                 text = text.Substring(0, end);
             }
-            return text.Length == 0 ? 0 : s.Font.Measure(text, size) + s.LetterSpacing * text.Length + gap;
+            return text.Length == 0 ? 0 : s.Font.Measure(text, size) + s.LetterSpacing * Fonts.TextFont.SpacedCharacters(text, 0, text.Length) + gap;
         }
         if (m.Type is not (ListStyleType.Disc or ListStyleType.Circle or ListStyleType.Square)) return 0;
         s.Font.LineMetrics(size, out float ascentPt, out _);

@@ -383,6 +383,40 @@ public class PdfToHtmlStructuredTests
         Assert.Contains("dashed #0000ff", StyleOf(html, ">5<"));
     }
 
+    [Theory]
+    [InlineData("0 0 612 792 re 36 36 540 720 re W n", true)] // nonzero, both boxes the same way: the whole page
+    [InlineData("0 0 612 792 re 36 756 m 576 756 l 576 36 l 36 36 l h W n", false)] // nonzero, the inner box reversed: a frame
+    [InlineData("0 0 612 792 re 36 36 540 720 re W* n", false)] // even-odd: a frame
+    public void Row_shading_shows_where_a_clip_of_two_boxes_lets_it_paint(string clip, bool paints)
+    {
+        // Some writers clip each page to the page and the area inside its margins at once. Under the nonzero rule the
+        // inner box, drawn the same way as the outer one, adds nothing, and the shaded rows inside it paint.
+        var content = new System.Text.StringBuilder(clip).Append('\n');
+        string[][] rows = [["Item", "Qty", "Price"], ["Apples", "3", "12.00"], ["Pears", "5", "7.50"], ["Plums", "8", "3.20"], ["Figs", "2", "9.90"]];
+        int[] columns = [76, 200, 300];
+        for (int i = 0, y = 700; i < rows.Length; i++, y -= 18)
+        {
+            if (i % 2 == 0) content.Append(FormattableString.Invariant($"0.85 g 72 {y - 5} 300 18 re f 0 g\n"));
+            for (int c = 0; c < 3; c++) content.Append(FormattableString.Invariant($"BT /F1 11 Tf {columns[c]} {y} Td ({rows[i][c]}) Tj ET\n"));
+        }
+        content.Append("BT /F1 11 Tf 72 560 Td (A paragraph after the table.) Tj ET");
+        var pdf = PdfToPdfATests.BuildPdf(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+            PdfToPdfATests.Stream(content.ToString()),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        var html = PdfToHtml.Convert(pdf, Styled);
+        HasRow(html, "Apples", "3", "12.00");
+        if (paints)
+        {
+            Assert.Contains("background:#d9d9d9;", StyleOf(html, "Item"));
+            Assert.Contains("background:#d9d9d9;", StyleOf(html, "Figs"));
+            Assert.Contains("<td>Apples</td>", html, StringComparison.Ordinal);
+        }
+        else Assert.DoesNotContain("#d9d9d9", html, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Images_are_included_when_asked_for()
     {

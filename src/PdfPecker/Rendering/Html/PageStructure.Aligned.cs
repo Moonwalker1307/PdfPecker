@@ -396,13 +396,17 @@ internal static partial class PageStructure
         {
             var left = Split(run, w => w.CenterX < cut);
             var right = Split(run, w => w.CenterX > cut);
+            // Parts side by side sit level with each other. A letter's date set on the right above the salutation, or a
+            // signature set on the right below the closing, leaves a gap down the lines too, but each is only above or
+            // below the other text and is read in its place.
+            if (!Level(left, right) || !Level(right, left)) return null;
             static double Baseline(FlowLine l) => l.Bottom - 0.2 * l.Size;
             var (few, many) = left.Count <= right.Count ? (left, right) : (right, left);
             // The cells of a table row share a baseline and, nearly always, a font size.
             int shared = few.Count(l => many.Exists(o => Math.Abs(Baseline(o) - Baseline(l)) <= 0.25 * Math.Max(l.Size, o.Size)
                 && Math.Abs(o.Size - l.Size) <= 0.1 * Math.Max(l.Size, o.Size)));
             // Lists side by side line up as a table's rows do, but a table's cells seldom start with list markers.
-            bool lists = left.Count(l => Marker(l, out _) != TextKind.Paragraph) >= 2 && right.Count(l => Marker(l, out _) != TextKind.Paragraph) >= 2;
+            bool lists = ListItems(left) >= 2 && ListItems(right) >= 2;
             if (shared > 0.3 * few.Count && !lists) return null;
             var group = new GroupBlock { Top = run.Min(l => l.Top), Left = run.Min(l => l.X0) };
             group.Parts.Add(Flow(left, body, columns: true));
@@ -414,6 +418,28 @@ internal static partial class PageStructure
 
     /// <summary>A gap this many body font sizes wide between two parts of a page sets them side by side.</summary>
     private const double SideGap = 1.5;
+
+    /// <summary>
+    /// Whether one of <paramref name="lines"/> is level with the text of <paramref name="other"/>: it overlaps one of the
+    /// stretches down the page that the other lines cover, with the space between lines no more than a line apart filled
+    /// in, by a quarter of the height of the shorter of the two or more.
+    /// </summary>
+    private static bool Level(List<FlowLine> lines, List<FlowLine> other)
+    {
+        var spans = new List<(double Top, double Bottom)>();
+        foreach (var l in other.OrderBy(l => l.Top))
+        {
+            if (spans.Count > 0 && l.Top - spans[^1].Bottom <= l.Size) spans[^1] = (spans[^1].Top, Math.Max(spans[^1].Bottom, l.Bottom));
+            else spans.Add((l.Top, l.Bottom));
+        }
+        foreach (var l in lines)
+            foreach (var (top, bottom) in spans)
+            {
+                double overlap = Math.Min(l.Bottom, bottom) - Math.Max(l.Top, top);
+                if (overlap > 0 && overlap >= 0.25 * Math.Min(l.Bottom - l.Top, bottom - top)) return true;
+            }
+        return false;
+    }
 
     /// <summary>The stretches from <paramref name="minX"/> to <paramref name="maxX"/> a line leaves empty, at least <paramref name="width"/> wide.</summary>
     private static List<(double X0, double X1)> Gaps(FlowLine line, double minX, double maxX, double width)
@@ -586,6 +612,8 @@ internal static partial class PageStructure
     /// The parts side by side, read one after the other, when a column holds a list, such as delivery terms and payment
     /// terms numbered beside a box of totals: its items start with list markers in two or more rows. Each list is a part
     /// of its own, and the columns between lists, which may still be a table, are one part. Null when no column is a list.
+    /// A column counted in letters or roman numbers is a list only when every entry is an item, as a column of names
+    /// whose initials happen to follow each other under a header is not.
     /// </summary>
     private static GroupBlock? ListColumns(List<FlowLine> run, List<List<TableCell>> rows, List<Band> bands, double body)
     {
@@ -593,8 +621,9 @@ internal static partial class PageStructure
         for (int c = 0; c < bands.Count; c++)
         {
             var entries = rows.SelectMany(r => r).Where(t => t.Column == c && t.ColumnSpan == 1 && t.Lines.Count > 0).ToList();
-            int items = entries.Count(t => Marker(t.Lines[0], out _) != TextKind.Paragraph);
-            list[c] = items >= 2 && items * 2 >= entries.Count;
+            var firsts = entries.ConvertAll(t => t.Lines[0]);
+            int items = ListItems(firsts), marked = firsts.Count(l => Marker(l, out _) != TextKind.Paragraph);
+            list[c] = items >= 2 && (items == marked ? items * 2 >= entries.Count : items == entries.Count);
         }
         if (!list.Contains(true)) return null;
         var group = new GroupBlock { Top = run.Min(l => l.Top), Left = bands[0].X0 };

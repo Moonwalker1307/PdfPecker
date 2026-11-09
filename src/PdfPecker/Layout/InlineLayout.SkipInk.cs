@@ -69,27 +69,34 @@ internal sealed partial class InlineLayout
     /// the outlines of a standard font's bundled replacement.
     /// </summary>
     internal void VisitGlyphs<T>(TextOp text, ref T visitor) where T : struct, IGlyphVisitor
+        => VisitGlyphs(text, ref visitor, _inkRuns, _inkGlyphs);
+
+    /// <summary>
+    /// Walks the glyphs of a text op as the writer draws them, with lists of the caller's for the font runs and glyphs:
+    /// the writer finds the ink of text in a transparency group this way too.
+    /// </summary>
+    internal static void VisitGlyphs<T>(TextOp text, ref T visitor, List<FontRun> inkRuns, List<ShapedGlyph> inkGlyphs) where T : struct, IGlyphVisitor
     {
         float scale = text.Size / 1000f;
         string str = text.Text;
-        _inkRuns.Clear();
-        text.Font.Split(str, _inkRuns);
+        inkRuns.Clear();
+        text.Font.Split(str, inkRuns);
         float runX = text.X;
-        for (int r = 0; r < _inkRuns.Count; r++)
+        for (int r = 0; r < inkRuns.Count; r++)
         {
-            var run = _inkRuns[text.Rtl ? _inkRuns.Count - 1 - r : r];
+            var run = inkRuns[text.Rtl ? inkRuns.Count - 1 - r : r];
             float pen = runX;
             switch (run.Font)
             {
                 case EmbeddedFont font:
                 {
-                    bool positioned = font.Shape(str, run.Start, run.Length, _inkGlyphs, text.Rtl);
-                    if (text.Rtl) _inkGlyphs.Reverse();
+                    bool positioned = font.Shape(str, run.Start, run.Length, inkGlyphs, text.Rtl);
+                    if (text.Rtl) inkGlyphs.Reverse();
                     bool kern = !positioned && font.HasKerning;
                     float glyphScale = font.SizeAdjust == 1 ? scale : scale * font.SizeAdjust;
                     float skew = font.SyntheticItalic ? SyntheticItalicSkew : 0;
                     int previous = -1;
-                    foreach (var g in _inkGlyphs)
+                    foreach (var g in inkGlyphs)
                     {
                         if (kern && previous >= 0) pen += (text.Rtl ? font.Program.Kern1000(g.Gid, previous) : font.Program.Kern1000(previous, g.Gid)) * glyphScale;
                         previous = g.Gid;

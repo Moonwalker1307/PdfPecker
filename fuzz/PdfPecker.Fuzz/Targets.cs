@@ -588,7 +588,7 @@ internal static class Targets
         => new() { Name = name, Extension = ext, Seeds = seeds, LenientDecoder = true, MaxSize = 256 * 1024, Run = (d, ct) => decode(d) };
 
     private const string FontPage =
-        "<!doctype html><body style=\"font-family:Fz;font-size:18px\"><p>Hamburgefonstiv 0123456789 fi ffl AV To Wa العربية שלום 日本語 कि</p>"
+        "<!doctype html><body style=\"font-family:Fz;font-size:18px\"><p>Hamburgefonstiv 0123456789 fi ffl AV To Wa العربية שלום 日本語 कि 葛\U000E0100辻\U000E0101侮\uFE00</p>"
         + "<p style=\"font-weight:700;font-style:italic;font-variation-settings:'wght' 700,'wdth' 75,'opsz' 14,'slnt' -10;font-feature-settings:'smcp','liga','onum','ss01','kern';font-size:30px\">Hamburgefonstiv fi ffl AV</p>"
         + "<p style=\"font-variant:super full-width jis04;font-kerning:none;font-synthesis:weight style;font-size-adjust:ex-height 0.5;font-stretch:75%\">Hamburgefonstiv 0123456789 AV To</p>"
         + "<p style=\"font-variant:small-caps;letter-spacing:2px;text-transform:uppercase;text-decoration:underline\">Ligatures and kerning: office waffle</p></body>";

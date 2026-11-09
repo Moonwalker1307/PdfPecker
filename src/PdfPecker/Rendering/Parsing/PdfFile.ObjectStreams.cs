@@ -75,7 +75,10 @@ internal sealed partial class PdfFile
         int first = GetInt(stream, "First", 0);
         // The total only grows: a stream decoded again after the cache is cleared counts again, which bounds the work too.
         if (_objectStreamBytes >= ObjectStreamBudget) throw ObjectStreamBudgetExceeded();
-        var data = DecodeStream(stream);
+        // Every page shares the stream once it is read, so it is charged to the file rather than to the page that
+        // happens to read it first, as images and fonts are charged to each page that uses them (see RenderCache).
+        byte[] data;
+        using (BeginSharedDecode()) data = DecodeStream(stream);
         _objectStreamBytes += data.Length;
         if (_objectStreamBytes > ObjectStreamBudget) throw ObjectStreamBudgetExceeded();
         var objectStream = new ObjectStream(ReadObjectTable(data, first, count, out var offsets), offsets, data, first);

@@ -408,6 +408,6 @@ internal sealed partial class StyleResolver
     /// <summary>border-spacing-h and border-spacing-v, the two halves the border-spacing shorthand expands to.</summary>
     private void ApplyBorderSpacing(ref float target, in DeclaredValue d)
     {
-        if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var spacing, _vw, _vh)) target = ToLayoutUnits(spacing.Resolve(0));
+        if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var spacing, _vw, _vh)) target = SnapBorderSpacing(spacing.Resolve(0));
     }
 }

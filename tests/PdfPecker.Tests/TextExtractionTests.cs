@@ -467,6 +467,35 @@ public class TextExtractionTests
     }
 
     [Theory]
+    [InlineData("<p style='text-align:right'>Berlin, 5 May 2024</p><p>Dear Mr Smith,</p><p>Thank you for your letter of last week. We are pleased to confirm the order and will ship it within the next ten working days, as agreed on the phone.</p><p>Kind regards,</p><p style='text-align:right'>Anna Example</p>")]
+    [InlineData("<p style='text-align:right'>Paris, 3 June 2024</p><p>Dear Madam,</p><p>We have received your letter and thank you for your trust.</p><p style='text-align:right'>The director</p><p>Copy: customer service</p>")]
+    public void A_letters_date_and_signature_are_read_in_their_place(string body)
+    {
+        // A date set on the right above the salutation, and a signature set on the right below the closing, leave a gap
+        // down the lines beside the text to their left; they were read as a part beside it, after the salutation or with
+        // the paragraph's last line before the closing.
+        var pdf = HtmlToPdf.Convert("<style>body{font:12pt serif} p{margin:0 0 9pt}</style>" + body);
+        var paragraphs = System.Text.RegularExpressions.Regex.Matches(body, "<p[^>]*>([^<]*)</p>").Select(m => m.Groups[1].Value).ToArray();
+        string Flat(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"[\s\\]+", " ");
+        var structuredHtml = PdfToHtml.Convert(pdf, new PdfHtmlOptions { Mode = PdfHtmlMode.Structured });
+        Assert.DoesNotContain("class=\"pdf-columns\"", structuredHtml, StringComparison.Ordinal);
+        var markdown = PdfToMarkdown.Convert(pdf);
+        foreach (var output in new[] { Flat(PdfText.Extract(pdf)), Flat(markdown), Flat(System.Text.RegularExpressions.Regex.Replace(structuredHtml, "<[^>]+>", " ")) })
+        {
+            int at = -1;
+            foreach (var paragraph in paragraphs)
+            {
+                int next = output.IndexOf(paragraph, StringComparison.Ordinal);
+                Assert.True(next > at, $"Out of order or missing: {paragraph}\n{output}");
+                at = next;
+            }
+        }
+        // The lines set on the right are paragraphs of their own.
+        foreach (System.Text.RegularExpressions.Match right in System.Text.RegularExpressions.Regex.Matches(body, "<p style='text-align:right'>([^<]*)</p>"))
+            Assert.Contains("\n" + right.Groups[1].Value + "\n", "\n" + markdown, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData(90, false)]
     [InlineData(90, true)]
     [InlineData(180, false)]

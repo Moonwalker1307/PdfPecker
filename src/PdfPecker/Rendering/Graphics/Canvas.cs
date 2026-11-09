@@ -49,6 +49,14 @@ internal sealed class Canvas
 
     public uint[] Pixels { get; }
 
+    /// <summary>
+    /// For the layer of a non-isolated transparency group, the canvas of the same size that the group is drawn over,
+    /// which painting does not change until the group ends. The layer holds only what the group drew, but blend modes
+    /// inside the group blend with what shows through it from below (ISO 32000-2, 11.4.8). Null for an isolated group
+    /// and the page.
+    /// </summary>
+    public Canvas? Backdrop { get; set; }
+
     // The rectangle painting has touched since the canvas was made or cleaned, empty while X1 <= X0: a transparency
     // layer is composited and cleared only there, since the rest of it is still transparent.
     public int DirtyX0 { get; private set; } = int.MaxValue;

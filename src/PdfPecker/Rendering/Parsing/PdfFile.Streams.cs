@@ -189,6 +189,50 @@ internal sealed partial class PdfFile
         }
     }
 
+    /// <summary>
+    /// Charges decoding on this thread to the file's own budget until disposed, also inside a render scope, whose budget
+    /// it then gives back untouched; cancellation still applies. It is for data that every page shares once read, such
+    /// as object streams. A page that paid for one would fit its budget or not depending on which pages read it first,
+    /// and a page whose budget had run out would leave the objects in it unreadable for every page after it.
+    /// </summary>
+    internal SharedDecodeScope BeginSharedDecode()
+    {
+        if (t_fileBudget) return default;
+        bool budgeted = t_budgeted;
+        long budget = t_decodeBudget;
+        var cancel = t_cancel;
+        t_budgeted = false;
+        var file = BeginFileBudget();
+        t_cancel = cancel;
+        return new SharedDecodeScope(file, budgeted, budget, cancel);
+    }
+
+    internal readonly struct SharedDecodeScope : IDisposable
+    {
+        private readonly FileBudgetScope _file;
+        private readonly bool _active, _budgeted;
+        private readonly long _budget;
+        private readonly CancellationToken _cancel;
+
+        public SharedDecodeScope(FileBudgetScope file, bool budgeted, long budget, CancellationToken cancel)
+        {
+            _file = file;
+            _active = true;
+            _budgeted = budgeted;
+            _budget = budget;
+            _cancel = cancel;
+        }
+
+        public void Dispose()
+        {
+            if (!_active) return;
+            _file.Dispose();
+            t_budgeted = _budgeted;
+            t_decodeBudget = _budget;
+            t_cancel = _cancel;
+        }
+    }
+
     /// <summary>Charges memory an image codec allocates against the page's decode budget, and checks for cancellation.</summary>
     internal static void ChargeDecoded(long bytes)
     {

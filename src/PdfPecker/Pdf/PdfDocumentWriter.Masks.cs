@@ -26,18 +26,23 @@ internal sealed partial class PdfDocumentWriter
         var area = new ByteBuffer(64);
         area.Num(PX(x0 - 1)).Sp().Num(PY(y1 + 1, pageTop)).Sp().Num(x1 - x0 + 2).Sp().Num(y1 - y0 + 2).Ascii(" re f");
         string rect = System.Text.Encoding.ASCII.GetString(area.Span);
+        // The bounding box of every group the mask is made of: what the layers paint, which takes in the rectangles too.
+        var painted = new List<Placed>();
+        foreach (var layer in layers)
+            foreach (var op in layer.Ops) Flatten(op, painted);
+        string box = GroupBox(painted, pageTop);
 
         byte[]? below = null;
         int belowForm = 0;
         for (int i = layers.Length - 1; i >= 0; i--)
         {
-            var paint = MaskLayerContent(layers[i], rect, pageTop, imageIds);
+            var paint = MaskLayerContent(layers[i], rect, box, pageTop, imageIds);
             if (below == null)
             {
                 below = paint;
                 continue;
             }
-            if (belowForm == 0) belowForm = AddPlainForm(below);
+            if (belowForm == 0) belowForm = AddPlainForm(below, box);
             var b = new ByteBuffer(paint.Length + 64);
             switch (layers[i].Composite)
             {
@@ -47,28 +52,28 @@ internal sealed partial class PdfDocumentWriter
                 // The layer is a group of its own under the mask below: a soft mask it sets itself (a gradient's alphas)
                 // would otherwise replace that mask in the graphics state rather than add to it.
                 case MaskComposite.Intersect:
-                    b.Ascii("q /s").Int(AddMaskForm(FormDo(belowForm), alpha: true)).Ascii(" gs /Fx").Int(AddPlainForm(paint)).Ascii(" Do Q\n");
+                    b.Ascii("q /s").Int(AddMaskForm(FormDo(belowForm), alpha: true, box)).Ascii(" gs /Fx").Int(AddPlainForm(paint, box)).Ascii(" Do Q\n");
                     break;
                 case MaskComposite.Subtract:
-                    b.Ascii("q /s").Int(InverseMask(belowForm, rect)).Ascii(" gs /Fx").Int(AddPlainForm(paint)).Ascii(" Do Q\n");
+                    b.Ascii("q /s").Int(InverseMask(belowForm, rect, box)).Ascii(" gs /Fx").Int(AddPlainForm(paint, box)).Ascii(" Do Q\n");
                     break;
                 default:
                 {
                     // Exclude: the layer where the mask below is not, and the mask below where the layer is not.
-                    int layerForm = AddPlainForm(paint);
-                    b.Ascii("q /s").Int(InverseMask(belowForm, rect)).Ascii(" gs /Fx").Int(layerForm).Ascii(" Do Q\n");
-                    b.Ascii("q /s").Int(InverseMask(layerForm, rect)).Ascii(" gs /Fx").Int(belowForm).Ascii(" Do Q\n");
+                    int layerForm = AddPlainForm(paint, box);
+                    b.Ascii("q /s").Int(InverseMask(belowForm, rect, box)).Ascii(" gs /Fx").Int(layerForm).Ascii(" Do Q\n");
+                    b.Ascii("q /s").Int(InverseMask(layerForm, rect, box)).Ascii(" gs /Fx").Int(belowForm).Ascii(" Do Q\n");
                     break;
                 }
             }
             below = b.Span.ToArray();
             belowForm = 0;
         }
-        return AddMaskForm(below!, alpha: true);
+        return AddMaskForm(below!, alpha: true, box);
     }
 
     /// <summary>What one mask layer paints, as a stream whose alpha is the layer's mask values.</summary>
-    private byte[] MaskLayerContent(MaskLayerOps layer, string rect, float pageTop, Dictionary<PdfImage, int> imageIds)
+    private byte[] MaskLayerContent(MaskLayerOps layer, string rect, string box, float pageTop, Dictionary<PdfImage, int> imageIds)
     {
         var ops = new List<Placed>();
         foreach (var op in layer.Ops) Flatten(op, ops);
@@ -94,19 +99,19 @@ internal sealed partial class PdfDocumentWriter
         RestoreState(saved);
         if (!layer.Luminance) return content.Span.ToArray();
         // Luminance: black painted through a luminosity mask of the layer has the layer's luminance as its alpha.
-        int lum = AddMaskForm(content.Span.ToArray(), alpha: false);
+        int lum = AddMaskForm(content.Span.ToArray(), alpha: false, box);
         var b = new ByteBuffer(96);
         b.Ascii("q /s").Int(lum).Ascii(" gs 0 g ").Ascii(rect).Ascii(" Q\n");
         return b.Span.ToArray();
     }
 
     /// <summary>A luminosity mask that is one minus the alpha of the form numbered <paramref name="form"/>.</summary>
-    private int InverseMask(int form, string rect)
+    private int InverseMask(int form, string rect, string box)
     {
-        int alpha = AddMaskForm(FormDo(form), alpha: true);
+        int alpha = AddMaskForm(FormDo(form), alpha: true, box);
         var b = new ByteBuffer(160);
         b.Ascii("1 g ").Ascii(rect).Ascii("\nq /s").Int(alpha).Ascii(" gs 0 g ").Ascii(rect).Ascii(" Q\n");
-        return AddMaskForm(b.Span.ToArray(), alpha: false);
+        return AddMaskForm(b.Span.ToArray(), alpha: false, box);
     }
 
     private static byte[] FormDo(int form)
@@ -117,18 +122,22 @@ internal sealed partial class PdfDocumentWriter
     }
 
     /// <summary>Adds a transparency group that only mask streams draw, and returns its /Fx number.</summary>
-    private int AddPlainForm(byte[] content)
+    private int AddPlainForm(byte[] content, string box)
     {
+        _formBoxes[_forms.Count] = box;
         _forms.Add(content);
         _formIsolated.Add(false);
         _formStreams.Add(null);
         return _forms.Count;
     }
 
-    /// <summary>Adds a soft mask, alpha or luminosity, whose group draws <paramref name="content"/>; returns its /s number.</summary>
-    private int AddMaskForm(byte[] content, bool alpha)
+    /// <summary>
+    /// Adds a soft mask, alpha or luminosity, whose group draws <paramref name="content"/> inside <paramref name="box"/>;
+    /// returns its /s number. Outside its box a mask is 0, as it is where its group paints nothing (its backdrop is black).
+    /// </summary>
+    private int AddMaskForm(byte[] content, bool alpha, string box = PlaneBox)
     {
-        string dict = "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] /Group << /S /Transparency /CS /DeviceRGB >> /Resources "
+        string dict = "/Type /XObject /Subtype /Form /BBox " + box + " /Group << /S /Transparency /CS /DeviceRGB >> /Resources "
             + _resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R";
         _masks.Add((content, dict, alpha));
         return _masks.Count;

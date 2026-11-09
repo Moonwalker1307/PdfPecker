@@ -125,6 +125,75 @@ public class PdfToMarkdownTests
         Assert.Contains("**Card 1**\n\nSome words that describe the card and wrap onto a second line of text.\n\n**Card 2**", md, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("table{border-spacing:6px} td,th{border:1px solid #000}")]
+    [InlineData("table{border-spacing:4px} td,th{border:2px dashed #333}")]
+    [InlineData("table{border-spacing:6px} td,th{border:2px inset #333}")]
+    [InlineData("table{border-spacing:3px} td,th{border:3px solid #333}")]
+    [InlineData("table{border-spacing:10px} td,th{border:3px solid #333}")]
+    public void A_table_with_wide_border_spacing_is_a_table(string css)
+    {
+        var md = Md($"<style>body{{font-family:sans-serif;font-size:11pt}} td,th{{padding:2px 4px}} {css}</style><table><tr><th>Name</th><th>Value</th><th>Note</th></tr>"
+            + "<tr><td>Alpha</td><td>1</td><td>first entry</td></tr><tr><td>Beta</td><td>22</td><td>second one</td></tr><tr><td>Gamma</td><td>333</td><td>third</td></tr></table>");
+        Assert.Equal("| Name | Value | Note |\n| --- | --- | --- |\n| Alpha | 1 | first entry |\n| Beta | 22 | second one |\n| Gamma | 333 | third |\n", md);
+    }
+
+    [Fact]
+    public void Boxes_set_apart_are_a_table_only_when_they_fill_the_grid()
+    {
+        // Samples in a row, set as far apart as the cells of a table with wide border spacing, with one more under the
+        // first: no box stands beside it, so they are not the cells of a table.
+        var md = Md("<style>body{font-family:sans-serif;font-size:9pt} .s{display:flex;flex-wrap:wrap;gap:8px;width:300px} .s div{border:2px solid #444;width:70px;height:40px;padding:2px}</style>"
+            + "<div class='s'><div>round</div><div>bevel</div><div>scoop</div><div>mixed</div></div><p>After the samples.</p>");
+        Assert.Equal("round bevel scoop\n\nmixed\n\nAfter the samples.\n", md);
+    }
+
+    [Fact]
+    public void A_table_of_bordered_fields_keeps_its_header()
+    {
+        // The fields in the cells are boxes as far apart as wide border spacing sets cells; the table around them is
+        // read whole, with its header row.
+        var md = Md("<style>body{font-family:sans-serif;font-size:9pt} table{border-collapse:collapse;width:100%} th,td{border:0.5pt solid #aaa;padding:2pt;text-align:left} .f{border:0.5pt solid #888;padding:2pt;height:11pt}</style>"
+            + "<table><tr><th>Employer</th><th>From</th><th>To</th><th>Role</th></tr><tr><td><div class='f'>Example Ltd.</div></td><td><div class='f'>2015</div></td><td><div class='f'>2019</div></td><td><div class='f'>Developer</div></td></tr>"
+            + string.Concat(Enumerable.Repeat("<tr><td><div class='f'></div></td><td><div class='f'></div></td><td><div class='f'></div></td><td><div class='f'></div></td></tr>", 2)) + "</table>");
+        Assert.Equal("| Employer | From | To | Role |\n| --- | --- | --- | --- |\n| Example Ltd. | 2015 | 2019 | Developer |\n|  |  |  |  |\n|  |  |  |  |\n", md);
+    }
+
+    [Fact]
+    public void A_hint_under_a_field_stays_out_of_the_fields_cell()
+    {
+        // Rows that each draw a box, with a framed field in each: the top and bottom of a field end where its own sides
+        // are, which is no sign of a column boundary in the rows around it.
+        var md = Md("<style>body{font-family:sans-serif;font-size:12px} .row{display:grid;grid-template-columns:100px 1fr 40px;column-gap:4px;border:1px solid #ddd;padding:3px 6px;margin-bottom:4px;align-items:baseline} .in{border:1px solid #aaa;padding:2px 4px} .hint{grid-column:2/4;font-size:10px}</style>"
+            + "<div class='row'><b>Name</b><div class='in'>Ada Lovelace</div><span>required</span></div><div class='row'><b>Organisation</b><div class='in'>Analytical Engines Ltd</div><span></span></div>"
+            + "<div class='row'><b>Amount</b><div class='in'>1 024,00</div><span>kr</span><div class='hint'>The hint sits under the field and the unit.</div></div>");
+        Assert.Equal("|  |  |  |\n| --- | --- | --- |\n| **Name** | Ada Lovelace | required |\n| **Organisation** | Analytical Engines Ltd |  |\n| **Amount** | 1 024,00 | kr |\n\n"
+            + "The hint sits under the field and the unit.\n", md);
+    }
+
+    [Fact]
+    public void Lists_counted_in_letters_side_by_side_are_read_one_after_the_other()
+    {
+        var md = Md("<style>body{font-family:sans-serif;font-size:10pt} .lists{display:flex;gap:4mm} .lists>*{margin:0}</style>"
+            + "<div class='lists'><ol type='A'><li>type A</li><li>second</li></ol><ol type='i' start='3'><li>roman from three</li><li>four</li></ol></div>");
+        Assert.Equal("A. type A\n\nB. second\n\niii. roman from three\n\niv. four\n", md);
+    }
+
+    [Fact]
+    public void Each_item_of_a_list_counted_in_letters_is_a_paragraph()
+    {
+        var md = Md("<style>body{font-family:sans-serif;font-size:10pt}</style><p>Choose one:</p><ol type='a'><li>the first way</li><li>the second way</li><li>the third way</li></ol><p>Then go on.</p>");
+        Assert.Equal("Choose one:\n\na. the first way\n\nb. the second way\n\nc. the third way\n\nThen go on.\n", md);
+    }
+
+    [Fact]
+    public void A_column_of_names_whose_initials_follow_each_other_is_still_a_table()
+    {
+        var md = Md("<style>body{font-family:sans-serif;font-size:11pt} td,th{padding:2px 12px;text-align:left}</style><table><tr><th>Name</th><th>Score</th><th>Team</th></tr>"
+            + "<tr><td>A. Smith</td><td>12</td><td>North</td></tr><tr><td>B. Jones</td><td>9</td><td>South</td></tr><tr><td>C. Brown</td><td>7</td><td>East</td></tr></table>");
+        Assert.Equal("| Name | Score | Team |\n| --- | --- | --- |\n| A. Smith | 12 | North |\n| B. Jones | 9 | South |\n| C. Brown | 7 | East |\n", md);
+    }
+
     [Fact]
     public void A_borderless_table_with_lower_case_values_is_a_table()
     {

@@ -138,15 +138,20 @@ internal sealed partial class PageRenderer
         else if (dx <= 0.5 && dy >= 2) rules.AddRule(new PageRule(false, (ax + bx) / 2, Math.Min(ay, by), Math.Max(ay, by), Color: color, Width: width, Dashed: dashed));
     }
 
-    /// <summary>The clip boxes in force with those of the current path's subpaths added, at most a few dozen levels.</summary>
-    private (double X0, double Y0, double X1, double Y1)[][]? AddClipBoxes((double X0, double Y0, double X1, double Y1)[][]? boxes)
+    /// <summary>
+    /// The clip boxes in force with those of the current path's subpaths added, at most a few dozen levels. The boxes are
+    /// read under the even-odd rule; a clip under the nonzero rule is turned into boxes that paint the same.
+    /// </summary>
+    private (double X0, double Y0, double X1, double Y1)[][]? AddClipBoxes((double X0, double Y0, double X1, double Y1)[][]? boxes, bool evenOdd)
     {
         if (_path.IsEmpty || boxes is { Length: >= 32 }) return boxes;
         var ctm = _gs.Ctm;
         var verbs = _path.Verbs;
         var pts = _path.Points;
-        var level = new List<(double, double, double, double)>();
+        var level = new List<(double X0, double Y0, double X1, double Y1)>();
+        var turns = new List<int>(); // which way each subpath runs, from the sign of its area
         double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        double sx = 0, sy = 0, lx = 0, ly = 0, area = 0; // the subpath's start, its last point and twice its area
         int pi = 0;
         bool open = false;
         for (int i = 0; i <= verbs.Count; i++)
@@ -155,21 +160,75 @@ internal sealed partial class PageRenderer
             int count = verb switch { PathData.MoveTo or PathData.LineTo => 1, PathData.CubicTo => 3, _ => 0 };
             if (verb == PathData.MoveTo)
             {
-                if (open && level.Count < 64) level.Add((x0, y0, x1, y1));
+                if (open && level.Count < 64)
+                {
+                    level.Add((x0, y0, x1, y1));
+                    area += lx * sy - sx * ly;
+                    turns.Add(Math.Sign(area));
+                }
                 if (i == verbs.Count) break;
                 open = false;
             }
             for (int k = 0; k < count; k++, pi += 2)
             {
                 var (px, py) = ctm.Apply(pts[pi], pts[pi + 1]);
-                if (!open) { (x0, y0, x1, y1) = (px, py, px, py); open = true; }
-                else { x0 = Math.Min(x0, px); y0 = Math.Min(y0, py); x1 = Math.Max(x1, px); y1 = Math.Max(y1, py); }
+                if (!open) { (x0, y0, x1, y1) = (px, py, px, py); (sx, sy) = (px, py); area = 0; open = true; }
+                else
+                {
+                    x0 = Math.Min(x0, px); y0 = Math.Min(y0, py); x1 = Math.Max(x1, px); y1 = Math.Max(y1, py);
+                    area += lx * py - px * ly;
+                }
+                (lx, ly) = (px, py);
             }
         }
         if (level.Count == 0) return boxes;
+        if (!evenOdd && level.Count >= 2) level = NonzeroBoxes(level, turns);
         var result = new (double, double, double, double)[(boxes?.Length ?? 0) + 1][];
         boxes?.CopyTo(result, 0);
         result[^1] = level.ToArray();
+        return result;
+    }
+
+    /// <summary>
+    /// The boxes that paint, under the even-odd rule, what the subpath boxes of a clip under the nonzero rule paint: a box
+    /// inside another that runs the same way adds nothing, and one that runs the other way cuts a hole. Where two boxes
+    /// overlap without one holding the other, the boxes are left as they are.
+    /// </summary>
+    private static List<(double X0, double Y0, double X1, double Y1)> NonzeroBoxes(List<(double X0, double Y0, double X1, double Y1)> boxes, List<int> turns)
+    {
+        int n = boxes.Count;
+        static double Area((double X0, double Y0, double X1, double Y1) b) => (b.X1 - b.X0) * (b.Y1 - b.Y0);
+        // Each box's parent: the smallest box that holds it, where of equal boxes the earlier holds the later.
+        var parent = new int[n];
+        for (int i = 0; i < n; i++)
+        {
+            parent[i] = -1;
+            var b = boxes[i];
+            for (int k = 0; k < n; k++)
+            {
+                if (k == i) continue;
+                var a = boxes[k];
+                bool holds = a.X0 <= b.X0 && a.Y0 <= b.Y0 && a.X1 >= b.X1 && a.Y1 >= b.Y1;
+                bool held = b.X0 <= a.X0 && b.Y0 <= a.Y0 && b.X1 >= a.X1 && b.Y1 >= a.Y1;
+                if (holds && held) holds = k < i;
+                if (holds)
+                {
+                    if (parent[i] < 0 || Area(a) < Area(boxes[parent[i]]) || Area(a) == Area(boxes[parent[i]]) && k > parent[i]) parent[i] = k;
+                }
+                else if (!held && Math.Min(a.X1, b.X1) > Math.Max(a.X0, b.X0) && Math.Min(a.Y1, b.Y1) > Math.Max(a.Y0, b.Y0)) return boxes;
+            }
+        }
+        // The winding number inside each box, outer boxes first; a box stays where it paints otherwise than its parent.
+        var order = Enumerable.Range(0, n).OrderByDescending(i => Area(boxes[i])).ThenBy(i => i).ToList();
+        var winding = new int[n];
+        var result = new List<(double X0, double Y0, double X1, double Y1)>(n);
+        var keep = new bool[n];
+        foreach (int i in order)
+        {
+            winding[i] = turns[i] + (parent[i] >= 0 ? winding[parent[i]] : 0);
+            keep[i] = (winding[i] != 0) != (parent[i] >= 0 && winding[parent[i]] != 0);
+        }
+        for (int i = 0; i < n; i++) if (keep[i]) result.Add(boxes[i]);
         return result;
     }
 }
