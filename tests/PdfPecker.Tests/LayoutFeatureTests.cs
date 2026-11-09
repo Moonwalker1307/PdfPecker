@@ -357,6 +357,30 @@ public class LayoutFeatureTests
         Near(secondRow, Box(ops, "#00ff00").H);
     }
 
+    [Theory]
+    [InlineData("width:300pt; grid-template-columns:1fr 2fr", "", 280, "", 100, 200)]
+    [InlineData("width:300pt; grid-template-columns:auto 1fr", "", 280, "width:20pt", 20, 280)]
+    [InlineData("width:300pt; grid-template-columns:1fr 2fr", "min-width:360pt", 10, "", 120, 240)]
+    [InlineData("width:300pt; grid-template-columns:auto 1fr", "min-width:330pt", 10, "width:20pt", 20, 310)]
+    [InlineData("float:left; grid-template-columns:1fr 2fr", "", 90, "", 30, 60)]
+    [InlineData("float:left; grid-template-columns:auto 1fr", "", 90, "width:20pt", 20, 70)]
+    public void An_item_spanning_flexible_columns_shares_its_width_by_their_fr(string grid, string span, float content, string first,
+        float firstColumn, float secondColumn)
+    {
+        // An item that spans an fr column has no automatic minimum (CSS Grid §6.6): in a grid of known width only its
+        // min-width grows the fr columns it crosses, by their fr, and its content widens neither them nor an auto
+        // column; a grid measured for its own width shares the item's width by the fr. Chrome draws all of these so.
+        var ops = Layout($"""
+            <div style="display:grid; {grid}">
+              <div style="grid-column:span 2; height:10pt; {span}"><div style="width:{content}pt"></div></div>
+              <div style="height:10pt; background:#ff0000; {first}"></div>
+              <div style="height:10pt; background:#00ff00"></div>
+            </div>
+            """);
+        Near(firstColumn, Box(ops, "#ff0000").W);
+        Near(secondColumn, Box(ops, "#00ff00").W);
+    }
+
     [Fact]
     public void Wrapping_column_flex_box_starts_a_new_column_when_full()
     {

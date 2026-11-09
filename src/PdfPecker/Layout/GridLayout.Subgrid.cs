@@ -106,11 +106,12 @@ internal sealed partial class LayoutEngine
     /// <summary>
     /// The items' contributions to the column tracks, in this grid's lines: an item's intrinsic widths with its
     /// margins, or for a column subgrid its items' contributions mapped through its edges. <paramref name="minimums"/>
-    /// gets each contribution's minimum contribution, in the same order (see <see cref="MinimumContribution"/>).
+    /// gets each contribution's minimum contribution, in the same order (see <see cref="MinimumContribution"/>), and
+    /// <paramref name="flexMinimums"/> the minimum contribution it has if it spans a flexible track.
     /// </summary>
     private void ColumnContributions(List<BoxItem> items, float basisW, float gap, Dictionary<string, List<int>>? colNames,
         Dictionary<string, List<int>>? rowNames, List<(int, int, float, float)> max, List<(int, int, float, float)>? min, int depth,
-        List<float>? minimums = null)
+        List<float>? minimums = null, List<float>? flexMinimums = null)
     {
         foreach (var it in items)
         {
@@ -124,14 +125,18 @@ internal sealed partial class LayoutEngine
                 MapSubgridContributions(subMax, max, it.Col, it.ColSpan, insetL, insetR, (subGap - gap) / 2);
                 if (min != null) MapSubgridContributions(subMin!, min, it.Col, it.ColSpan, insetL, insetR, (subGap - gap) / 2);
                 // A subgrid's items keep their min-content contributions.
-                if (minimums != null)
-                    for (int k = mapped; k < max.Count; k++) minimums.Add(max[k].Item3);
+                for (int k = mapped; k < max.Count; k++)
+                {
+                    minimums?.Add(max[k].Item3);
+                    flexMinimums?.Add(max[k].Item3);
+                }
                 continue;
             }
             var (mn, mx) = ItemIntrinsic(it);
             max.Add((it.Col, it.ColSpan, mn + it.Ml + it.Mr, mx + it.Ml + it.Mr));
             min?.Add((it.Col, it.ColSpan, mn + it.Ml + it.Mr, mn + it.Ml + it.Mr));
             minimums?.Add(MinimumContribution(it, mn) + it.Ml + it.Mr);
+            flexMinimums?.Add(FlexibleSpanMinimum(it, it.Style.MinWidth, HorizontalFrame(it.Style, 0)) + it.Ml + it.Mr);
         }
     }
 
