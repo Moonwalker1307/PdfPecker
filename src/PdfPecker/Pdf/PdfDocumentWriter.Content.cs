@@ -368,17 +368,25 @@ internal sealed partial class PdfDocumentWriter
         var pageMc = _mc;
         if (pageMc != null) _mc = new McStream(pageMc.Page);
         var streamSpace = StartStreamSpace();
+        bool outerBlends = _streamBlends;
+        _streamBlends = false;
         WriteLayerContent(group, tb, pageTop, imageIds);
         EndText(group);
         EndMarked(group);
         _streamSpace = streamSpace;
+        // The pixels of a filter or a filtered backdrop reach beyond the layer's ops.
+        if (tb.Layer.Raster == null && tb.Layer.Backdrop == null) _formBoxes[_forms.Count] = GroupBox(tb.Items, pageTop);
         _forms.Add(group.Span.ToArray());
-        _formIsolated.Add(tb.Layer.BlendMode != null || tb.Layer.Isolated);
+        // A translucent or masked box is a stacking context, which CSS isolates: what blends inside it blends only with
+        // the rest of its content. Without blending inside, a non-isolated group looks the same and keeps its bytes.
+        _formIsolated.Add(tb.Layer.BlendMode != null || tb.Layer.Isolated || _streamBlends);
+        _streamBlends = outerBlends;
         _formStreams.Add(_mc);
         _mc = pageMc;
         int alpha = (int)MathF.Round(Math.Clamp(tb.Layer.Opacity, 0, 1) * 255);
         if (tb.Layer.BlendMode is { } blend)
         {
+            _streamBlends = true;
             _blendStates.Add((alpha, blend));
             b.Ascii("/g").Int(alpha).Ascii(blend);
         }

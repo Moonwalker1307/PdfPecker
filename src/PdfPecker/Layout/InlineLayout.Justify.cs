@@ -204,14 +204,8 @@ internal sealed partial class InlineLayout
 
     private const float JustifyTolerance = 0.001f;
 
-    /// <summary>The characters of an item that letter spacing moves: each surrogate pair once.</summary>
-    private static int Glyphs(Item it)
-    {
-        int count = it.Length;
-        for (int i = it.Start, end = it.Start + it.Length - 1; i < end; i++)
-            if (char.IsHighSurrogate(it.Source[i]) && char.IsLowSurrogate(it.Source[i + 1])) count--;
-        return count;
-    }
+    /// <summary>The characters of an item that letter spacing moves: each surrogate pair once, and no hidden ones.</summary>
+    private static int Glyphs(Item it) => TextFont.SpacedCharacters(it.Source, it.Start, it.Length);
 
     /// <summary>
     /// Chrome's justification context: whether the character before had an opportunity after it, and what kind of

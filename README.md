@@ -280,6 +280,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, contextual alternates
   (as Chrome applies them, such as Fira Code's ligatures), variable fonts and OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
   versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, with the default palette.
+  Variation sequences pick the glyph the font gives them (cmap format 14), such as the forms of a CJK ideograph that
+  ideographic variation selectors choose, and copy as written.
   `@font-face` takes `size-adjust`, `ascent-override`, `descent-override` and `line-gap-override`, so a fallback face
   can be sized to match a web font. `FontCollection.AddDeferred` registers a font that is read only when a document
   uses it, with a `unicode-range` so that fallback skips it for other characters, which suits large CJK fonts.

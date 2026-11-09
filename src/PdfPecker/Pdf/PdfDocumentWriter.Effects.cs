@@ -293,26 +293,168 @@ internal sealed partial class PdfDocumentWriter
                 foreach (var o in layer.Ops) Bounds(o, ref lx0, ref ly0, ref lx1, ref ly1);
                 if (!(lx1 > lx0 && ly1 > ly0)) break;
                 if (layer.Raster is { } inner) { lx0 += inner.X; ly0 += inner.Y; lx1 += inner.X + inner.W; ly1 += inner.Y + inner.H; }
-                if (layer.Transform is { } m)
-                {
-                    // The corners about the transform origin.
-                    float tx0 = float.MaxValue, ty0 = float.MaxValue, tx1 = float.MinValue, ty1 = float.MinValue;
-                    foreach (var (cx, cy) in new[] { (lx0, ly0), (lx1, ly0), (lx0, ly1), (lx1, ly1) })
-                    {
-                        float px = cx - layer.OriginX, py = cy - layer.OriginY;
-                        m.Apply(ref px, ref py);
-                        px += layer.OriginX;
-                        py += layer.OriginY;
-                        tx0 = Math.Min(tx0, px); ty0 = Math.Min(ty0, py); tx1 = Math.Max(tx1, px); ty1 = Math.Max(ty1, py);
-                    }
-                    (lx0, ly0, lx1, ly1) = (tx0, ty0, tx1, ty1);
-                }
+                if (layer.Transform is { } m) Transformed(layer, m, ref lx0, ref ly0, ref lx1, ref ly1);
                 Add(lx0, ly0, lx1 - lx0, ly1 - ly0, ref x0, ref y0, ref x1, ref y1);
                 break;
             }
             case GroupOp g:
                 foreach (var o in g.Ops) Bounds(o, ref x0, ref y0, ref x1, ref y1);
                 break;
+        }
+    }
+
+    /// <summary>The box round the four corners of a box that the layer's transform turns about its origin.</summary>
+    private static void Transformed(LayerOp layer, Matrix m, ref float x0, ref float y0, ref float x1, ref float y1)
+    {
+        float tx0 = float.MaxValue, ty0 = float.MaxValue, tx1 = float.MinValue, ty1 = float.MinValue;
+        foreach (var (cx, cy) in new[] { (x0, y0), (x1, y0), (x0, y1), (x1, y1) })
+        {
+            float px = cx - layer.OriginX, py = cy - layer.OriginY;
+            m.Apply(ref px, ref py);
+            px += layer.OriginX;
+            py += layer.OriginY;
+            tx0 = Math.Min(tx0, px); ty0 = Math.Min(ty0, py); tx1 = Math.Max(tx1, px); ty1 = Math.Max(ty1, py);
+        }
+        (x0, y0, x1, y1) = (tx0, ty0, tx1, ty1);
+    }
+
+    // The font runs and glyphs of a text op whose ink PaintBounds measures.
+    private readonly List<FontRun> _inkRuns = new();
+    private readonly List<ShapedGlyph> _inkGlyphs = new();
+
+    /// <summary>
+    /// Grows the rectangle, in flow coordinates, to take in everything the placed items can paint: the bounding box of
+    /// the transparency group or soft mask that draws them. A viewer gives a group a buffer of that size, so a box the
+    /// size of the plane costs a page-sized buffer for every small translucent box. Returns false when it is not known:
+    /// a filter or a backdrop filter paints pixels beyond what its content covers.
+    /// </summary>
+    private bool PaintBounds(List<Placed> items, ref float x0, ref float y0, ref float x1, ref float y1)
+    {
+        foreach (var item in items)
+        {
+            switch (item.Op)
+            {
+                case LinkOp:
+                    break;
+                case LayerBlock lb:
+                {
+                    var layer = lb.Layer;
+                    if (layer.Raster != null || layer.Backdrop != null || layer.Transform3D != null) return false;
+                    float lx0 = float.MaxValue, ly0 = float.MaxValue, lx1 = float.MinValue, ly1 = float.MinValue;
+                    if (!PaintBounds(lb.Items, ref lx0, ref ly0, ref lx1, ref ly1)) return false;
+                    if (!(lx1 > lx0 && ly1 > ly0)) break;
+                    if (layer.Transform is { } m) Transformed(layer, m, ref lx0, ref ly0, ref lx1, ref ly1);
+                    Grow(lx0, ly0, lx1, ly1, ref x0, ref y0, ref x1, ref y1);
+                    break;
+                }
+                case ClipBlock cb:
+                {
+                    float cx0 = float.MaxValue, cy0 = float.MaxValue, cx1 = float.MinValue, cy1 = float.MinValue;
+                    if (!PaintBounds(cb.Items, ref cx0, ref cy0, ref cx1, ref cy1)) return false;
+                    // The clip's edges are snapped to whole pixels.
+                    var c = cb.Clip;
+                    Grow(Math.Max(cx0, c.X - 1), Math.Max(cy0, c.Y - 1), Math.Min(cx1, c.X + c.W + 1), Math.Min(cy1, c.Y + c.H + 1),
+                        ref x0, ref y0, ref x1, ref y1);
+                    break;
+                }
+                case FieldBlock fb:
+                    if (!PaintBounds(fb.Items, ref x0, ref y0, ref x1, ref y1)) return false;
+                    break;
+                case TextOp t:
+                {
+                    // The generous box of the whole run, and each glyph's own box where shaping moved it further.
+                    var ink = new GlyphBoxes { Op = t, X0 = float.MaxValue, Y0 = float.MaxValue, X1 = float.MinValue, Y1 = float.MinValue };
+                    Bounds(t, ref ink.X0, ref ink.Y0, ref ink.X1, ref ink.Y1);
+                    InlineLayout.VisitGlyphs(t, ref ink, _inkRuns, _inkGlyphs);
+                    // The outline, and the stroke that widens a synthetic bold, reach out past the glyphs.
+                    float grow = t.StrokeWidth + t.Size * 0.1f;
+                    Grow(ink.X0 - grow, ink.Y0 - grow, ink.X1 + grow, ink.Y1 + grow, ref x0, ref y0, ref x1, ref y1);
+                    break;
+                }
+                case PathOp path:
+                {
+                    // Corners are mitred, up to the default limit of ten half widths.
+                    float grow = path.StrokeWidth * 5;
+                    Grow(path.X0 - grow, path.Y0 - grow, path.X1 + grow, path.Y1 + grow, ref x0, ref y0, ref x1, ref y1);
+                    break;
+                }
+                case RectOp or BorderRectOp or RoundRectOp or BackgroundOp or LineOp or ImageOp or SvgOp or CircleOp:
+                    Bounds(item.Op, ref x0, ref y0, ref x1, ref y1);
+                    break;
+                default:
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    private static void Grow(float ax0, float ay0, float ax1, float ay1, ref float x0, ref float y0, ref float x1, ref float y1)
+    {
+        if (!(ax1 > ax0 && ay1 > ay0)) return;
+        x0 = Math.Min(x0, ax0); y0 = Math.Min(y0, ay0);
+        x1 = Math.Max(x1, ax1); y1 = Math.Max(y1, ay1);
+    }
+
+    /// <summary>
+    /// The bounding box of a group that draws the items, as the PDF array of its form in the stream's space: what they
+    /// paint, grown by two points and out to whole points for the pixels a viewer touches at the edges. The plane when
+    /// that is not known, or when they paint nothing, which keeps such a group as it was.
+    /// </summary>
+    private string GroupBox(List<Placed> items, float pageTop)
+    {
+        float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
+        if (!PaintBounds(items, ref x0, ref y0, ref x1, ref y1) || !(x1 > x0 && y1 > y0)) return PlaneBox;
+        var b = new ByteBuffer(64);
+        b.Ascii("[").Num(MathF.Floor(PX(x0 - 2))).Sp().Num(MathF.Floor(PY(y1 + 2, pageTop))).Sp()
+            .Num(MathF.Ceiling(PX(x1 + 2))).Sp().Num(MathF.Ceiling(PY(y0 - 2, pageTop))).Ascii("]");
+        return System.Text.Encoding.ASCII.GetString(b.Span);
+    }
+
+    /// <summary>The bounding box that takes in the whole plane, for content whose ink is not known.</summary>
+    private const string PlaneBox = "[-32767 -32767 32767 32767]";
+
+    /// <summary>
+    /// Grows a box, in flow coordinates, round each glyph of a text op: the font's bounding box at the glyph's origin,
+    /// raised as shaping raised it, and never less than the generous box <see cref="Bounds"/> gives text, in case a
+    /// font's box is wrong.
+    /// </summary>
+    private struct GlyphBoxes : InlineLayout.IGlyphVisitor
+    {
+        public TextOp Op;
+        public float X0, Y0, X1, Y1;
+
+        public void Glyph(FontProgram program, int gid, string text, int start, float x, float dy, float skew, float scale)
+        {
+            float em = program.UnitsPerEm;
+            Add(x, dy, program.XMin / em, program.YMin / em, program.XMax / em, program.YMax / em, program.Advance1000(gid) / 1000f, skew,
+                Op.Size * scale);
+        }
+
+        public void Glyph(StandardFont font, char c, string text, int start, float x) => Add(x, 0, 0, 0, 0, 0, font.CharWidth(c, 1), 0, Op.Size);
+
+        private void Add(float x, float dy, float left, float bottom, float right, float top, float advance, float skew, float size)
+        {
+            if (!(size > 0)) return;
+            left = Math.Min(left, -0.5f);
+            right = Math.Max(right, advance + 0.5f);
+            bottom = Math.Min(bottom, -0.5f);
+            top = Math.Max(top, 1.25f);
+            // A synthetic italic slants the glyph right above the baseline and left below it.
+            right += skew * top;
+            left += skew * bottom;
+            X0 = Math.Min(X0, x + left * size);
+            X1 = Math.Max(X1, x + right * size);
+            // Text drawn upside down about its baseline has its ink, and its raise, on the other side.
+            if (Op.UpsideDown)
+            {
+                Y0 = Math.Min(Y0, Op.Baseline + dy + bottom * size);
+                Y1 = Math.Max(Y1, Op.Baseline + dy + top * size);
+            }
+            else
+            {
+                Y0 = Math.Min(Y0, Op.Baseline - dy - top * size);
+                Y1 = Math.Max(Y1, Op.Baseline - dy - bottom * size);
+            }
         }
     }
 }

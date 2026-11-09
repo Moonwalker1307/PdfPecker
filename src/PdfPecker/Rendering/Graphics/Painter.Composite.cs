@@ -24,7 +24,7 @@ internal sealed partial class Painter
             Shader.Shade(y, x0, shaded);
         }
 
-        if (Blend != BlendMode.Normal) CompositeBlended(pixels, coverage, clipMask, softMask, shaded);
+        if (Blend != BlendMode.Normal) CompositeBlended(pixels, coverage, clipMask, softMask, shaded, Below(y, x0, count));
         else if (clipMask.IsEmpty && softMask.IsEmpty && Alpha == FullCoverage)
         {
             if (shaded.IsEmpty && Color >> 24 == 255) CompositeOpaqueSolid(pixels, coverage);
@@ -52,18 +52,41 @@ internal sealed partial class Painter
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static uint ToScaleFactor(int coverage) => (uint)(coverage + (coverage >> 7));
 
-    private void CompositeBlended(Span<uint> pixels, ReadOnlySpan<byte> coverage, ReadOnlySpan<byte> clipMask, ReadOnlySpan<byte> softMask, ReadOnlySpan<uint> shaded)
+    /// <summary>
+    /// What shows from below through the layer of a non-isolated group at <paramref name="count"/> pixels of row
+    /// <paramref name="y"/>: its backdrop canvas, over that canvas's own backdrop when it is a non-isolated layer too,
+    /// and so on. Empty when the canvas is not such a layer.
+    /// </summary>
+    private ReadOnlySpan<uint> Below(int y, int x0, int count)
+    {
+        var backdrop = Canvas.Backdrop;
+        if (backdrop == null) return default;
+        if (_below.Length < count) _below = new uint[Math.Max(count, _below.Length * 2)];
+        var below = _below.AsSpan(0, count);
+        int start = y * Canvas.Width + x0;
+        backdrop.Pixels.AsSpan(start, count).CopyTo(below);
+        for (var deeper = backdrop.Backdrop; deeper != null; deeper = deeper.Backdrop)
+        {
+            var row = deeper.Pixels.AsSpan(start, count);
+            for (int i = 0; i < count; i++) below[i] = Canvas.Over(below[i], row[i]);
+        }
+        return below;
+    }
+
+    private void CompositeBlended(Span<uint> pixels, ReadOnlySpan<byte> coverage, ReadOnlySpan<byte> clipMask, ReadOnlySpan<byte> softMask, ReadOnlySpan<uint> shaded,
+        ReadOnlySpan<uint> below)
     {
         uint solid = Color;
         int alpha = Alpha;
         bool hasShader = !shaded.IsEmpty;
         var mode = Blend;
+        bool nonIsolated = !below.IsEmpty;
         for (int i = 0; i < pixels.Length; i++)
         {
             int c = EffectiveCoverage(coverage, clipMask, softMask, alpha, i);
             if (c == 0) continue;
-            uint source = hasShader ? shaded[i] : solid;
-            pixels[i] = BlendPixel(Canvas.Scale(source, ToScaleFactor(c)), pixels[i], mode);
+            uint source = Canvas.Scale(hasShader ? shaded[i] : solid, ToScaleFactor(c));
+            pixels[i] = nonIsolated ? BlendPixelNonIsolated(source, pixels[i], below[i], mode) : BlendPixel(source, pixels[i], mode);
         }
     }
 

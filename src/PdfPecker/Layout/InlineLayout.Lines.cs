@@ -713,7 +713,7 @@ internal sealed partial class InlineLayout
     {
         var style = it.Style;
         var pattern = it.Source;
-        float pw = style.Font.Measure(pattern, style.TextSize) + style.LetterSpacing * pattern.Length;
+        float pw = style.Font.Measure(pattern, style.TextSize) + style.LetterSpacing * TextFont.SpacedCharacters(pattern, 0, pattern.Length);
         if (!(pw > MinLeaderPattern)) return;
         // A visible gap between the text and the pattern on both sides, unless the pattern is blank.
         float gap = string.IsNullOrWhiteSpace(pattern) ? 0 : style.TextSize * LeaderGapRatio;
