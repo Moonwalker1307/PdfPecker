@@ -47,16 +47,17 @@ internal sealed class RenderCache
     private int _glyphCount;
 
     // A large image that one page draws, such as the scan of a scanned page, goes to a small pool of its own whose
-    // oldest entries give way to new ones, until another page draws it too: kept with the others, every page's scan
-    // (35 MB at 300 dpi A4) stayed until the image pool's 512 MB were full, though no other page draws it. The pool
-    // holds one such scan, so a page drawn again soon after, as a thumbnail and then in full, still finds it.
+    // least recently drawn entries give way to new ones, until another page draws it too: kept with the others, every
+    // page's scan (35 MB at 300 dpi A4) stayed until the image pool's 512 MB were full, though no other page draws it.
+    // The pool always keeps the image drawn last, even one larger than the pool, so a page drawn again soon after, as a
+    // thumbnail and then in full or at several resolutions, finds its scan; it holds the pool's limit or that one
+    // image, whichever is more.
     private const long SinglePageMinBytes = 4L * 1024 * 1024;
     private readonly Pool _singlePagePool;
-    private readonly Dictionary<PdfDict, Entry<DecodedImage?>> _singlePageImages = new(ReferenceEqualityComparer.Instance);
-    // The pool's keys, oldest first. Only keys: an image that moves to the shared pool leaves its key behind here, and
-    // the key is skipped when its turn comes, while an entry kept here would hold the decoded image long after the
-    // shared pool, full, had declined it.
-    private readonly Queue<PdfDict> _singlePageOrder = new();
+    private readonly Dictionary<PdfDict, LinkedListNode<SinglePageImage>> _singlePageImages = new(ReferenceEqualityComparer.Instance);
+    // The pool's entries, least recently drawn first. An image that moves to the shared pool leaves the list at once, so
+    // the list never holds an image the pool no longer counts.
+    private readonly LinkedList<SinglePageImage> _singlePageOrder = new();
     // The page that first drew each large image; small, as it holds only the keys.
     private readonly Dictionary<PdfDict, object> _imagePages = new(ReferenceEqualityComparer.Instance);
 
@@ -98,7 +99,12 @@ internal sealed class RenderCache
             {
                 // From now on every page, the first one too, finds the image in the shared pool.
                 first = SharedOwner;
-                if (_singlePageImages.Remove(stream, out promoted)) _singlePagePool.Held -= promoted.Size;
+                if (_singlePageImages.Remove(stream, out var node))
+                {
+                    _singlePageOrder.Remove(node);
+                    promoted = node.Value.Entry;
+                    _singlePagePool.Held -= promoted.Size;
+                }
                 else promoted = SharedMarker;
             }
         }
@@ -125,12 +131,23 @@ internal sealed class RenderCache
     /// <summary>The page recorded for an image that more than one page draws.</summary>
     private static readonly object SharedOwner = new();
 
-    /// <summary><see cref="GetOrAdd"/> for the single-page pool, which makes room for a new entry by dropping the oldest.</summary>
+    /// <summary>
+    /// <see cref="GetOrAdd"/> for the single-page pool, which makes room for a new entry by dropping the least recently
+    /// drawn ones; an image larger than the pool takes the place of all of them.
+    /// </summary>
     private DecodedImage? GetOrAddSinglePage(PdfStream key, PageCacheUse use, Func<(DecodedImage? Value, long Size)> create)
     {
         var pool = _singlePagePool;
-        Entry<DecodedImage?>? entry;
-        lock (pool) _singlePageImages.TryGetValue(key, out entry);
+        Entry<DecodedImage?>? entry = null;
+        lock (pool)
+        {
+            if (_singlePageImages.TryGetValue(key, out var node))
+            {
+                entry = node.Value.Entry;
+                _singlePageOrder.Remove(node);
+                _singlePageOrder.AddLast(node);
+            }
+        }
         if (entry != null)
         {
             use.Charge(entry);
@@ -146,24 +163,27 @@ internal sealed class RenderCache
         {
             if (_singlePageImages.TryGetValue(key, out var other))
             {
-                use.Made(other);
-                return other.Value;
+                use.Made(other.Value.Entry);
+                return other.Value.Entry.Value;
             }
-            // Too large for this pool, or drawn by another page while this one decoded it: that page keeps it.
-            if (size > pool.Limit || ReferenceEquals(_imagePages.GetValueOrDefault(key), SharedOwner)) return value;
+            // Drawn by another page while this one decoded it: that page keeps it. An image larger than even the shared
+            // pool, which no pool would have kept before, is not kept either.
+            if (size > _imagePool.Limit || ReferenceEquals(_imagePages.GetValueOrDefault(key), SharedOwner)) return value;
             entry.Size = size;
-            while (pool.Held + size > pool.Limit && _singlePageOrder.TryDequeue(out var oldest))
+            while (pool.Held + size > pool.Limit && _singlePageOrder.First is { } oldest)
             {
-                // An image that moved to the shared pool has left this one already. It never comes back, so a key
-                // here stands for at most one entry.
-                if (_singlePageImages.Remove(oldest, out var held)) pool.Held -= held.Size;
+                _singlePageOrder.RemoveFirst();
+                _singlePageImages.Remove(oldest.Value.Key);
+                pool.Held -= oldest.Value.Entry.Size;
             }
-            _singlePageImages[key] = entry;
-            _singlePageOrder.Enqueue(key);
+            _singlePageImages[key] = _singlePageOrder.AddLast(new SinglePageImage(key, entry));
             pool.Held += size;
         }
         return value;
     }
+
+    /// <summary>An entry of the single-page pool, with its key, so that dropping the oldest finds its map entry.</summary>
+    private readonly record struct SinglePageImage(PdfDict Key, Entry<DecodedImage?> Entry);
 
     /// <summary>The colour space a name stands for in the resources, as <see cref="ColorSpace.Parse"/> reads it.</summary>
     public ColorSpace? GetColorSpace(PdfFile file, string name, PdfDict? resources, PageCacheUse use)
