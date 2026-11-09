@@ -677,6 +677,92 @@ public class FontTests
         static int Units(TextFont font, string text) => font.MeasureUnits(text, 0, text.Length);
     }
 
+    [Theory]
+    [InlineData("‍")] // zero width joiner
+    [InlineData("‌")] // zero width non-joiner
+    [InlineData("‎")] // left-to-right mark
+    [InlineData("⁠")] // word joiner
+    [InlineData("﻿")] // byte order mark
+    [InlineData("️")] // emoji presentation selector
+    [InlineData("\U000E0100")] // ideographic variation selector, a surrogate pair
+    [InlineData("‍‍")]
+    public void LetterSpacingSkipsDefaultIgnorableCharacters(string hidden)
+    {
+        // Chrome gives a hidden character no letter spacing, and the drawing shows no glyph for it, so the layout
+        // measures the text as if it were not there: right-aligned text starts where it would without it, and so does
+        // what follows it on the line. The Thai letter, which Work Sans lacks, is drawn in a fallback font after the run.
+        foreach (var (family, after) in new[] { ("serif", ""), ("W", ""), ("W, T", "\u0E01") })
+        {
+            string Html(string text) => "<style>@page{margin:0} body{margin:0} @font-face{font-family:W;src:url(" + DataUri(Regular) + ")}"
+                + "@font-face{font-family:T;src:url(" + DataUri(Font("NotoSansThai-Subset.woff2")) + ")}"
+                + "div{width:400px;font:20px " + family + ";text-align:right;white-space:pre}</style>"
+                + "<div><span style='letter-spacing:10px'>" + text + after + "</span>|</div>";
+            Assert.Equal(TextX(Html("ab")), TextX(Html("a" + hidden + "b")));
+        }
+
+        static string TextX(string html) => string.Join(" ", Regex.Matches(AllContent(ConvertUncompressed(html)), @"1 0 0 1 (-?[\d.]+) -?[\d.]+ Tm")
+            .Select(m => m.Groups[1].Value));
+    }
+
+    [Fact]
+    public void LetterSpacingGoesOnceAfterACharacterOutsideTheBasicPlane()
+    {
+        // A surrogate pair is one character and one glyph, which the drawing spaces once, as Chrome does.
+        string Html(string text) => "<style>@page{margin:0} body{margin:0} @font-face{font-family:W;src:url(" + DataUri(Regular) + ")}"
+            + "div{width:400px;font:20px W;text-align:right}</style><div style='letter-spacing:10px'>" + text + "</div>";
+        float X(string text) => float.Parse(Regex.Match(AllContent(ConvertUncompressed(Html(text))), @"1 0 0 1 (-?[\d.]+) -?[\d.]+ Tm").Groups[1].Value,
+            CultureInfo.InvariantCulture);
+        // U+1D400, which Work Sans lacks, and U+E000, which it lacks too, have the same .notdef width.
+        Assert.Equal(X("ab"), X("a\U0001D400b"), 2);
+    }
+
+    // A subset of Noto Sans JP whose variation sequences give 葛 and 辻 their one-dot forms with U+E0100, leave them as
+    // they are with U+E0101, and draw 侮 with U+FE00 as the compatibility ideograph U+FA30.
+    private static readonly byte[] NotoSansJP = Font("NotoSansJP-Subset.ttf");
+
+    [Fact]
+    public void VariationSequencesPickTheGlyphTheFontGivesThem()
+    {
+        var program = Assert.Single(FontProgram.Load(NotoSansJP));
+        int kuzu = program.GlyphId(0x845B);
+        Assert.NotEqual(0, kuzu);
+        int variant = program.VariationGlyphId(0x845B, 0xE0100);
+        Assert.True(variant > 0 && variant != kuzu);
+        Assert.Equal(kuzu, program.VariationGlyphId(0x845B, 0xE0101));   // a default sequence keeps the usual glyph
+        Assert.Equal(-1, program.VariationGlyphId(0x845B, 0xFE00));      // a sequence the font does not have
+        Assert.Equal(program.GlyphId(0xFA30), program.VariationGlyphId(0x4FAE, 0xFE00));
+        Assert.Equal(-1, Assert.Single(FontProgram.Load(Regular)).VariationGlyphId('A', 0xFE00));
+
+        // Outside the shaper and in it, the sequence is one glyph that stands for both characters.
+        var font = new EmbeddedFont(program, false, false);
+        var glyphs = new List<ShapedGlyph>();
+        font.Shape("葛\U000E0100辻", 0, 4, glyphs);
+        Assert.Equal(new[] { (variant, 0, 3), (program.GlyphId(0x8FBB), 3, 1) }, glyphs.Select(g => (g.Gid, g.Start, g.Length)));
+        ComplexShaper.Shape(program, "葛\U000E0100辻", 0, 4, false, glyphs);
+        Assert.Equal(new[] { (variant, 0, 3), (program.GlyphId(0x8FBB), 3, 1) }, glyphs.Select(g => (g.Gid, g.Start, g.Length)));
+        font.Shape("葛\U000E0101A\uFE00", 0, 5, glyphs);
+        Assert.Equal(new[] { (kuzu, 0, 3), (program.GlyphId('A'), 3, 1) }, glyphs.Select(g => (g.Gid, g.Start, g.Length)));
+    }
+
+    [Fact]
+    public void VariationSequencesDrawTheirGlyphAndCopyAsWritten()
+    {
+        // As in Chrome: the variant glyph is embedded and drawn, and the text extracts with its selectors, through the
+        // glyph's own mapping or, for a glyph the plain character also draws, through /ActualText.
+        const string text = "葛葛\U000E0100葛\U000E0101 辻\U000E0100 侮侮\uFE00\uFA30";
+        string Html(string t) => "<style>@font-face{font-family:J;src:url(" + DataUri(NotoSansJP) + ")} body{font:40px J;margin:0}</style><p>" + t + "</p>";
+        var pdf = HtmlToPdf.Convert(Html(text), new PdfOptions { Compress = false });
+        Assert.Equal(text, PdfText.Extract(pdf).Trim());
+        var tagged = HtmlToPdf.Convert(Html(text), new PdfOptions { Conformance = PdfConformance.PdfA2u, Compress = false });
+        AssertStructurallyValid(tagged);
+        Assert.Equal(text, PdfText.Extract(tagged).Trim());
+
+        byte[] Render(string t) => PdfRenderer.Open(HtmlToPdf.Convert(Html(t))).RenderPage(0, new ImageOptions { Dpi = 72 }).Rgba;
+        Assert.NotEqual(Render("葛"), Render("葛\U000E0100"));
+        Assert.Equal(Render("葛"), Render("葛\U000E0101"));
+        Assert.Equal(Render("\uFA30"), Render("侮\uFE00"));
+    }
+
     [Fact]
     public void ZeroWidthNonJoinerStillPreventsALigature()
     {
@@ -929,13 +1015,23 @@ public class FontTests
 internal static class CmapFonts
 {
     /// <summary>The font with a cmap of the one subtable under the platform and encoding.</summary>
-    public static byte[] With(byte[] font, int platform, int encoding, byte[] subtable)
+    public static byte[] With(byte[] font, int platform, int encoding, byte[] subtable) => With(font, (platform, encoding, subtable));
+
+    /// <summary>The font with a cmap of these subtables, each under its platform and encoding.</summary>
+    public static byte[] With(byte[] font, params (int Platform, int Encoding, byte[] Subtable)[] subtables)
     {
         var cmap = new List<byte>();
-        U16(cmap, 0); U16(cmap, 1); U16(cmap, platform); U16(cmap, encoding); U32(cmap, 12);
-        cmap.AddRange(subtable);
+        U16(cmap, 0); U16(cmap, subtables.Length);
+        int offset = 4 + 8 * subtables.Length;
+        foreach (var (platform, encoding, subtable) in subtables)
+        {
+            U16(cmap, platform); U16(cmap, encoding); U32(cmap, offset);
+            offset += subtable.Length;
+        }
+        foreach (var (_, _, subtable) in subtables) cmap.AddRange(subtable);
         var program = Assert.Single(FontProgram.Load(font));
-        var tables = program.Tables.Select(t => (t.Tag, t.Tag == FontProgram.Tag("cmap") ? cmap.ToArray() : program.Data.AsSpan(t.Offset, t.Length).ToArray())).ToList();
+        var bytes = cmap.ToArray();
+        var tables = program.Tables.Select(t => (t.Tag, t.Tag == FontProgram.Tag("cmap") ? bytes : program.Data.AsSpan(t.Offset, t.Length).ToArray())).ToList();
         return SfntBuilder.Build(0x00010000, tables);
     }
 
@@ -972,6 +1068,28 @@ internal static class CmapFonts
         foreach (var _ in segments) U16(subtable, 0);
         return subtable.ToArray();
     }
+
+    /// <summary>
+    /// A format 14 subtable whose selector records, one for each selector, all share one table of default ranges and
+    /// one of non-default mappings; the counts the tables claim can be larger than what they hold.
+    /// </summary>
+    public static byte[] VariationSequences(IEnumerable<int> selectors, IReadOnlyList<(int Start, int More)> defaults, uint defaultCount,
+        IReadOnlyList<(int CodePoint, int Glyph)> mappings, uint mappingCount, uint? length = null)
+    {
+        var list = selectors.ToList();
+        int records = 10 + list.Count * 11, defaultTable = records, mappingTable = defaultTable + 4 + defaults.Count * 4;
+        int end = mappingTable + 4 + mappings.Count * 5;
+        var subtable = new List<byte>();
+        U16(subtable, 14); U32(subtable, (int)(length ?? (uint)end)); U32(subtable, list.Count);
+        foreach (int selector in list) { U24(subtable, selector); U32(subtable, defaultTable); U32(subtable, mappingTable); }
+        U32(subtable, (int)defaultCount);
+        foreach (var (start, more) in defaults) { U24(subtable, start); subtable.Add((byte)more); }
+        U32(subtable, (int)mappingCount);
+        foreach (var (codePoint, glyph) in mappings) { U24(subtable, codePoint); U16(subtable, glyph); }
+        return subtable.ToArray();
+    }
+
+    private static void U24(List<byte> to, int v) { to.Add((byte)(v >> 16)); U16(to, v & 0xFFFF); }
 
     private static void U16(List<byte> to, int v) { to.Add((byte)(v >> 8)); to.Add((byte)v); }
 

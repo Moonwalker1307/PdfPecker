@@ -1322,7 +1322,7 @@ internal sealed partial class SvgImage
                 if (sb.Length == 0) continue;
                 var str = sb.ToString();
                 float size = st.FontSize / 0.75f;
-                float w = st.Font.Measure(str, size) + st.LetterSpacing / 0.75f * str.Length;
+                float w = st.Font.Measure(str, size) + st.LetterSpacing / 0.75f * TextFont.SpacedCharacters(str, 0, str.Length);
                 runs.Add(new TextRun(str, st, penX, penY, w, onPath));
                 penX += w;
             }
@@ -1336,7 +1336,7 @@ internal sealed partial class SvgImage
             var trimmed = last.Text.TrimEnd(' ');
             float size = last.Style.FontSize / 0.75f;
             runs[^1] = new TextRun(trimmed, last.Style, last.X, last.Y,
-                last.Style.Font.Measure(trimmed, size) + last.Style.LetterSpacing / 0.75f * trimmed.Length, last.Path);
+                last.Style.Font.Measure(trimmed, size) + last.Style.LetterSpacing / 0.75f * TextFont.SpacedCharacters(trimmed, 0, trimmed.Length), last.Path);
         }
 
         chunkStarts.Add(runs.Count);
@@ -1459,7 +1459,7 @@ internal sealed partial class SvgImage
                 while (end < run.Text.Length && levels[offset + end] == levels[offset + k]) end++;
                 var st = run.Style;
                 float size = st.FontSize / 0.75f;
-                float w = st.Font.MeasureUnits(run.Text, k, end - k) * size / 1000f + st.LetterSpacing / 0.75f * (end - k);
+                float w = st.Font.MeasureUnits(run.Text, k, end - k) * size / 1000f + st.LetterSpacing / 0.75f * TextFont.SpacedCharacters(run.Text, k, end - k);
                 pieces.Add((i, k, end - k, w));
                 pieceLevels.Add(levels[offset + k]);
                 k = end;
@@ -1497,7 +1497,7 @@ internal sealed partial class SvgImage
         for (int r = 0; r < fontRuns.Count; r++)
         {
             var fr = fontRuns[rtl ? fontRuns.Count - 1 - r : r];
-            float w = fr.Font.MeasureUnits(run.Text, fr.Start, fr.Length) * size / 1000f + s.LetterSpacing / 0.75f * fr.Length;
+            float w = fr.Font.MeasureUnits(run.Text, fr.Start, fr.Length) * size / 1000f + s.LetterSpacing / 0.75f * TextFont.SpacedCharacters(run.Text, fr.Start, fr.Length);
             EmitTextShape(new TextRun(run.Text.Substring(fr.Start, fr.Length), s, x, run.Y, w, run.Path), fr.Font, shift, ctm, opacity, rtl);
             x += w;
         }

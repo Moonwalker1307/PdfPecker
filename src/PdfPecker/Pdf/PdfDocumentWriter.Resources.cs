@@ -87,7 +87,8 @@ internal sealed partial class PdfDocumentWriter
                 fs.FormId = formIds[i];
                 structParents = " /StructParents " + fs.Key.ToString(CultureInfo.InvariantCulture);
             }
-            WriteStream(formIds[i], _forms[i], _compress, "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] "
+            string box = _formBoxes.TryGetValue(i, out var known) ? known : PlaneBox;
+            WriteStream(formIds[i], _forms[i], _compress, "/Type /XObject /Subtype /Form /BBox " + box + " "
                 + (_formIsolated[i] ? "/Group << /S /Transparency /I true >> /Resources " : "/Group << /S /Transparency >> /Resources ")
                 + doc.ResourcesId.ToString(CultureInfo.InvariantCulture) + " 0 R"
                 + structParents);

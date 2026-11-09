@@ -360,7 +360,9 @@ internal static partial class PageStructure
                 && line.Top - previous.Bottom <= typical + 0.35 * Math.Min(line.Size, previous.Size)
                 && line.Top - previous.Bottom > -0.5 * line.Size
                 && line.X0 < right && line.X1 > left
-                && (current.Kind is not (TextKind.Bullet or TextKind.Numbered) || line.X0 >= textStart - 1);
+                && (current.Kind is not (TextKind.Bullet or TextKind.Numbered) || line.X0 >= textStart - 1)
+                // The next item of a list counted in letters or roman numbers, as "b." after "a.", starts a block.
+                && !NextItem(current.Lines[0], line);
             if (joins)
             {
                 current!.Lines.Add(line);
@@ -446,6 +448,72 @@ internal static partial class PageStructure
 
     private static bool IsBullet(string text)
         => text.Length == 1 && text[0] is '•' or '◦' or '▪' or '▫' or '‣' or '⁃' or '●' or '○' or '■' or '□' or '–' or '—' or '-' or '*' or '·' or '➢' or '►' or '✓';
+
+    /// <summary>
+    /// How many of the lines start a list item: with a bullet or a number, as <see cref="Marker"/> finds, or with a letter
+    /// or a roman number and a full stop or bracket that counts on from the one before, as "a." and "b." or "iii." and
+    /// "iv." do. A letter alone, out of order, is as often a name's initial.
+    /// </summary>
+    private static int ListItems(List<FlowLine> lines)
+    {
+        int items = 0;
+        (int Letter, int Roman, bool Upper)? last = null;
+        bool counted = false; // whether the last lettered line is already counted
+        foreach (var line in lines)
+        {
+            if (Marker(line, out _) != TextKind.Paragraph) items++;
+            else if (Lettered(line) is { } marker)
+            {
+                bool follows = last is { } p && Follows(p, marker);
+                if (follows) items += counted ? 1 : 2;
+                counted = follows;
+                last = marker;
+            }
+        }
+        return items;
+    }
+
+    /// <summary>Whether one lettered list marker counts on from another, in the alphabet or in roman numbers.</summary>
+    private static bool Follows((int Letter, int Roman, bool Upper) previous, (int Letter, int Roman, bool Upper) next)
+        => previous.Upper == next.Upper
+            && (previous.Letter > 0 && next.Letter == previous.Letter + 1 || previous.Roman > 0 && next.Roman == previous.Roman + 1);
+
+    /// <summary>Whether a line starts the item of a lettered list after the item that <paramref name="first"/> starts.</summary>
+    private static bool NextItem(FlowLine first, FlowLine line)
+        => Lettered(line) is { } next && Lettered(first) is { } previous && Follows(previous, next);
+
+    /// <summary>
+    /// The value of a line's first word as a lettered list marker, "a." to "z.", or a roman number up to 39, followed by
+    /// a full stop or a bracket, or in brackets: its place in the alphabet, its value as a roman number (0 where it is
+    /// not one), and whether it is in capitals. Null when the line does not start with one.
+    /// </summary>
+    private static (int Letter, int Roman, bool Upper)? Lettered(FlowLine line)
+    {
+        var text = line.Words[0].Text.AsSpan();
+        if (line.Words.Count < 2 || text.Length < 2 || text.Length > 8 || text[^1] is not ('.' or ')')) return null;
+        if (text[0] == '(')
+        {
+            if (text[^1] != ')') return null;
+            text = text[1..];
+        }
+        text = text[..^1];
+        if (text.Length == 0 || !char.IsAsciiLetter(text[0])) return null;
+        bool upper = char.IsAsciiLetterUpper(text[0]);
+        int roman = 0, previous = int.MaxValue;
+        foreach (char c in text)
+        {
+            if (!char.IsAsciiLetter(c) || char.IsAsciiLetterUpper(c) != upper) return null;
+            int value = char.ToLowerInvariant(c) switch { 'i' => 1, 'v' => 5, 'x' => 10, _ => 0 };
+            if (value == 0) { roman = -1; continue; }
+            if (roman < 0) continue;
+            // A smaller value before a larger one is taken off, as in "iv".
+            roman += value > previous ? value - 2 * previous : value;
+            previous = value;
+        }
+        int letter = text.Length == 1 ? char.ToLowerInvariant(text[0]) - 'a' + 1 : 0;
+        if (roman is <= 0 or > 39) roman = 0;
+        return letter == 0 && roman == 0 ? null : (letter, roman, upper);
+    }
 
     /// <summary>Whether a line starts with a list marker: a bullet, or a number followed by a full stop or bracket.</summary>
     private static TextKind Marker(FlowLine line, out int number)

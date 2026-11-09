@@ -78,6 +78,7 @@ internal sealed partial class LayoutEngine
         public int FootCount; // trailing rows that come from <tfoot>
         public float FootReserve; // per layout pass: room the footer repeated at the bottom of each page takes, or 0
         public bool MayMoveTable; // per layout pass: the whole table may start on the next page instead of its first row
+        public int TopPage;       // per layout pass: the page (or column) the table's border box starts on
         public float? TableMove;  // set when it should: how far the first row missed fitting on the page
         public bool Rtl;      // direction: rtl, so the first column is on the right
         public float[] ColMin = Array.Empty<float>(), ColMax = Array.Empty<float>();
@@ -804,6 +805,7 @@ internal sealed partial class LayoutEngine
                 if (!caption.Style.CaptionBottom) y = LayoutCaption(caption, bx, y, boxW);
 
             tableTop = y;
+            m.TopPage = PageOf(tableTop);
             tableGroup = new GroupOp { Reach = bx + boxW };
             _ops.Add(tableGroup);
             cy = y + frameT + (m.Rows.Count > 0 ? vs : 0);
@@ -1096,16 +1098,44 @@ internal sealed partial class LayoutEngine
             _measuringRows--;
             return y;
         });
-        return foot.Height <= _grid.Height(PageOf(top)) / 2 ? foot.Height : 0;
+        return Repeats(foot.Height - vs, PageOf(top)) ? foot.Height : 0;
     }
+
+    /// <summary>
+    /// The room the header rows take where they are repeated at the top of a page, the border spacing under each row
+    /// included.
+    /// </summary>
+    private float HeadRoom(TableModel m, float[] colX, float[] widths, float hs, float vs, bool collapse)
+    {
+        if (m.HeadCount == 0) return 0;
+        var heads = Capture(() =>
+        {
+            _measuringRows++;
+            float y = 0;
+            for (int h = 0; h < m.HeadCount; h++)
+                y = LayoutRow(m, h, y, colX, widths, hs, vs, collapse, allowMove: false) + vs;
+            _measuringRows--;
+            return y;
+        });
+        return heads.Height;
+    }
+
+    /// <summary>
+    /// Whether a header or footer <paramref name="height"/> tall (its rows and the border spacing between them) is
+    /// repeated on each page a table breaks across. As in Chrome, only one that takes at most a quarter of the page is:
+    /// a taller one would leave too little room for the rows.
+    /// </summary>
+    private bool Repeats(float height, int page) => height <= _grid.Height(page) / 4 + Eps;
 
     /// <summary>
     /// Whether body rows <paramref name="r"/> and <paramref name="r"/> + 1 stay on one page: both are in a row group with
     /// break-inside: avoid, or break-after: avoid on the first or break-before: avoid on the second asks for it, as a
-    /// report keeps a group together or a group's header row with its first detail row.
+    /// report keeps a group together or a group's header row with its first detail row. The footer rows at the end of
+    /// the table stay together too, as Chrome keeps them.
     /// </summary>
     private static bool KeepsWithNext(TableModel m, int r)
     {
+        if (r >= m.Rows.Count - m.FootCount) return r + 1 < m.Rows.Count;
         if (r < m.HeadCount || r + 1 >= m.Rows.Count - m.FootCount) return false;
         RowModel a = m.Rows[r], b = m.Rows[r + 1];
         return a.Tr.Style.AvoidBreakAfter || b.Tr.Style.AvoidBreakBefore
@@ -1238,13 +1268,27 @@ internal sealed partial class LayoutEngine
             foreach (var cell in row.Ending)
                 rowBottom = Math.Max(rowBottom, cell.Top + cell.NeededH);
 
+            // As in Chrome, the header goes on the table's first page whole: a header row that would break there, or that
+            // starts on the next page with only the table's top edge and spacing before it, moves the whole table to the
+            // next page instead (see LayoutTable). So does the first row of a table without a header that starts there.
+            if (allowMove && attempt == 0 && m.MayMoveTable && MayLayOutAgain && (r < m.HeadCount || r == 0)
+                && (PageOf(rowTop) > m.TopPage || r < m.HeadCount && CrossesPage(rowTop, rowBottom)))
+            {
+                _rowProbe = null;
+                Truncate(rowStartOps);
+                m.TableMove = Math.Max(0, rowBottom - FlowEnd(m.TopPage));
+                return rowTop;
+            }
             // A body row leaves room on its page for the footer repeated under it.
             float reserve = r >= m.HeadCount && r < m.Rows.Count - m.FootCount ? m.FootReserve : 0;
             float keptBottom = rowBottom + keepWith;
             bool forced = allowMove && attempt == 0 && !AtPageTop(rowTop) && ForcedBreakBefore(m, r);
+            // As in Chrome, the footer rows at the end of the table do not break inside: they go to the next page whole
+            // when they fit there, as a footer too tall to repeat does.
+            bool footRow = r >= m.Rows.Count - m.FootCount;
             bool move = forced || allowMove && attempt == 0 && MayLayOutAgain && !AtPageTop(rowTop)
                         && (CrossesPage(rowTop, rowBottom + reserve) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1)
-                            && !(mayBreakInside && BreaksInside(m, r, rowTop, reserve, collapse))
+                            && !(mayBreakInside && !footRow && BreaksInside(m, r, rowTop, reserve, collapse))
                             || keepWith > 0 && CrossesPage(rowTop, keptBottom + reserve)
                             || SpanContentCrossesPage(m, r, rowTop, reserve));
             if (move && !CrossesPage(rowTop, rowBottom + reserve)) rowBottom = keptBottom;
@@ -1265,9 +1309,12 @@ internal sealed partial class LayoutEngine
                 // so the table is laid out in full.
                 _rowProbe = null;
                 Truncate(rowStartOps);
-                if (r == m.HeadCount && m.MayMoveTable)
+                // The first row does not fit: the whole table moves (see LayoutTable), as in Chrome only when there is no
+                // header or the header is repeated, so that it would not stay behind on its own and come again over the
+                // row. A header too tall to repeat stays on this page.
+                if (r == m.HeadCount && m.MayMoveTable
+                    && (m.HeadCount == 0 || Repeats(HeadRoom(m, colX, widths, hs, vs, collapse) - vs, PageOf(rowTop) + (move ? 1 : 0))))
                 {
-                    // The first row does not fit: the whole table moves (see LayoutTable).
                     m.TableMove = move ? rowBottom + reserve - FlowEnd(PageOf(rowTop))
                         : afterSpacingBreak ? spacingShortage : rowBottom - rowTop + reserve;
                     return rowTop;
@@ -1279,8 +1326,10 @@ internal sealed partial class LayoutEngine
                     float bodyEnd = rowTop, end = rowTop, edgeHalf = 0;
                     if (reserve > 0)
                     {
-                        // The footer closes the table on this page, where the row would have started.
-                        float footTop = rowTop;
+                        // The footer closes the table on this page, where the row would have started. As in Chrome, it
+                        // starts no lower than the page leaves room for it and the spacing under it: the spacing above
+                        // it gives way first.
+                        float footTop = Math.Max(rowTop - vs, Math.Min(rowTop, FlowEnd(PageOf(rowTop)) - reserve));
                         int footOps = _ops.Count;
                         var outerFoot = _repeatingFoot;
                         _repeatingFoot = m;
@@ -1305,9 +1354,9 @@ internal sealed partial class LayoutEngine
                         rowTop = LayoutRow(m, h, rowTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns) + vs;
                     // The structure has the header once: its repeats are artifacts.
                     if (Tags != null) Untag(_ops, headOps);
-                    if (rowTop - headStart > _grid.Height(PageOf(headStart)) / 2)
+                    if (!Repeats(rowTop - headStart - vs, PageOf(headStart)))
                     {
-                        // Headers too tall to repeat usefully: drop them again.
+                        // Headers too tall to repeat: drop them again.
                         Truncate(rowStartOps);
                         rowTop = headStart;
                     }
@@ -1382,6 +1431,8 @@ internal sealed partial class LayoutEngine
         if (row.Tr.Style.AvoidBreakInside || row.Group?.Style.AvoidBreakInside == true) return false;
         int page = PageOf(rowTop);
         float limit = FlowEnd(page) - reserve;
+        // A row that starts where the room for the footer does has nothing to leave before the break.
+        if (rowTop >= limit - Eps) return false;
         foreach (var cell in row.Cells)
             if (cell.RowSpan > 1 || !ContentBeforeBreak(cell, page, limit, collapse)) return false;
         foreach (var cell in row.Ending)
@@ -1402,8 +1453,10 @@ internal sealed partial class LayoutEngine
         if (cell.Top + cell.ContentH - below <= limit + Eps) return false;
         for (int i = cell.OpsStart; i < cell.OpsEnd && i < _ops.Count; i++)
             if (FirstContentBox(_ops[i]) is var (top, bottom)) return PageOf(top) == page && bottom <= limit + Eps;
-        // A cell without content, only a height, breaks anywhere.
-        return true;
+        // A cell without content, only a height, breaks anywhere in that height, but as in Chrome not in its top border
+        // and padding: with only those before the break, it goes to the next page with its row.
+        float above = cs.PaddingTop.Resolve(cell.W) + (collapse ? cell.CollapsedT / 2 : cs.BorderTop);
+        return cell.Top + above < limit - Eps;
     }
 
     /// <summary>The top and bottom of the first text line, image or drawing among an op and the ops in it.</summary>
@@ -1451,21 +1504,9 @@ internal sealed partial class LayoutEngine
     {
         int opsStart = _ops.Count;
         int first = PageOf(rowTop);
-        float head = 0;
-        if (m.HeadCount > 0)
-        {
-            var heads = Capture(() =>
-            {
-                _measuringRows++;
-                float y = 0;
-                for (int h = 0; h < m.HeadCount; h++)
-                    y = LayoutRow(m, h, y, colX, widths, hs, vs, collapse, allowMove: false) + vs;
-                _measuringRows--;
-                return y;
-            });
-            // Headers too tall to repeat usefully are not repeated, as when a row moves to the next page.
-            if (heads.Height <= _grid.Height(first + 1) / 2) head = heads.Height;
-        }
+        float head = HeadRoom(m, colX, widths, hs, vs, collapse);
+        // Headers too tall to repeat are not repeated, as when a row moves to the next page.
+        if (head > 0 && !Repeats(head - vs, first + 1)) head = 0;
         float foot = m.FootReserve;
 
         // The pages the row may reach once it leaves that room: its breaks are known before its cells are painted, and

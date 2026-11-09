@@ -32,7 +32,27 @@ internal static partial class ComplexShaper
             if (!decomposeFirst || !TryAddIndicDecomposition(font, layout, run, cp, i, units, depth: 0))
                 AddCharacter(font, layout, run, cp, i, units, rtl, depth: 0);
             i += units;
+            if (i < end && VariationSequences.IsSelector(s, i, end, out int selector, out int selectorUnits))
+                i += AddVariationSequence(font, layout, run, cp, selector, selectorUnits);
         }
+    }
+
+    /// <summary>
+    /// Draws a character the font has a variation sequence for with the sequence's glyph, which also takes the
+    /// selector, and returns the selector's length, as HarfBuzz replaces the two with one glyph; returns 0 for a
+    /// sequence the font does not have, or a character drawn as other characters, whose selector is left to be removed
+    /// with the other default ignorable characters.
+    /// </summary>
+    private static int AddVariationSequence(FontProgram font, OpenTypeLayout? layout, GlyphRun run, int cp, int selector, int units)
+    {
+        if (run.Count == 0 || run[run.Count - 1].CodePoint != cp || font.VariationGlyphId(cp, selector) is not (>= 0 and var gid)) return 0;
+        var glyph = run[run.Count - 1];
+        glyph.Gid = gid;
+        glyph.Length += units;
+        glyph.Props = layout is { HasGlyphClasses: true } ? layout.GlyphProps(gid)
+            : UnicodeTables.IsMark(cp) ? OpenTypeLayout.Mark : OpenTypeLayout.Base;
+        run[run.Count - 1] = glyph;
+        return units;
     }
 
     /// <summary>

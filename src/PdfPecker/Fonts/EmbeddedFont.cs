@@ -300,6 +300,14 @@ internal sealed class EmbeddedFont : TextFont
             if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1])) { cp = char.ConvertToUtf32(s[i], s[i + 1]); n = 2; }
             int gid = Program.GlyphId(cp);
             if (rtl && Text.UnicodeTables.Mirror(cp) is int m && m != cp && Program.GlyphId(m) is int mg && mg != 0) gid = mg;
+            // A variation sequence the font has is one glyph for the character and its selector, as HarfBuzz draws it,
+            // and copies as both.
+            if (i + n < end && VariationSequences.IsSelector(s, i + n, end, out int selector, out int units)
+                && Program.VariationGlyphId(cp, selector) is >= 0 and var variant)
+            {
+                gid = variant;
+                n += units;
+            }
             if (lig != null && !ligate && prev >= 0 && lig.StartsLigature(prev, gid)) ligate = true;
             hidden |= IsHidden(cp);
             glyphs.Add(new ShapedGlyph(gid, i, n));
@@ -337,13 +345,22 @@ internal sealed class EmbeddedFont : TextFont
         if (MayLigate(s, start, length)) return MeasureShaped(s, start, length);
         var w = _widths;
         bool kern = HasKerning;
-        int total = 0, prev = -1;
+        int total = 0, prev = -1, last = -1;
         for (int i = start, end = start + length; i < end; i++)
         {
             int cp = s[i];
             if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1])) cp = char.ConvertToUtf32(s[i], s[++i]);
-            // Drawn as nothing, so the letters around it kern as a pair.
-            if (IsHidden(cp)) continue;
+            // Drawn as nothing, so the letters around it kern as a pair. A variation selector that gives the character
+            // before it a glyph of its own is measured with that glyph.
+            if (IsHidden(cp))
+            {
+                if (last >= 0 && cp is (>= 0xFE00 and <= 0xFE0F) or (>= 0xE0100 and <= 0xE01EF)
+                    && Program.VariationGlyphId(last, cp) is > 0 and var variant && variant != Program.GlyphId(last))
+                    return MeasureShaped(s, start, length);
+                last = -1;
+                continue;
+            }
+            last = cp;
             total += cp < 0x10000 ? w[cp] : CharUnits(cp);
             if (kern)
             {

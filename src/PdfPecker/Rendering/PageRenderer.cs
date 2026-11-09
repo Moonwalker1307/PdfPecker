@@ -565,7 +565,7 @@ internal sealed partial class PageRenderer
         {
             // Text and images are extracted whether or not a clip hides them; fills are taken as backgrounds only where
             // the clip lets them paint, and a picture in flowing HTML shows as much as the clip leaves.
-            if (_text?.Fills != null || _images is { Clips: true }) _gs.ClipBoxes = AddClipBoxes(_gs.ClipBoxes);
+            if (_text?.Fills != null || _images is { Clips: true }) _gs.ClipBoxes = AddClipBoxes(_gs.ClipBoxes, evenOdd);
             return;
         }
         var ctm = _gs.Ctm;
@@ -693,13 +693,15 @@ internal sealed partial class PageRenderer
                 _path.Clear();
             }
             var group = _file.GetDict(form, "Group");
-            bool isolatedGroup = group != null && _file.GetName(group, "S") == "Transparency";
+            bool transparencyGroup = group != null && _file.GetName(group, "S") == "Transparency";
+            bool isolated = transparencyGroup && _file.GetBool(group!, "I", false);
             // An isolated group (/I true) is drawn on its own transparent canvas even when it is opaque, so that blend
-            // modes inside it blend only with each other and not with the page below.
-            if (isolatedGroup && (_gs.FillAlpha < 1 || _gs.SoftMask != null || _gs.Blend != BlendMode.Normal || _file.GetBool(group, "I", false))
+            // modes inside it blend only with each other and not with the page below. A non-isolated group composited
+            // as it is gives what drawing its content directly gives.
+            if (transparencyGroup && (_gs.FillAlpha < 1 || _gs.SoftMask != null || _gs.Blend != BlendMode.Normal || isolated)
                 && _hidden == 0 && !Collecting)
             {
-                RenderGroup(data, res);
+                RenderGroup(data, res, isolated);
             }
             else
             {
@@ -717,8 +719,12 @@ internal sealed partial class PageRenderer
         }
     }
 
-    /// <summary>Renders a transparency group offscreen, then composites it with the group's alpha, blend mode and soft mask.</summary>
-    private void RenderGroup(byte[] data, PdfDict? res)
+    /// <summary>
+    /// Renders a transparency group offscreen, then composites it with the group's alpha, blend mode and soft mask. The
+    /// layer holds only what the group draws either way; a non-isolated group's blend modes see the canvas below through
+    /// it.
+    /// </summary>
+    private void RenderGroup(byte[] data, PdfDict? res, bool isolated)
     {
         var clip = _gs.Clip;
         if (clip.IsEmpty) return;
@@ -729,6 +735,7 @@ internal sealed partial class PageRenderer
         var layer = RentLayer();
         var mainCanvas = _canvas;
         var savedBase = _patternBase;
+        if (!isolated) layer.Backdrop = mainCanvas;
         _canvas = layer;
         _gs.FillAlpha = _gs.StrokeAlpha = 1;
         _gs.Blend = BlendMode.Normal;
@@ -784,6 +791,7 @@ internal sealed partial class PageRenderer
     private void ReturnLayer(Canvas layer)
     {
         layer.Clean();
+        layer.Backdrop = null;
         if (_freeLayers.Count < MaxFreeLayers) _freeLayers.Add(layer);
     }
 
@@ -832,12 +840,12 @@ internal sealed partial class PageRenderer
         }
         // The group is drawn only where it can change the mask, inside its bounding box, and where the mask can be used:
         // whatever is painted under the mask stays inside the clip of the state that set it, since restoring an earlier
-        // clip restores the earlier mask with it. Elsewhere the mask is what the backdrop alone gives.
+        // clip restores the earlier mask with it. Elsewhere the mask is what the backdrop alone gives. The group is drawn
+        // on a transparent layer and put on the backdrop afterwards, as MuPDF and Poppler do: blend modes inside it do
+        // not blend with the backdrop colour, and only the part it draws costs anything.
         var (rx0, ry0, rx1, ry1) = SoftMaskArea(g);
-        long area = (long)(rx1 - rx0) * (ry1 - ry0);
-        ChargeLayer(area);
+        ChargeLayer(0);
         var layer = RentLayer();
-        if (backdrop != 0 && area > 0) layer.FillRect(rx0, ry0, rx1, ry1, backdrop);
         var mainCanvas = _canvas;
         var saved = _gs;
         var savedBase = _patternBase;
@@ -850,7 +858,7 @@ internal sealed partial class PageRenderer
         _softMaskDepth++;
         try
         {
-            if (area > 0) RunForm(g, null, null);
+            if (rx1 > rx0) RunForm(g, null, null);
         }
         finally
         {
@@ -874,9 +882,9 @@ internal sealed partial class PageRenderer
                 lut[i] = (byte)(Math.Clamp(o1[0], 0, 1) * 255 + 0.5);
             }
         }
-        // The values are kept only where the group drew, which lies inside the area; the rest of the area still holds
-        // the backdrop, whose value the mask has everywhere outside. A group that drew nothing leaves an empty rectangle,
-        // whose corners must not be subtracted.
+        // The values are kept only where the group drew; the mask has the backdrop's value everywhere else. A group that
+        // drew nothing leaves an empty rectangle, whose corners must not be subtracted.
+        ChargeLayer(layer.DirtyArea);
         int x0 = 0, y0 = 0, w = 0, h = 0;
         if (layer.DirtyArea > 0)
         {
@@ -889,10 +897,9 @@ internal sealed partial class PageRenderer
         var mask = new byte[w * h];
         for (int y = 0; y < h; y++)
         {
-            for (int x = 0, i = (y0 + y) * layer.Width + x0; x < w; x++, i++) mask[y * w + x] = MaskValue(px[i], luminosity, lut);
+            for (int x = 0, i = (y0 + y) * layer.Width + x0; x < w; x++, i++) mask[y * w + x] = MaskValue(Canvas.Over(px[i], backdrop), luminosity, lut);
         }
         var outside = MaskValue(backdrop, luminosity, lut);
-        if (backdrop != 0 && area > 0) layer.FillRect(rx0, ry0, rx1, ry1, 0);
         ReturnLayer(layer);
         return new SoftMask(mask, x0, y0, w, h, outside);
     }
@@ -900,7 +907,7 @@ internal sealed partial class PageRenderer
     /// <summary>The mask value of a pixel of a soft mask's layer: its luminosity or its alpha, through the transfer table.</summary>
     private static byte MaskValue(uint c, bool luminosity, byte[]? lut)
     {
-        // A luminosity layer is opaque (backdrop), so premultiplied equals straight color.
+        // A luminosity value is read once the layer is on its opaque backdrop, where premultiplied equals straight color.
         int v = luminosity ? ((int)(c & 255) * 77 + (int)((c >> 8) & 255) * 151 + (int)((c >> 16) & 255) * 28) >> 8 : (int)(c >> 24);
         return lut != null ? lut[v] : (byte)v;
     }

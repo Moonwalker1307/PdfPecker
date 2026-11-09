@@ -20,6 +20,12 @@ internal static partial class PageStructure
     private const double Close = 4, Gutter = 15;
 
     /// <summary>
+    /// The facing sides of the boxes of neighbouring cells, which each draw their own border, are at most this far apart:
+    /// the border spacing and one border's width, up to some 10px of spacing.
+    /// </summary>
+    private const double Spacing = 10;
+
+    /// <summary>
     /// More horizontal and vertical lines than this, multiplied, is a drawing such as a map or a chart rather than
     /// tables, and is not searched for them.
     /// </summary>
@@ -78,8 +84,7 @@ internal static partial class PageStructure
                 Union(i, h.Count + j);
             }
         }
-        var strict = new int[parent.Length];
-        for (int i = 0; i < parent.Length; i++) strict[i] = Find(i);
+        var strict = Roots();
         var groups = Groups(i => strict[i]);
 
         // Tables with separate borders, the CSS default, draw each cell's box on its own, the border spacing and a border's
@@ -88,24 +93,32 @@ internal static partial class PageStructure
         // another are as often cards or panels, so a joined grid, and each grid it joins, is a table only with two rows
         // and two columns or more; a row of cells whose lines meet is read with the rest of its table.
         long work = 0;
-        Pair(h, 0);
-        Pair(v, h.Count);
-        var joined = new Dictionary<int, int>(); // a grid each joined grid holds, or -1 once it holds two
-        for (int i = 0; i < parent.Length; i++)
-        {
-            int root = Find(i);
-            if (!joined.TryGetValue(root, out int first)) joined[root] = strict[i];
-            else if (first >= 0 && first != strict[i]) joined[root] = -1;
-        }
-        var separate = Groups(i => joined[Find(i)] == -1 ? Find(i) : -1);
+        Pair(h, 0, wider: false);
+        Pair(v, h.Count, wider: false);
+        var close = Roots();
+        var joined = Holds(strict, close);
+        var separate = Groups(i => joined[close[i]] == -1 ? close[i] : -1);
+
+        // Wider border spacing sets the facing sides further apart, as far as the gap between cards in a grid or between
+        // the fields in a table's cells. Boxes joined over such gaps make a grid of their own, tried after all the grids
+        // above, so a table around such fields is read whole, and only where its boxes fill the grid and hold short
+        // entries, as a table's cells do, rather than the title and lines of text of a card.
+        Pair(h, 0, wider: true);
+        Pair(v, h.Count, wider: true);
+        var wide = Roots();
+        var joinedWide = Holds(close, wide);
+        var spaced = Groups(i => joinedWide[wide[i]] == -1 ? wide[i] : -1);
 
         // Grids, smallest first: a frame around a table, or around a box that holds one, is not a table itself.
-        var grids = groups.Select(e => (e.Value.H, e.Value.V, Joined: joined[Find(e.Key)] == -1))
-            .Concat(separate.Values.Select(g => (g.H, g.V, Joined: true)))
-            .Where(g => g.H.Count > 0 && g.V.Count > 0).Select(g => (g.H, g.V, g.Joined, Box: Bounds(g.H, g.V)))
-            .OrderBy(g => (g.Box.X1 - g.Box.X0) * (g.Box.Y1 - g.Box.Y0)).ToList();
+        static IEnumerable<(List<Segment> H, List<Segment> V, bool Joined, bool Spaced, (double X0, double Y0, double X1, double Y1) Box)> BySize(
+            IEnumerable<(List<Segment> H, List<Segment> V, bool Joined, bool Spaced)> list)
+            => list.Where(g => g.H.Count > 0 && g.V.Count > 0).Select(g => (g.H, g.V, g.Joined, g.Spaced, Box: Bounds(g.H, g.V)))
+                .OrderBy(g => (g.Box.X1 - g.Box.X0) * (g.Box.Y1 - g.Box.Y0));
+        var grids = BySize(groups.Select(e => (e.Value.H, e.Value.V, Joined: joined[close[e.Key]] == -1, Spaced: false))
+                .Concat(separate.Values.Select(g => (g.H, g.V, Joined: true, Spaced: false))))
+            .Concat(BySize(spaced.Values.Select(g => (g.H, g.V, Joined: true, Spaced: true)))).ToList();
         var found = new List<(double X0, double Y0, double X1, double Y1)>();
-        foreach (var (gh, gv, boxes, box) in grids)
+        foreach (var (gh, gv, boxes, wideApart, box) in grids)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (found.Exists(f => f.X0 >= box.X0 - Reach && f.X1 <= box.X1 + Reach && f.Y0 >= box.Y0 - Reach && f.Y1 <= box.Y1 + Reach)) continue;
@@ -113,8 +126,10 @@ internal static partial class PageStructure
             foreach (var w in words)
                 if (!w.Used && Inside(w, box)) inside.Add(w);
             if (inside.Count == 0) continue;
-            var breaks = Breaks(rules, gh, gv, box, inside);
-            var block = Grid(gh, gv.Concat(breaks).ToList(), box, inside, body, boxes);
+            // Cells that each draw their own border draw every column boundary, so a grid joined over wider spacing has
+            // none to find from breaks, and the dashes of its frames' borders would read as such breaks.
+            var breaks = wideApart ? new List<Segment>() : Breaks(rules, gh, gv, box, inside);
+            var block = Grid(gh, gv.Concat(breaks).ToList(), box, inside, body, boxes, wideApart);
             // Columns drawn only by breaks in the row lines say nothing of a row whose one bold label spans them.
             if (breaks.Count > 0 && block is TableBlock broken) SpanHeadings(broken);
             if (block == null) continue;
@@ -151,19 +166,42 @@ internal static partial class PageStructure
             return result;
         }
 
-        // Joins lines of one direction, sorted by position, that run the same length a few points apart. A page of so
-        // many lines that comparing them takes long is a drawing, and its lines stay as they are.
-        void Pair(List<Segment> list, int offset)
+        // Joins lines of one direction, sorted by position, that run the same length up to Close apart, or wider than
+        // that up to Spacing. A page of so many lines that comparing them takes long is a drawing, and its lines stay as
+        // they are.
+        void Pair(List<Segment> list, int offset, bool wider)
         {
+            double max = wider ? Spacing : Close;
             for (int i = 0; i < list.Count; i++)
             {
                 if ((i & 0xFF) == 0) cancellationToken.ThrowIfCancellationRequested();
-                for (int j = i + 1; j < list.Count && list[j].Pos - list[i].Pos <= Close; j++)
+                for (int j = i + 1; j < list.Count && list[j].Pos - list[i].Pos <= max; j++)
                 {
                     if (++work > MaxCrossings) return;
-                    if (Math.Abs(list[j].Start - list[i].Start) <= SameLine && Math.Abs(list[j].End - list[i].End) <= SameLine) Union(offset + i, offset + j);
+                    if ((!wider || list[j].Pos - list[i].Pos > Close) && Math.Abs(list[j].Start - list[i].Start) <= SameLine
+                        && Math.Abs(list[j].End - list[i].End) <= SameLine)
+                        Union(offset + i, offset + j);
                 }
             }
+        }
+
+        int[] Roots()
+        {
+            var roots = new int[parent.Length];
+            for (int i = 0; i < parent.Length; i++) roots[i] = Find(i);
+            return roots;
+        }
+
+        // For each group of outer, the one group of inner it holds, or -1 once it holds two.
+        static Dictionary<int, int> Holds(int[] inner, int[] outer)
+        {
+            var holds = new Dictionary<int, int>();
+            for (int i = 0; i < outer.Length; i++)
+            {
+                if (!holds.TryGetValue(outer[i], out int first)) holds[outer[i]] = inner[i];
+                else if (first >= 0 && first != inner[i]) holds[outer[i]] = -1;
+            }
+            return holds;
         }
     }
 
@@ -184,11 +222,21 @@ internal static partial class PageStructure
         var inBox = rules.FindAll(r => r.Horizontal && !r.Edge && r.Position >= box.Y0 - Reach && r.Position <= box.Y1 + Reach);
         // A line is broken at a place no piece of it, or of a line drawn over it, runs across.
         bool Broken(double x, double y) => !inBox.Exists(r => Math.Abs(r.Position - y) <= SameLine && r.Start < x - Join && r.End > x + Join);
+        // A line that ends where a side of its own starts or ends is the top or bottom of a box inside the grid, such as a
+        // form field's, rather than a row line broken at a column. The grid's own lines are not such sides.
+        List<PageRule>? sides = null;
+        bool Corner(double x, double y)
+        {
+            sides ??= rules.FindAll(r => !r.Horizontal && r.Position > box.X0 + Close && r.Position < box.X1 - Close
+                && r.End >= box.Y0 - Reach && r.Start <= box.Y1 + Reach);
+            return sides.Exists(r => Math.Abs(r.Position - x) <= Reach && (Math.Abs(r.Start - y) <= Reach || Math.Abs(r.End - y) <= Reach))
+                && !v.Exists(s => Math.Abs(s.Pos - x) <= SameLine && s.Start <= y + Reach && s.End >= y - Reach);
+        }
         var ends = new List<(double X, double Y)>();
         foreach (var r in inBox)
         {
-            if (r.Start > box.X0 + Close && r.Start < box.X1 - Close && Broken(r.Start, r.Position)) ends.Add((r.Start, r.Position));
-            if (r.End > box.X0 + Close && r.End < box.X1 - Close && Broken(r.End, r.Position)) ends.Add((r.End, r.Position));
+            if (r.Start > box.X0 + Close && r.Start < box.X1 - Close && Broken(r.Start, r.Position) && !Corner(r.Start, r.Position)) ends.Add((r.Start, r.Position));
+            if (r.End > box.X0 + Close && r.End < box.X1 - Close && Broken(r.End, r.Position) && !Corner(r.End, r.Position)) ends.Add((r.End, r.Position));
         }
         if (ends.Count == 0) return breaks;
         ends.Sort((a, b) => a.X.CompareTo(b.X));
@@ -369,9 +417,9 @@ internal static partial class PageStructure
     }
 
     /// <summary>Whether a boundary is drawn along most of the stretch from <paramref name="from"/> to <paramref name="to"/>.</summary>
-    private static bool Drawn(GridLine line, double from, double to)
+    private static bool Drawn(GridLine line, double from, double to, bool edges = true)
     {
-        if (line.Edge) return true;
+        if (line.Edge && edges) return true;
         double covered = 0;
         foreach (var s in line.Rules) covered += Math.Max(0, Math.Min(to, s.End) - Math.Max(from, s.Start));
         return covered >= 0.5 * (to - from);
@@ -384,7 +432,7 @@ internal static partial class PageStructure
     /// <paramref name="boxes"/>, cells that each draw their own border, or a part of one needs two rows and two columns.
     /// </summary>
     private static FlowBlock? Grid(List<Segment> h, List<Segment> v, (double X0, double Y0, double X1, double Y1) box, List<FlowWord> words, double body,
-        bool boxes = false)
+        bool boxes = false, bool spaced = false)
     {
         var xs = Boundaries(v, box.X0, box.X1, w => w.CenterX, words);
         var ys = Boundaries(h, box.Y0, box.Y1, w => w.CenterY, words);
@@ -433,6 +481,15 @@ internal static partial class PageStructure
         // A cell that is not a rectangle means the lines are a drawing, not a table.
         for (int i = 0; i < cells.Length; i++)
             if (cells[i] is { } tc && area[i] != tc.RowSpan * tc.ColumnSpan) return null;
+        // In a table whose cells each draw their own border every cell is a box, along the outside of the grid too: a
+        // place no box covers, as beside a box set under a row of others, means boxes laid out on their own.
+        if (spaced)
+            foreach (var tc in cells)
+                if (tc != null && !(Drawn(xs[tc.Column], ys[tc.Row].Pos, ys[tc.Row + tc.RowSpan].Pos, edges: false)
+                    && Drawn(xs[tc.Column + tc.ColumnSpan], ys[tc.Row].Pos, ys[tc.Row + tc.RowSpan].Pos, edges: false)
+                    && Drawn(ys[tc.Row], xs[tc.Column].Pos, xs[tc.Column + tc.ColumnSpan].Pos, edges: false)
+                    && Drawn(ys[tc.Row + tc.RowSpan], xs[tc.Column].Pos, xs[tc.Column + tc.ColumnSpan].Pos, edges: false)))
+                    return null;
 
         if (columns == 1 || rows == 1)
         {
@@ -466,6 +523,9 @@ internal static partial class PageStructure
         var withText = new List<List<FlowLine>>(filled);
         for (int i = 0; i < texts.Length; i++)
             if (texts[i] is { } list) withText.Add(cellLines[i] = CellLines(list));
+        // Boxes joined over wider spacing are as often cards, each with a title and some lines of text; most cells of a
+        // table hold one line.
+        if (spaced && withText.Count(l => l.Count > 1) * 3 > withText.Count) return null;
         if (UnderRuled(withText))
         {
             // The rules outline groups of rows and columns rather than cells, so the rows come from the lines and the

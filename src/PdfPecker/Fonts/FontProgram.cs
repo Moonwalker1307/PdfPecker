@@ -94,6 +94,8 @@ internal sealed partial class FontProgram
     private ushort[]? _bmp;                     // BMP code point -> glyph id
     private Dictionary<int, ushort>? _astral;   // supplementary planes
     private short[]? _charWidths;               // BMP code point -> advance in 1/1000 em
+    private VariationSequences? _sequences;     // cmap format 14, read when text first has a variation selector
+    private bool _sequencesLoaded;
     private Kerning? _kerning;
     private bool _kerningLoaded;
     private Ligatures? _ligatures;
@@ -327,6 +329,46 @@ internal sealed partial class FontProgram
         var bmp = _bmp ?? BuildCharMap();
         if ((uint)codePoint < 0x10000) return bmp[codePoint];
         return _astral != null && _astral.TryGetValue(codePoint, out var g) ? g : 0;
+    }
+
+    /// <summary>
+    /// The glyph of a character followed by a variation selector (U+FE00..U+FE0F, U+E0100..U+E01EF), from the font's
+    /// variation sequences (cmap format 14): the glyph of a non-default sequence, the character's usual glyph for a
+    /// default one, or -1 when the font does not have the sequence, which then draws the character as usual and the
+    /// selector as nothing, as HarfBuzz does.
+    /// </summary>
+    public int VariationGlyphId(int codePoint, int selector)
+    {
+        var sequences = Volatile.Read(ref _sequencesLoaded) ? _sequences : LoadSequences();
+        if (sequences == null) return -1;
+        int glyph = sequences.Glyph(codePoint, selector);
+        return glyph == 0 ? GlyphId(codePoint) : glyph;
+    }
+
+    private VariationSequences? LoadSequences()
+    {
+        lock (_lock)
+        {
+            if (_sequencesLoaded) return _sequences;
+            if (Table("cmap") is { } cmap)
+                try
+                {
+                    foreach (var subtable in CmapTable.Subtables(Reader, cmap.Offset, cmap.Length))
+                        if (subtable.Format == CmapTable.VariationSequencesFormat)
+                        {
+                            var sequences = CmapTable.ReadVariationSequences(Reader, subtable.Offset, NumGlyphs);
+                            if (!sequences.IsEmpty) _sequences = sequences;
+                            break;
+                        }
+                }
+                catch (Exception ex) when (IsFormatError(ex))
+                {
+                    // Damaged variation sequences: the characters keep their usual glyphs.
+                    SwallowedErrors.Record(ex);
+                }
+            Volatile.Write(ref _sequencesLoaded, true);
+            return _sequences;
+        }
     }
 
     /// <summary>

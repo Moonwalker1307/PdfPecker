@@ -802,4 +802,102 @@ public class RendererImageTests
         AssertAt(img, 20, 20, (int)Math.Round((0.8 + 0.24) / 2 * 255), (int)Math.Round((0.4 + 0.24) / 2 * 255), (int)Math.Round((0.2 + 0.18) / 2 * 255), 4);
     }
 
+    // ---------------------------------------------------------------- non-isolated groups
+
+    /// <summary>A transparency group of a 40 by 40 page; <paramref name="resources"/> go in its resources dictionary.</summary>
+    private static int Group(FixturePdf pdf, string content, bool isolated = false, string resources = "")
+        => pdf.AddStream($"/Type /XObject /Subtype /Form /BBox [0 0 40 40] /Group << /S /Transparency{(isolated ? " /I true" : "")} >> /Resources << {resources} >>", content);
+
+    [Theory]
+    [InlineData(false, 3, 255, 0)] // cyan times yellow is green
+    [InlineData(true, 3, 255, 252)] // the group has nothing to blend with: cyan
+    public void Blend_modes_in_a_non_isolated_group_blend_with_the_page_below(bool isolated, int r, int g, int b)
+    {
+        // The group is painted at 99% opacity, so it is drawn offscreen; a non-isolated one still blends with the yellow
+        // under it, as MuPDF and Poppler draw it (ISO 32000-2, 11.4.8).
+        var pdf = new FixturePdf();
+        int multiply = pdf.Add("<< /BM /Multiply >>");
+        int form = Group(pdf, "/M gs 0 1 1 rg 0 0 40 40 re f", isolated, $"/ExtGState << /M {multiply} 0 R >>");
+        int alpha = pdf.Add("<< /ca 0.99 >>");
+        var img = Render(pdf.Build(40, 40, "1 1 0 rg 0 0 40 20 re f /A gs /X Do", $"/XObject << /X {form} 0 R >> /ExtGState << /A {alpha} 0 R >>"));
+        AssertAt(img, 20, 10, r, g, b, 3);
+        AssertAt(img, 20, 30, 3, 255, 255, 3); // nothing below: cyan either way
+    }
+
+    [Fact]
+    public void Non_isolated_group_inside_a_non_isolated_group_blends_with_the_page()
+    {
+        // Cyan difference yellow is magenta; the inner group's 0.8 and the outer group's 0.7 leave 0.56 of it over yellow.
+        var pdf = new FixturePdf();
+        int difference = pdf.Add("<< /BM /Difference >>");
+        int a80 = pdf.Add("<< /ca 0.8 >>");
+        int inner = Group(pdf, "/D gs 0 1 1 rg 0 0 40 40 re f", resources: $"/ExtGState << /D {difference} 0 R >>");
+        int outer = Group(pdf, "/A gs /Xi Do", resources: $"/ExtGState << /A {a80} 0 R >> /XObject << /Xi {inner} 0 R >>");
+        int a70 = pdf.Add("<< /ca 0.7 >>");
+        var img = Render(pdf.Build(40, 40, "1 1 0 rg 0 0 40 40 re f /A gs /X Do", $"/XObject << /X {outer} 0 R >> /ExtGState << /A {a70} 0 R >>"));
+        AssertAt(img, 20, 20, 255, 112, 143, 3);
+    }
+
+    [Fact]
+    public void Isolated_group_blended_inside_a_non_isolated_group_blends_with_the_page()
+    {
+        // The isolated cyan group is multiplied onto what shows through the translucent outer group: yellow, giving
+        // green, of which the outer group's 0.5 shows.
+        var pdf = new FixturePdf();
+        int child = Group(pdf, "0 1 1 rg 0 0 40 40 re f", isolated: true);
+        int multiply = pdf.Add("<< /BM /Multiply >>");
+        int outer = Group(pdf, "/M gs /Xc Do", resources: $"/ExtGState << /M {multiply} 0 R >> /XObject << /Xc {child} 0 R >>");
+        int half = pdf.Add("<< /ca 0.5 >>");
+        var img = Render(pdf.Build(40, 40, "1 1 0 rg 0 0 40 40 re f /A gs /X Do", $"/XObject << /X {outer} 0 R >> /ExtGState << /A {half} 0 R >>"));
+        AssertAt(img, 20, 20, 128, 255, 0, 3);
+    }
+
+    [Fact]
+    public void Non_isolated_group_with_only_normal_paint_looks_like_an_isolated_one()
+    {
+        var pdfs = new[] { false, true }.Select(isolated =>
+        {
+            var pdf = new FixturePdf();
+            int form = Group(pdf, "0 1 1 rg 5 5 20 20 re f 1 0 0 rg 15 15 20 20 re f", isolated);
+            int half = pdf.Add("<< /ca 0.5 >>");
+            return Render(pdf.Build(40, 40, "1 1 0 rg 0 0 40 20 re f /A gs /X Do", $"/XObject << /X {form} 0 R >> /ExtGState << /A {half} 0 R >>")).Rgba;
+        }).ToArray();
+        Assert.Equal(pdfs[0], pdfs[1]);
+    }
+
+    [Theory]
+    [InlineData("/M gs 1 g 0 0 20 40 re f", 255, 0, 0)] // white multiplied with nothing stays white: mask 1
+    [InlineData("/H gs /Xi Do", 255, 64, 64)] // white differenced with nothing, at half alpha over gray 0.5: mask 0.75
+    public void Luminosity_soft_mask_group_is_put_on_its_backdrop_colour_after_it_is_drawn(string groupContent, int r, int g, int b)
+    {
+        // Blend modes in the mask's group, also in a non-isolated group inside it, do not blend with the backdrop colour
+        // BC, as MuPDF and Poppler draw it: the group is drawn alone and then composited with BC.
+        var pdf = new FixturePdf();
+        int multiply = pdf.Add("<< /BM /Multiply >>");
+        int difference = pdf.Add("<< /BM /Difference >>");
+        int half = pdf.Add("<< /ca 0.5 >>");
+        int inner = Group(pdf, "/D gs 1 g 0 0 20 40 re f", resources: $"/ExtGState << /D {difference} 0 R >>");
+        int form = pdf.AddStream("/Type /XObject /Subtype /Form /BBox [0 0 40 40] /Group << /S /Transparency /CS /DeviceGray >> "
+            + $"/Resources << /ExtGState << /M {multiply} 0 R /H {half} 0 R >> /XObject << /Xi {inner} 0 R >> >>", groupContent);
+        int gs = pdf.Add($"<< /Type /ExtGState /SMask << /Type /Mask /S /Luminosity /G {form} 0 R /BC [0.5] >> >>");
+        var img = Render(pdf.Build(40, 40, "/GS gs 1 0 0 rg 0 0 40 40 re f", $"/ExtGState << /GS {gs} 0 R >>"));
+        AssertAt(img, 10, 20, r, g, b, 3);
+        AssertAt(img, 30, 20, 255, 128, 128, 3); // outside what the group drew, the backdrop colour alone
+    }
+
+    [Fact]
+    public void Many_luminosity_soft_masks_with_unbounded_boxes_render_at_print_resolution()
+    {
+        // A luminosity mask's group was drawn over its backdrop colour, which filled all of its box within the clip:
+        // a page's worth for a huge box and no clip, so 200 such masks were too complex to render at 300 dpi.
+        var pdf = new FixturePdf();
+        int form = pdf.AddStream("/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] /Group << /S /Transparency /CS /DeviceGray >>",
+            "1 g 0 0 10 10 re f");
+        int gs = pdf.Add($"<< /Type /ExtGState /SMask << /Type /Mask /S /Luminosity /G {form} 0 R >> >>");
+        var content = new StringBuilder();
+        for (int i = 0; i < 200; i++) content.Append($"q 1 0 0 1 {20 + i % 40 * 13} {20 + i / 40 * 13} cm /GS gs 1 0 0 rg 0 0 10 10 re f Q ");
+        var page = PdfRenderer.Open(pdf.Build(595, 842, content.ToString(), $"/ExtGState << /GS {gs} 0 R >>"))
+            .RenderPage(0, new ImageOptions { Dpi = 300 });
+        AssertColor(Px(page, (int)(25 * 300 / 72.0), page.Height - (int)(25 * 300 / 72.0)), 255, 0, 0);
+    }
 }
