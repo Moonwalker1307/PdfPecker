@@ -3,7 +3,7 @@ using PdfPecker.Rendering.Images;
 namespace PdfPecker.Images;
 
 /// <summary>
-/// Decodes image files to <see cref="ImagePlanes"/> for <see cref="ImageDecoder"/>, giving the pixels that
+/// Decodes image files to <see cref="ImagePlanes"/> for <see cref="ImageToPixels"/>, giving the pixels that
 /// <see cref="ImageToPdf"/> would embed and the renderer would draw, without the PDF in between. Where
 /// <see cref="PdfImage.FromBytes"/> already makes 8-bit planes (GIF, WebP, BMP, TIFF and PNG with transparency) they are
 /// taken before they are compressed; JPEG and PNG of 8-bit grey or RGB are decoded straight to their samples; the rest

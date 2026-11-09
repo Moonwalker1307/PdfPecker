@@ -1,6 +1,6 @@
 namespace PdfPecker.Tests;
 
-public class ImageDecoderTests
+public class ImageToPixelsTests
 {
     private static byte[] Fixture(string name) => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
 
@@ -46,7 +46,7 @@ public class ImageDecoderTests
 
     private static void AssertSameImage(byte[] image, string name)
     {
-        var decoded = ImageDecoder.Decode(image, new ImageDecodeOptions { Format = ImagePixelFormat.Rgb, ApplyOrientation = false });
+        var decoded = ImageToPixels.Convert(image, new ImageToPixelsOptions { Format = ImagePixelFormat.Rgb, ApplyOrientation = false });
         var expected = EmbeddedRgb(image, out int w, out int h);
         Assert.Equal((w, h), (decoded.Width, decoded.Height));
         Assert.True(expected.AsSpan().SequenceEqual(decoded.Pixels), name);
@@ -106,33 +106,33 @@ public class ImageDecoderTests
     [Fact]
     public void The_natural_format_keeps_grey_grey_and_transparency()
     {
-        var gray = ImageDecoder.Decode(Fixture("images/gray-lzw.tif"));
+        var gray = ImageToPixels.Convert(Fixture("images/gray-lzw.tif"));
         Assert.Equal(ImagePixelFormat.Gray, gray.Format);
         Assert.Equal(gray.Width * gray.Height, gray.Pixels.Length);
         Assert.Equal(gray.Width, gray.Stride);
 
-        var rgb = ImageDecoder.Decode(Fixture("rgb.jpg"));
+        var rgb = ImageToPixels.Convert(Fixture("rgb.jpg"));
         Assert.Equal(ImagePixelFormat.Rgb, rgb.Format);
         Assert.Equal(rgb.Width * rgb.Height * 3, rgb.Pixels.Length);
 
-        var rgba = ImageDecoder.Decode(PdfTestHelpers.RgbaPng());
+        var rgba = ImageToPixels.Convert(PdfTestHelpers.RgbaPng());
         Assert.Equal(ImagePixelFormat.Rgba, rgba.Format);
         Assert.Equal(new byte[] { 255, 0, 0, 0 }, rgba.Pixels[..4]);
         Assert.Equal(new byte[] { 255, 0, 0, 255 }, rgba.Pixels[4..8]);
 
         // An alpha channel that is opaque everywhere is no transparency.
-        Assert.Equal(ImagePixelFormat.Rgb, ImageDecoder.Decode(PdfTestHelpers.SolidPng(3, 3, 1, 2, 3)).Format);
+        Assert.Equal(ImagePixelFormat.Rgb, ImageToPixels.Convert(PdfTestHelpers.SolidPng(3, 3, 1, 2, 3)).Format);
     }
 
     [Fact]
     public void Transparency_is_flattened_onto_the_background()
     {
         var png = PdfTestHelpers.SolidPng(2, 2, 255, 255, 255, 0);
-        var rgb = ImageDecoder.Decode(png, new ImageDecodeOptions { Format = ImagePixelFormat.Rgb, BackgroundColor = 0xFF102030 });
+        var rgb = ImageToPixels.Convert(png, new ImageToPixelsOptions { Format = ImagePixelFormat.Rgb, BackgroundColor = 0xFF102030 });
         Assert.Equal(new byte[] { 0x10, 0x20, 0x30 }, rgb.Pixels[..3]);
-        var gray = ImageDecoder.Decode(png, new ImageDecodeOptions { Format = ImagePixelFormat.Gray, BackgroundColor = 0xFF808080 });
+        var gray = ImageToPixels.Convert(png, new ImageToPixelsOptions { Format = ImagePixelFormat.Gray, BackgroundColor = 0xFF808080 });
         Assert.All(gray.Pixels, p => Assert.Equal(0x80, p));
-        var rgba = ImageDecoder.Decode(PdfTestHelpers.RgbPng(), new ImageDecodeOptions { Format = ImagePixelFormat.Rgba });
+        var rgba = ImageToPixels.Convert(PdfTestHelpers.RgbPng(), new ImageToPixelsOptions { Format = ImagePixelFormat.Rgba });
         Assert.Equal(new byte[] { 0, 128, 255, 255 }, rgba.Pixels[..4]);
     }
 
@@ -140,7 +140,7 @@ public class ImageDecoderTests
     public void Colour_becomes_luma_and_grey_stays_exact()
     {
         var png = PdfTestHelpers.PixelPng(3, 1, (x, _) => x switch { 0 => (255, 0, 0), 1 => (0, 255, 0), _ => (77, 77, 77) });
-        var gray = ImageDecoder.Decode(png, new ImageDecodeOptions { Format = ImagePixelFormat.Gray });
+        var gray = ImageToPixels.Convert(png, new ImageToPixelsOptions { Format = ImagePixelFormat.Gray });
         Assert.Equal(new byte[] { 76, 150, 77 }, gray.Pixels);
     }
 
@@ -148,8 +148,8 @@ public class ImageDecoderTests
     public void A_photo_is_turned_as_its_exif_orientation_says_unless_asked_not_to()
     {
         var jpeg = Fixture("images/exif.jpg");
-        var stored = ImageDecoder.Decode(jpeg, new ImageDecodeOptions { ApplyOrientation = false });
-        var upright = ImageDecoder.Decode(jpeg);
+        var stored = ImageToPixels.Convert(jpeg, new ImageToPixelsOptions { ApplyOrientation = false });
+        var upright = ImageToPixels.Convert(jpeg);
         var embedded = Images.PdfImage.FromBytes(jpeg)!;
         Assert.Equal((embedded.Width, embedded.Height), (upright.Width, upright.Height));
         int orientation = Images.ExifReader.ReadOrientation(jpeg);
@@ -178,33 +178,33 @@ public class ImageDecoderTests
         var pages = new[] { PdfTestHelpers.SolidPng(30, 20, 255, 0, 0), PdfTestHelpers.SolidPng(10, 40, 0, 0, 255) };
         var pdf = ImageToPdf.Convert(pages);
         var tiff = PdfToImage.ConvertToTiff(pdf, new ImageOptions { Dpi = 72 });
-        Assert.Equal(2, ImageDecoder.GetFrameCount(tiff));
-        var first = ImageDecoder.Decode(tiff);
-        var second = ImageDecoder.Decode(tiff, new ImageDecodeOptions { Frame = 1 });
+        Assert.Equal(2, ImageToPixels.GetFrameCount(tiff));
+        var first = ImageToPixels.Convert(tiff);
+        var second = ImageToPixels.Convert(tiff, new ImageToPixelsOptions { Frame = 1 });
         Assert.Equal(new byte[] { 255, 0, 0 }, first.Pixels[..3]);
         Assert.Equal(new byte[] { 0, 0, 255 }, second.Pixels[..3]);
         Assert.NotEqual((first.Width, first.Height), (second.Width, second.Height));
-        Assert.Throws<ArgumentOutOfRangeException>(() => ImageDecoder.Decode(tiff, new ImageDecodeOptions { Frame = 2 }));
-        Assert.Equal(1, ImageDecoder.GetFrameCount(Fixture("rgb.jpg")));
-        Assert.Throws<ArgumentOutOfRangeException>(() => ImageDecoder.Decode(Fixture("rgb.jpg"), new ImageDecodeOptions { Frame = 1 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ImageToPixels.Convert(tiff, new ImageToPixelsOptions { Frame = 2 }));
+        Assert.Equal(1, ImageToPixels.GetFrameCount(Fixture("rgb.jpg")));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ImageToPixels.Convert(Fixture("rgb.jpg"), new ImageToPixelsOptions { Frame = 1 }));
     }
 
     [Fact]
     public void Bad_input_fails_with_documented_exceptions()
     {
-        Assert.Throws<ArgumentNullException>(() => ImageDecoder.Decode((byte[])null!));
-        Assert.Throws<InvalidDataException>(() => ImageDecoder.Decode(new byte[] { 1, 2, 3, 4 }));
-        Assert.Throws<InvalidDataException>(() => ImageDecoder.GetFrameCount("GIF89a"u8.ToArray()[..3]));
+        Assert.Throws<ArgumentNullException>(() => ImageToPixels.Convert((byte[])null!));
+        Assert.Throws<InvalidDataException>(() => ImageToPixels.Convert(new byte[] { 1, 2, 3, 4 }));
+        Assert.Throws<InvalidDataException>(() => ImageToPixels.GetFrameCount("GIF89a"u8.ToArray()[..3]));
         var png = PdfTestHelpers.RgbPng(8);
-        Assert.Throws<InvalidDataException>(() => ImageDecoder.Decode(png[..(png.Length / 2)]));
-        Assert.Throws<InvalidDataException>(() => ImageDecoder.Decode(png, new ImageDecodeOptions { MaxPixels = 63 }));
-        Assert.Equal(64 * 3, ImageDecoder.Decode(png, new ImageDecodeOptions { MaxPixels = 64 }).Pixels.Length);
-        Assert.Throws<ArgumentOutOfRangeException>(() => new ImageDecodeOptions { MaxPixels = ImageDecodeOptions.MaxPixelLimit + 1 });
-        Assert.Throws<ArgumentOutOfRangeException>(() => new ImageDecodeOptions { Frame = -1 });
-        Assert.Throws<ArgumentOutOfRangeException>(() => ImageDecoder.Decode(png, new ImageDecodeOptions { Format = (ImagePixelFormat)7 }));
+        Assert.Throws<InvalidDataException>(() => ImageToPixels.Convert(png[..(png.Length / 2)]));
+        Assert.Throws<InvalidDataException>(() => ImageToPixels.Convert(png, new ImageToPixelsOptions { MaxPixels = 63 }));
+        Assert.Equal(64 * 3, ImageToPixels.Convert(png, new ImageToPixelsOptions { MaxPixels = 64 }).Pixels.Length);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ImageToPixelsOptions { MaxPixels = ImageToPixelsOptions.MaxPixelLimit + 1 });
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ImageToPixelsOptions { Frame = -1 });
+        Assert.Throws<ArgumentOutOfRangeException>(() => ImageToPixels.Convert(png, new ImageToPixelsOptions { Format = (ImagePixelFormat)7 }));
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
-        Assert.Throws<OperationCanceledException>(() => ImageDecoder.Decode(png, null, cancelled.Token));
+        Assert.Throws<OperationCanceledException>(() => ImageToPixels.Convert(png, null, cancelled.Token));
     }
 }
 
@@ -218,8 +218,8 @@ public class ImageDecoderHostileInputTests
         // 50,000 by 50,000 pixels of nothing: over the limit, so the data is never inflated.
         var raw = new byte[1024];
         var png = PdfTestHelpers.Png(50_000, 50_000, 0, raw);
-        Assert.Throws<InvalidDataException>(() => ImageDecoder.Decode(png));
-        Assert.Equal(1, ImageDecoder.GetFrameCount(png));
+        Assert.Throws<InvalidDataException>(() => ImageToPixels.Convert(png));
+        Assert.Equal(1, ImageToPixels.GetFrameCount(png));
     }
 
     [Fact]
@@ -230,7 +230,7 @@ public class ImageDecoderHostileInputTests
         byte[] png = Convert.FromHexString(
             "89504E470D0A1A0A0000000D49484452000000140000000A08020000003B37E9B10000001B49444154782055"
             + "91AC752B62DCC03184C78F203D761849B2A4C99324" + "45A85C");
-        var decoded = ImageDecoder.Decode(png);
+        var decoded = ImageToPixels.Convert(png);
         Assert.Equal((20, 10, ImagePixelFormat.Rgb), (decoded.Width, decoded.Height, decoded.Format));
     }
 }

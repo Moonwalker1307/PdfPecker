@@ -4,7 +4,7 @@ using PdfPecker.Images;
 namespace PdfPecker;
 
 /// <summary>
-/// The byte layout of pixels from <see cref="ImageDecoder"/> and
+/// The byte layout of pixels from <see cref="ImageToPixels"/> and
 /// <see cref="PdfRenderer.RenderPage(int, Span{byte}, ImagePixelFormat, ImageOptions?, CancellationToken)"/>: 8 bits
 /// per channel, rows from the top without padding.
 /// </summary>
@@ -20,8 +20,8 @@ public enum ImagePixelFormat
     Rgba,
 }
 
-/// <summary>Options for <see cref="ImageDecoder.Decode(byte[], ImageDecodeOptions?, CancellationToken)"/>.</summary>
-public sealed class ImageDecodeOptions
+/// <summary>Options for <see cref="ImageToPixels.Convert(byte[], ImageToPixelsOptions?, CancellationToken)"/>.</summary>
+public sealed class ImageToPixelsOptions
 {
     /// <summary>The most pixels an image may have, which is also the library's own limit. 100 million.</summary>
     public const long MaxPixelLimit = 100_000_000;
@@ -30,7 +30,7 @@ public sealed class ImageDecodeOptions
     private long _maxPixels = MaxPixelLimit;
 
     /// <summary>
-    /// The frame to decode, counted from 0: a page of a multi-page TIFF file (see <see cref="ImageDecoder.GetFrameCount"/>).
+    /// The frame to decode, counted from 0: a page of a multi-page TIFF file (see <see cref="ImageToPixels.GetFrameCount"/>).
     /// Other formats have one frame; an animated GIF or WebP gives its first. Default 0.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
@@ -74,7 +74,7 @@ public sealed class ImageDecodeOptions
     }
 }
 
-/// <summary>Decoded pixels from <see cref="ImageDecoder"/>.</summary>
+/// <summary>Decoded pixels from <see cref="ImageToPixels"/>.</summary>
 public sealed class ImagePixels
 {
     internal ImagePixels(int width, int height, ImagePixelFormat format, byte[] pixels)
@@ -107,10 +107,10 @@ public sealed class ImagePixels
 /// pixel per image pixel: the same colour conversions (CMYK, palettes, 16-bit and fewer-bit samples, the EXIF
 /// orientation of photos) and the same limits on damaged and oversized files. All methods are static and thread-safe.
 /// </summary>
-public static class ImageDecoder
+public static class ImageToPixels
 {
     /// <summary>
-    /// The number of frames <see cref="Decode(byte[], ImageDecodeOptions?, CancellationToken)"/> can read: the pages of
+    /// The number of frames <see cref="Convert(byte[], ImageToPixelsOptions?, CancellationToken)"/> can read: the pages of
     /// a TIFF file (up to 65,536), and 1 for the other formats.
     /// </summary>
     /// <param name="image">The image file's bytes.</param>
@@ -130,15 +130,15 @@ public static class ImageDecoder
     /// <param name="cancellationToken">Checked before and after decoding, which itself runs to the end.</param>
     /// <returns>The pixels.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="image"/> is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageDecodeOptions.Frame"/> is not a frame of the image, or <see cref="ImageDecodeOptions.Format"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageToPixelsOptions.Frame"/> is not a frame of the image, or <see cref="ImageToPixelsOptions.Format"/> is not a defined value.</exception>
     /// <exception cref="InvalidDataException">
-    /// The data is not a supported image, is damaged, or has more pixels than <see cref="ImageDecodeOptions.MaxPixels"/>.
+    /// The data is not a supported image, is damaged, or has more pixels than <see cref="ImageToPixelsOptions.MaxPixels"/>.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
-    public static ImagePixels Decode(byte[] image, ImageDecodeOptions? options = null, CancellationToken cancellationToken = default)
+    public static ImagePixels Convert(byte[] image, ImageToPixelsOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(image);
-        options ??= new ImageDecodeOptions();
+        options ??= new ImageToPixelsOptions();
         if (options.Format is { } requested) _ = PixelConversion.BytesPerPixel(requested);
         cancellationToken.ThrowIfCancellationRequested();
         int frames = PixelDecoder.FrameCount(image);
@@ -167,39 +167,39 @@ public static class ImageDecoder
         return new ImagePixels(planes.Width, planes.Height, format, pixels);
     }
 
-    /// <summary>Decodes an image from a stream, read to its end; see <see cref="Decode(byte[], ImageDecodeOptions?, CancellationToken)"/>.</summary>
+    /// <summary>Decodes an image from a stream, read to its end; see <see cref="Convert(byte[], ImageToPixelsOptions?, CancellationToken)"/>.</summary>
     /// <param name="image">A stream with a PNG, JPEG, GIF, WebP, BMP or TIFF file.</param>
     /// <param name="options">The frame, pixel format, background and limits; null for the defaults.</param>
     /// <param name="cancellationToken">Checked before and after decoding.</param>
     /// <returns>The pixels.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="image"/> is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageDecodeOptions.Frame"/> is not a frame of the image, or <see cref="ImageDecodeOptions.Format"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageToPixelsOptions.Frame"/> is not a frame of the image, or <see cref="ImageToPixelsOptions.Format"/> is not a defined value.</exception>
     /// <exception cref="InvalidDataException">The data is not a supported image, is damaged, or is too large.</exception>
     /// <exception cref="IOException">Reading the stream fails.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
-    public static ImagePixels Decode(Stream image, ImageDecodeOptions? options = null, CancellationToken cancellationToken = default)
+    public static ImagePixels Convert(Stream image, ImageToPixelsOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(image);
         var ms = new MemoryStream();
         image.CopyTo(ms);
-        return Decode(ms.ToArray(), options, cancellationToken);
+        return Convert(ms.ToArray(), options, cancellationToken);
     }
 
-    /// <summary>Decodes an image file; see <see cref="Decode(byte[], ImageDecodeOptions?, CancellationToken)"/>.</summary>
+    /// <summary>Decodes an image file; see <see cref="Convert(byte[], ImageToPixelsOptions?, CancellationToken)"/>.</summary>
     /// <param name="path">A PNG, JPEG, GIF, WebP, BMP or TIFF file.</param>
     /// <param name="options">The frame, pixel format, background and limits; null for the defaults.</param>
     /// <param name="cancellationToken">Checked before and after decoding.</param>
     /// <returns>The pixels.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageDecodeOptions.Frame"/> is not a frame of the image, or <see cref="ImageDecodeOptions.Format"/> is not a defined value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageToPixelsOptions.Frame"/> is not a frame of the image, or <see cref="ImageToPixelsOptions.Format"/> is not a defined value.</exception>
     /// <exception cref="InvalidDataException">The file is not a supported image, is damaged, or is too large.</exception>
     /// <exception cref="IOException">The file cannot be read, for example because it does not exist.</exception>
     /// <exception cref="UnauthorizedAccessException">The process may not read the file.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
-    public static ImagePixels DecodeFile(string path, ImageDecodeOptions? options = null, CancellationToken cancellationToken = default)
+    public static ImagePixels ConvertFile(string path, ImageToPixelsOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(path);
-        return Decode(File.ReadAllBytes(path), options, cancellationToken);
+        return Convert(File.ReadAllBytes(path), options, cancellationToken);
     }
 
     private const string NotAnImage = "The data is not a PNG, JPEG, GIF, WebP, BMP or TIFF image.";
