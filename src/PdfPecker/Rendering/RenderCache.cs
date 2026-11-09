@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using PdfPecker.Rendering.Content;
 using PdfPecker.Rendering.Fonts;
 using PdfPecker.Rendering.Images;
@@ -45,15 +46,111 @@ internal sealed class RenderCache
     private readonly ConcurrentDictionary<GlyphKey, GlyphBitmap> _glyphs = new();
     private int _glyphCount;
 
+    // A large image that one page draws, such as the scan of a scanned page, goes to a small pool of its own whose
+    // oldest entries give way to new ones, until another page draws it too: kept with the others, every page's scan
+    // (35 MB at 300 dpi A4) stayed until the image pool's 512 MB were full, though no other page draws it. The pool
+    // holds one such scan, so a page drawn again soon after, as a thumbnail and then in full, still finds it.
+    private const long SinglePageMinBytes = 4L * 1024 * 1024;
+    private readonly Pool _singlePagePool = new(64L * 1024 * 1024);
+    private readonly Dictionary<PdfDict, Entry<DecodedImage?>> _singlePageImages = new(ReferenceEqualityComparer.Instance);
+    private readonly Queue<(PdfDict Key, Entry<DecodedImage?> Entry, long Size)> _singlePageOrder = new();
+    // The page that first drew each large image; small, as it holds only the keys.
+    private readonly Dictionary<PdfDict, object> _imagePages = new(ReferenceEqualityComparer.Instance);
+
     public PdfFont GetFont(PdfFile file, PdfDict dict, PageCacheUse use)
         => GetOrAdd(_fonts, _fontPool, dict, use, () => (PdfFont.Load(file, dict), 0));
 
-    public DecodedImage? GetImage(PdfStream stream, Func<DecodedImage?> decode, PageCacheUse use)
-        => GetOrAdd(_images, _imagePool, stream, use, () =>
+    /// <summary>
+    /// The decoded image of <paramref name="stream"/>, which its dictionary says takes about
+    /// <paramref name="expectedBytes"/>, made by <paramref name="decode"/> when it is not cached.
+    /// </summary>
+    public DecodedImage? GetImage(PdfStream stream, Func<DecodedImage?> decode, PageCacheUse use, long expectedBytes = 0)
+    {
+        Func<(DecodedImage? Value, long Size)> create = () =>
         {
             var image = decode();
             return (image, image?.ByteSize ?? 0);
-        });
+        };
+        if (expectedBytes < SinglePageMinBytes || use.Page == null) return GetOrAdd(_images, _imagePool, stream, use, create);
+
+        Entry<DecodedImage?>? promoted = null;
+        lock (_singlePagePool)
+        {
+            ref var first = ref CollectionsMarshal.GetValueRefOrAddDefault(_imagePages, stream, out bool seen);
+            if (!seen) first = use.Page;
+            if (ReferenceEquals(first, SharedOwner)) promoted = SharedMarker;
+            else if (ReferenceEquals(first, use.Page)) promoted = null;
+            else
+            {
+                // From now on every page, the first one too, finds the image in the shared pool.
+                first = SharedOwner;
+                if (_singlePageImages.Remove(stream, out promoted)) _singlePagePool.Held -= promoted.Size;
+                else promoted = SharedMarker;
+            }
+        }
+        if (promoted == null) return GetOrAddSinglePage(stream, use, create);
+        if (ReferenceEquals(promoted, SharedMarker)) return GetOrAdd(_images, _imagePool, stream, use, create);
+
+        // A second page draws the image: it moves to the shared pool, as if that page had found it there.
+        use.Charge(promoted);
+        lock (_imagePool)
+        {
+            if (_images.TryGetValue(stream, out var other)) return other.Value;
+            if (_imagePool.Held + promoted.Size <= _imagePool.Limit)
+            {
+                _images[stream] = promoted;
+                _imagePool.Held += promoted.Size;
+            }
+        }
+        return promoted.Value;
+    }
+
+    /// <summary>Stands for "look in the shared pool" in <see cref="GetImage"/>; never stored.</summary>
+    private static readonly Entry<DecodedImage?> SharedMarker = new(null, 0);
+
+    /// <summary>The page recorded for an image that more than one page draws.</summary>
+    private static readonly object SharedOwner = new();
+
+    /// <summary><see cref="GetOrAdd"/> for the single-page pool, which makes room for a new entry by dropping the oldest.</summary>
+    private DecodedImage? GetOrAddSinglePage(PdfStream key, PageCacheUse use, Func<(DecodedImage? Value, long Size)> create)
+    {
+        var pool = _singlePagePool;
+        Entry<DecodedImage?>? entry;
+        lock (pool) _singlePageImages.TryGetValue(key, out entry);
+        if (entry != null)
+        {
+            use.Charge(entry);
+            return entry.Value;
+        }
+        long before = PdfFile.DecodeLimit;
+        var (value, size) = create();
+        long after = PdfFile.DecodeLimit;
+        if (after == 0) return value;
+        entry = new Entry<DecodedImage?>(value, before - after);
+        use.Made(entry);
+        lock (pool)
+        {
+            if (_singlePageImages.TryGetValue(key, out var other))
+            {
+                use.Made(other);
+                return other.Value;
+            }
+            // Too large for this pool, or drawn by another page while this one decoded it: that page keeps it.
+            if (size > pool.Limit || ReferenceEquals(_imagePages.GetValueOrDefault(key), SharedOwner)) return value;
+            entry.Size = size;
+            while (pool.Held + size > pool.Limit && _singlePageOrder.TryDequeue(out var oldest))
+            {
+                // An entry that moved to the shared pool has left this one already.
+                if (!_singlePageImages.TryGetValue(oldest.Key, out var held) || !ReferenceEquals(held, oldest.Entry)) continue;
+                _singlePageImages.Remove(oldest.Key);
+                pool.Held -= oldest.Entry.Size;
+            }
+            _singlePageImages[key] = entry;
+            _singlePageOrder.Enqueue((key, entry, size));
+            pool.Held += size;
+        }
+        return value;
+    }
 
     /// <summary>The colour space a name stands for in the resources, as <see cref="ColorSpace.Parse"/> reads it.</summary>
     public ColorSpace? GetColorSpace(PdfFile file, string name, PdfDict? resources, PageCacheUse use)
@@ -153,6 +250,9 @@ internal sealed class RenderCache
         }
 
         public long Cost { get; }
+
+        /// <summary>The bytes the entry holds, for the single-page pool.</summary>
+        public long Size { get; set; }
     }
 
     /// <summary>The bytes the entries of one or more caches may hold together, and what they hold.</summary>
@@ -195,6 +295,9 @@ internal sealed class PageCacheUse
     {
         long Cost { get; }
     }
+
+    /// <summary>The page being drawn (its dictionary), which the image cache tells apart from other pages; null when unknown.</summary>
+    public object? Page { get; set; }
 
     /// <summary>Notes an entry this page made, whose decoding was already charged to it.</summary>
     public void Made(ICharged entry) => _charged.Add(entry);

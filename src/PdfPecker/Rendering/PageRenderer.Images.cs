@@ -9,7 +9,8 @@ internal sealed partial class PageRenderer
     private void DrawImageXObject(PdfStream xobj, PdfDict? res)
     {
         if (_gs.Clip.IsEmpty) return;
-        var img = _cache.GetImage(xobj, () => DecodeImage(xobj, null, res, false), _cacheUse);
+        long bytes = 4L * _file.GetIntValue(xobj["Width"] ?? xobj["W"]) * _file.GetIntValue(xobj["Height"] ?? xobj["H"]);
+        var img = _cache.GetImage(xobj, () => DecodeImage(xobj, null, res, false), _cacheUse, bytes);
         if (img != null) DrawImage(img);
     }
 

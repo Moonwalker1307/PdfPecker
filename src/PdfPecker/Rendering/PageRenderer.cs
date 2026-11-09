@@ -100,6 +100,7 @@ internal sealed partial class PageRenderer
     /// <summary>Renders a page's contents and (optionally) its annotation appearances with the given base transform.</summary>
     public void RenderPage(PdfDict page, PdfDict? resources, in Matrix baseCtm, bool annotations)
     {
+        _cacheUse.Page = page;
         _oc = OptionalContent.Create(_file);
         _gs.Ctm = baseCtm;
         _patternBase = baseCtm;
