@@ -33,7 +33,7 @@ internal sealed class RenderCache
     private const int GlyphLimit = 50_000;
 
     private readonly Pool _fontPool = new(long.MaxValue);
-    private readonly Pool _imagePool = new(512L * 1024 * 1024);
+    private readonly Pool _imagePool;
     // Most colour spaces and functions are tiny, but a sampled function keeps its whole table, up to 128 MB.
     private readonly Pool _colorPool = new(128L * 1024 * 1024);
     private readonly Dictionary<PdfDict, Entry<PdfFont>> _fonts = new(ReferenceEqualityComparer.Instance);
@@ -51,11 +51,25 @@ internal sealed class RenderCache
     // (35 MB at 300 dpi A4) stayed until the image pool's 512 MB were full, though no other page draws it. The pool
     // holds one such scan, so a page drawn again soon after, as a thumbnail and then in full, still finds it.
     private const long SinglePageMinBytes = 4L * 1024 * 1024;
-    private readonly Pool _singlePagePool = new(64L * 1024 * 1024);
+    private readonly Pool _singlePagePool;
     private readonly Dictionary<PdfDict, Entry<DecodedImage?>> _singlePageImages = new(ReferenceEqualityComparer.Instance);
-    private readonly Queue<(PdfDict Key, Entry<DecodedImage?> Entry, long Size)> _singlePageOrder = new();
+    // The pool's keys, oldest first. Only keys: an image that moves to the shared pool leaves its key behind here, and
+    // the key is skipped when its turn comes, while an entry kept here would hold the decoded image long after the
+    // shared pool, full, had declined it.
+    private readonly Queue<PdfDict> _singlePageOrder = new();
     // The page that first drew each large image; small, as it holds only the keys.
     private readonly Dictionary<PdfDict, object> _imagePages = new(ReferenceEqualityComparer.Instance);
+
+    public RenderCache() : this(512L * 1024 * 1024, 64L * 1024 * 1024)
+    {
+    }
+
+    /// <summary>A cache whose image pools hold at most the given bytes; tests use small ones.</summary>
+    internal RenderCache(long imageLimit, long singlePageImageLimit)
+    {
+        _imagePool = new Pool(imageLimit);
+        _singlePagePool = new Pool(singlePageImageLimit);
+    }
 
     public PdfFont GetFont(PdfFile file, PdfDict dict, PageCacheUse use)
         => GetOrAdd(_fonts, _fontPool, dict, use, () => (PdfFont.Load(file, dict), 0));
@@ -140,13 +154,12 @@ internal sealed class RenderCache
             entry.Size = size;
             while (pool.Held + size > pool.Limit && _singlePageOrder.TryDequeue(out var oldest))
             {
-                // An entry that moved to the shared pool has left this one already.
-                if (!_singlePageImages.TryGetValue(oldest.Key, out var held) || !ReferenceEquals(held, oldest.Entry)) continue;
-                _singlePageImages.Remove(oldest.Key);
-                pool.Held -= oldest.Entry.Size;
+                // An image that moved to the shared pool has left this one already. It never comes back, so a key
+                // here stands for at most one entry.
+                if (_singlePageImages.Remove(oldest, out var held)) pool.Held -= held.Size;
             }
             _singlePageImages[key] = entry;
-            _singlePageOrder.Enqueue((key, entry, size));
+            _singlePageOrder.Enqueue(key);
             pool.Held += size;
         }
         return value;
