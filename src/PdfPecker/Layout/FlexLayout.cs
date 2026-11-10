@@ -408,7 +408,10 @@ internal sealed partial class LayoutEngine
                     // Each level of flex rows nested in stretched items lays out the levels inside it once to measure
                     // them and once more at the stretched height, which doubles the work per level; past the relayout
                     // budget an item keeps the height it was measured at.
-                    if (want is { } h && Math.Abs(h - current) > Eps && (regrown || NeedsRelayoutWhenStretched(it) || st.Height.IsPercent)
+                    // An item measured at the line's height already is laid out again too when percentage heights
+                    // inside it took its height as auto: stretched, it is definite (as when its min-height sizes the line).
+                    if (want is { } h && (Math.Abs(h - current) > Eps ? regrown || NeedsRelayoutWhenStretched(it) || st.Height.IsPercent
+                            : align == BoxAlign.Stretch && it.Box.Source is { BorderH: null } && HasPercentHeightChild(it.El))
                         && !ForcedHeightKeepsLayout(it, h) && MayLayOutAgain)
                         it.Box = CaptureBox(it.El, it.OuterMain, shrinkToFit: false, borderW: it.Main, borderH: h, reuse: true, inner: it.Box.Known);
                 }
@@ -789,8 +792,12 @@ internal sealed partial class LayoutEngine
                     hypo[i] = h;
                 }
             }
+            // An item whose flexed height is definite is laid out at it also when its own min-height or content
+            // gave it that height already, so that the percentage heights inside resolve against it, as in Chrome.
             for (int i = 0; i < items.Count; i++)
-                if (items[i].El != null && Math.Abs(hypo[i] - contentH[i]) > Eps) forcedH[i] = hypo[i];
+                if (items[i].El is { } el && (Math.Abs(hypo[i] - contentH[i]) > Eps
+                        || (definiteH != null || DefiniteBasis(items[i].Style)) && !items[i].IsReplaced && HasPercentHeightChild(el)))
+                    forcedH[i] = hypo[i];
 
             if (free > Eps)
             {
@@ -840,9 +847,11 @@ internal sealed partial class LayoutEngine
                 if (forcedH[i] is { } fh)
                 {
                     _heightOverride[it.El] = fh;
-                    // A flexed height is definite for the percentages inside the item only when the container's
-                    // height is (css-flexbox §9.8).
-                    if (definiteH == null) (_indefiniteOverride ??= new HashSet<Element>()).Add(it.El);
+                    // A flexed height is definite for the percentages inside the item when the container's height
+                    // is (css-flexbox §9.8), and, as in Chrome, when the item's flex basis is: a length, or auto with a
+                    // height of its own. A container with only a min-height then still gives a card body of
+                    // flex: 1 1 0 a height its children can take a percentage of.
+                    if (definiteH == null && !DefiniteBasis(it.Style)) (_indefiniteOverride ??= new HashSet<Element>()).Add(it.El);
                 }
                 float savedBaseline = _lastBaseline;
                 _lastBaseline = float.NaN;
@@ -889,6 +898,14 @@ internal sealed partial class LayoutEngine
         if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
         return cy;
     }
+
+    /// <summary>
+    /// Whether a column flex item's flex basis is definite without the container's height: a length, or auto with a
+    /// height that is a length. A percentage basis or height needs a container of definite height, and content sizes
+    /// are never definite.
+    /// </summary>
+    private static bool DefiniteBasis(ComputedStyle st)
+        => st.FlexBasis.IsAuto ? HeightOf(st.Height, null) != null : !st.FlexBasis.IsPercent;
 
     /// <summary>Measures an item laid out at the given outer width (unpaginated).</summary>
     private Captured Measure(BoxItem it, Element container, float outerW, bool stretch, float? borderW = null)
