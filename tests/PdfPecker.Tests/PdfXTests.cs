@@ -146,4 +146,12 @@ public class PdfXTests
         Assert.Equal(plain[3 * 15 + 7], pdfx[3 * 15 + 7]);
         Assert.Equal(plain[11 * 15 + 7], pdfx[11 * 15 + 7]);
     }
+
+    [Fact]
+    public void Cmyk_colours_are_the_press_inks()
+    {
+        var options = Options();
+        var content = AllContent(HtmlToPdf.Convert("<p style='color: device-cmyk(0 0 0 1)'>Black ink</p>", options));
+        Assert.Contains("0 0 0 1 k", content);
+    }
 }
