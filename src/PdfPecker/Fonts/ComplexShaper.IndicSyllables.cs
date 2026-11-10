@@ -205,20 +205,28 @@ internal static partial class ComplexShaper
     /// one, as HarfBuzz does when the font has the dotted circle.
     /// </summary>
     private static void InsertDottedCircles(FontProgram font, OpenTypeLayout? layout, GlyphRun run)
+        => InsertDottedCircles(font, layout, run, SyllableType.Broken, IndicCat.DottedCircle, IndicCat.Repha, IndicPos.End);
+
+    /// <summary>
+    /// Puts a dotted circle into each syllable of the broken type, after the glyphs of the reph category it starts with,
+    /// with the given category and position (HarfBuzz's hb_syllabic_insert_dotted_circles); -1 for no reph category.
+    /// </summary>
+    private static void InsertDottedCircles(FontProgram font, OpenTypeLayout? layout, GlyphRun run, byte brokenType, byte category,
+        int rephCategory, byte position)
     {
         int gid = 0;
         int lastSyllable = -1;
         for (int i = 0; i < run.Count; i++)
         {
             var g = run[i];
-            if (g.Syllable == lastSyllable || (g.Syllable & 0x0F) != SyllableType.Broken) continue;
+            if (g.Syllable == lastSyllable || (g.Syllable & 0x0F) != brokenType) continue;
             lastSyllable = g.Syllable;
             if (gid == 0 && (gid = font.GlyphId(0x25CC)) == 0) return;
-            while (i < run.Count && run[i].Syllable == lastSyllable && run[i].IndicCategory == IndicCat.Repha) i++;
+            while (i < run.Count && run[i].Syllable == lastSyllable && run[i].IndicCategory == rephCategory) i++;
             run.Insert(i, new GlyphInfo
             {
                 Gid = gid, CodePoint = 0x25CC, Cluster = g.Cluster, Length = 0, Mask = g.Mask, Syllable = g.Syllable,
-                IndicCategory = IndicCat.DottedCircle, IndicPosition = IndicPos.End,
+                IndicCategory = category, IndicPosition = position,
                 Props = layout is { HasGlyphClasses: true } ? layout.GlyphProps(gid) : OpenTypeLayout.Base,
             });
         }

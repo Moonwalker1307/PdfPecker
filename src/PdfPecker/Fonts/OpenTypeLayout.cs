@@ -43,6 +43,9 @@ internal sealed partial class OpenTypeLayout
     // the glyphs of a multiple substitution. A ligature forgets that its glyph was multiplied before.
     public const byte Substituted = 1, Ligated = 2, Multiplied = 4;
 
+    // In Substitutions: a grapheme joiner that kept no marks apart, which lookups may then skip like other ignorables.
+    public const byte Unhidden = 8;
+
     // GSUB and GPOS start with a version and the offsets of the script, feature and lookup lists.
     private const int SupportedMajorVersion = 1;
     private const int LayoutHeaderLength = 10;

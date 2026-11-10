@@ -8,7 +8,8 @@ namespace PdfPecker.Fonts;
 /// N'Ko and other joining scripts get their initial, medial, final and isolated forms and required ligatures;
 /// Hebrew and the joining scripts get mark positioning (GPOS mark, mkmk), cursive attachment and kerning. Fonts
 /// without OpenType forms fall back to the Unicode Arabic presentation forms. The Indic scripts get their syllables
-/// reordered and their conjuncts, half forms, reph and matras formed; Thai and Lao get Sara Am decomposed and, in fonts
+/// reordered and their conjuncts, half forms, reph and matras formed; Khmer, Myanmar, Sinhala and Tibetan get the same
+/// from HarfBuzz's Khmer and Myanmar shapers and its Universal Shaping Engine; Thai and Lao get Sara Am decomposed and, in fonts
 /// without Thai lookups, their marks moved by the fonts' private-use glyphs. Text with combining marks in the other
 /// scripts, such as Latin, Greek and Cyrillic, is composed where the font has the letter and gets its marks placed by
 /// GPOS. Glyphs come out in logical order, with
@@ -17,7 +18,8 @@ namespace PdfPecker.Fonts;
 /// <remarks>
 /// The class is split by concern: this file has the scripts and the order of the shaping steps, Plan picks the GSUB and
 /// GPOS lookups of a font and script, Characters turns the text into glyphs and orders and composes the marks, Joining
-/// gives the joining scripts their forms, Indic and IndicSyllables shape the Indic scripts, Thai shapes Thai and Lao,
+/// gives the joining scripts their forms, Indic and IndicSyllables shape the Indic scripts, Syllabic, Khmer, Myanmar and
+/// Use shape Khmer, Myanmar, Sinhala and Tibetan, Thai shapes Thai and Lao,
 /// and Positioning places the glyphs once the lookups have run.
 /// </remarks>
 internal static partial class ComplexShaper
@@ -32,6 +34,13 @@ internal static partial class ComplexShaper
     // The nine Indic blocks from Devanagari to Malayalam, Thai and Lao, and Devanagari Extended.
     private const char IndicFirst = '\u0900', IndicLast = '\u0D7F', ThaiFirst = '\u0E00', LaoLast = '\u0EFF';
     private const char DevanagariExtendedFirst = '\uA8E0', DevanagariExtendedLast = '\uA8FF';
+
+    // Sinhala, Tibetan, Myanmar, Khmer, Khmer Symbols, Myanmar Extended-B and -A, and the Sinhala archaic numbers.
+    private const char SinhalaFirst = '\u0D80', SinhalaLast = '\u0DFF', TibetanFirst = '\u0F00', MyanmarLast = '\u109F';
+    private const char KhmerFirst = '\u1780', KhmerLast = '\u17FF', KhmerSymbolsFirst = '\u19E0', KhmerSymbolsLast = '\u19FF';
+    private const char MyanmarExtendedBFirst = '\uA9E0', MyanmarExtendedBLast = '\uA9FF';
+    private const char MyanmarExtendedAFirst = '\uAA60', MyanmarExtendedALast = '\uAA7F';
+    private const int SinhalaNumbersFirst = 0x111E0, SinhalaNumbersLast = 0x111FF;
 
     /// <summary>True when the text has characters of a script this shaper handles.</summary>
     public static bool Handles(string s, int start, int length)
@@ -52,6 +61,9 @@ internal static partial class ComplexShaper
             or (>= ArabicExtendedCFirst and <= ArabicExtendedCLast)
             or (>= IndicFirst and <= IndicLast) or (>= ThaiFirst and <= LaoLast)
             or (>= DevanagariExtendedFirst and <= DevanagariExtendedLast)
+            or (>= SinhalaFirst and <= SinhalaLast) or (>= TibetanFirst and <= MyanmarLast) or (>= KhmerFirst and <= KhmerLast)
+            or (>= KhmerSymbolsFirst and <= KhmerSymbolsLast) or (>= MyanmarExtendedBFirst and <= MyanmarExtendedBLast)
+            or (>= MyanmarExtendedAFirst and <= MyanmarExtendedALast) or (>= SinhalaNumbersFirst and <= SinhalaNumbersLast)
             || IsCombiningMark(cp) || IsEmojiSequencePart(cp);
 
     // Combining marks, which the font's GPOS places on letters that have no precomposed form, such as q̃ or ą́.
@@ -85,6 +97,7 @@ internal static partial class ComplexShaper
     {
         Hebrew, Arabic, Syriac, Nko, Mandaic, Thaana, Samaritan, Latin, Greek, Cyrillic, Other,
         Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam, Thai, Lao,
+        Khmer, Myanmar, Sinhala, Tibetan,
     }
 
     private static Script ScriptOf(int cp) => cp switch
@@ -108,6 +121,10 @@ internal static partial class ComplexShaper
         >= 0x0D00 and <= 0x0D7F => Script.Malayalam,
         >= 0x0E00 and <= 0x0E7F => Script.Thai,
         >= 0x0E80 and <= 0x0EFF => Script.Lao,
+        >= 0x0D80 and <= 0x0DFF or >= 0x111E0 and <= 0x111FF => Script.Sinhala,
+        >= 0x0F00 and <= 0x0FFF => Script.Tibetan,
+        >= 0x1000 and <= 0x109F or >= 0xA9E0 and <= 0xA9FF or >= 0xAA60 and <= 0xAA7F => Script.Myanmar,
+        >= 0x1780 and <= 0x17FF or >= 0x19E0 and <= 0x19FF => Script.Khmer,
         _ => Script.Other,
     };
 
@@ -145,6 +162,10 @@ internal static partial class ComplexShaper
         _ when IndicConfigOf(script) is { } config => config.NewTag,
         Script.Thai => "thai",
         Script.Lao => "lao ",
+        Script.Khmer => "khmr",
+        Script.Myanmar => "mym2",
+        Script.Sinhala => "sinh",
+        Script.Tibetan => "tibt",
         Script.Hebrew => "hebr",
         Script.Arabic => "arab",
         Script.Syriac => "syrc",
@@ -247,6 +268,11 @@ internal static partial class ComplexShaper
             ShapeIndic(font, layout, run, plan, s, start, length, rtl, output);
             return;
         }
+        if (plan.Syllabic != null)
+        {
+            ShapeSyllabic(font, layout, run, plan, s, start, length, rtl, output);
+            return;
+        }
 
         AddText(font, layout, run, s, start, length, rtl, decomposeFirst: false);
         if (script is Script.Thai or Script.Lao) DecomposeSaraAm(run, font, layout);
@@ -285,7 +311,10 @@ internal static partial class ComplexShaper
         return false;
     }
 
-    private static void RemoveIgnorables(GlyphRun run) => run.RemoveAll(static g => UnicodeTables.IsDefaultIgnorable(g.CodePoint));
+    // A glyph that GSUB made of an ignorable character, such as a ligature of a joiner and a sign, is a real glyph and
+    // stays, as in HarfBuzz.
+    private static void RemoveIgnorables(GlyphRun run)
+        => run.RemoveAll(static g => UnicodeTables.IsDefaultIgnorable(g.CodePoint) && (g.Substitutions & OpenTypeLayout.Substituted) == 0);
 
     /// <summary>
     /// The GSUB and GPOS lookups of one shaping call, which share the ligature ids they hand out and one work budget,
@@ -330,14 +359,14 @@ internal static partial class ComplexShaper
             }
         }
 
-        /// <summary>Applies the lookups of an Indic stage, as the GSUB lookups of the other scripts are applied.</summary>
+        /// <summary>Applies the lookups of an Indic or syllabic stage, as the GSUB lookups of the other scripts are applied.</summary>
         public void Apply(StageLookup[] lookups)
         {
             if (_layout == null) return;
             try
             {
-                foreach (var (lookup, mask, perSyllable, manualJoiners) in lookups)
-                    _layout.ApplyLookup(_run, false, lookup, mask, _rtl, ref _nextLigatureId, ref _operations, _maxLength, perSyllable, manualJoiners);
+                foreach (var (lookup, mask, perSyllable, manualJoiners, manualZwj) in lookups)
+                    _layout.ApplyLookup(_run, false, lookup, mask, _rtl, ref _nextLigatureId, ref _operations, _maxLength, perSyllable, manualJoiners, manualZwj);
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
             {

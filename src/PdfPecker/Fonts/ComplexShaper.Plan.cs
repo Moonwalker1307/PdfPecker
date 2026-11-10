@@ -70,6 +70,9 @@ internal static partial class ComplexShaper
 
         /// <summary>How the font shapes an Indic script, or null for the other scripts and fonts made for the default script.</summary>
         public IndicPlan? Indic { get; init; }
+
+        /// <summary>How the font shapes Khmer, Myanmar, Sinhala or Tibetan, or null as for <see cref="Indic"/>.</summary>
+        public SyllabicPlan? Syllabic { get; init; }
     }
 
     // Keyed weakly by the font, so that a font registered for one conversion is not kept alive by its plans for the
@@ -78,8 +81,9 @@ internal static partial class ComplexShaper
 
     private static Plan GetPlan(FontProgram font, OpenTypeLayout? layout, Script script, FeaturesOff off)
     {
-        // The Indic plans have stages of their own, which keep every feature, so one plan serves all of their runs.
-        if (IsIndic(script)) off = FeaturesOff.None;
+        // The Indic and syllabic plans have stages of their own, which keep every feature, so one plan serves all of their
+        // runs.
+        if (IsIndic(script) || IsSyllabic(script)) off = FeaturesOff.None;
         return s_plans.GetValue(font, static _ => new ConcurrentDictionary<(Script, FeaturesOff), Plan>()).GetOrAdd((script, off), static (key, state) =>
         {
             // OpenTypeLayout checks the lists a plan reads when it loads the font; should a damaged font still get
@@ -90,6 +94,7 @@ internal static partial class ComplexShaper
             try
             {
                 if (IsIndic(script)) return BuildIndicScriptPlan(font, layout, script);
+                if (IsSyllabic(script)) return BuildSyllabicScriptPlan(font, layout, script);
                 return layout == null ? Plan.Empty : BuildPlan(layout, script, ScriptTag(script), font.ShapedFeatures, off);
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException) { SwallowedErrors.Record(ex); return Plan.Empty; }

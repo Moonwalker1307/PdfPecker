@@ -147,12 +147,26 @@ internal sealed partial class OpenTypeLayout
         var (mx, my) = Anchor(markAnchor);
         var g = buf[i];
         g.XOffset = bx - mx;
-        g.YOffset = by - my;
+        // Across the line, a mark keeps the offset its base had when it attached (with the glyphs that base is
+        // cursively attached to), as HarfBuzz's resolve_cross_offset does; a base that moves later leaves it in place.
+        g.YOffset = by - my + CrossOffset(buf, j);
         g.AttachType = AttachMark;
         g.AttachChain = j - i;
         buf[i] = g;
         i++;
         return true;
+    }
+
+    private static int CrossOffset(GlyphRun buf, int j)
+    {
+        int offset = buf[j].YOffset;
+        for (int steps = 0; steps < MaxAttachmentNesting && (buf[j].AttachType & AttachCursive) != 0 && buf[j].AttachChain != 0; steps++)
+        {
+            j += buf[j].AttachChain;
+            if ((uint)j >= (uint)buf.Count) break;
+            offset += buf[j].YOffset;
+        }
+        return offset;
     }
 
     // The base (or ligature) a mark attaches to for mark-to-base and mark-to-ligature positioning: the glyph before it
@@ -262,8 +276,8 @@ internal sealed partial class OpenTypeLayout
         if ((g.AttachType & AttachCursive) != 0) g.YOffset += p.YOffset;
         else
         {
+            // The offset across the line was taken when the mark attached.
             g.XOffset += p.XOffset;
-            g.YOffset += p.YOffset;
             if (j < i)
             {
                 // A mark attached to an earlier glyph is drawn after the advances between them, so it moves back over
