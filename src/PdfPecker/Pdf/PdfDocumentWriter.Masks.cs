@@ -137,7 +137,7 @@ internal sealed partial class PdfDocumentWriter
     /// </summary>
     private int AddMaskForm(byte[] content, bool alpha, string box = PlaneBox)
     {
-        string dict = "/Type /XObject /Subtype /Form /BBox " + box + " /Group << /S /Transparency /CS /DeviceRGB >> /Resources "
+        string dict = "/Type /XObject /Subtype /Form /BBox " + box + " /Group << /S /Transparency /CS " + _rgbSpace + " >> /Resources "
             + _resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R";
         _masks.Add((content, dict, alpha));
         return _masks.Count;

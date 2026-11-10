@@ -98,7 +98,7 @@ public static partial class HtmlToPdf
             // Most documents have no form controls and no images, and the parser tells which, sparing walks of the tree.
             // An empty signature field can be any element, so its attribute is looked for in the source instead.
             if ((_namesUsed & NamesUsed.FormControls) != 0 || _html.Contains(FormControls.SignatureAttribute, StringComparison.OrdinalIgnoreCase))
-                FormControls.Prepare(_doc, _options.FormFields);
+                FormControls.Prepare(_doc, _options.FormFields && _options.PdfX == null); // PDF/X: no widgets on the printed page
         }
 
         /// <summary>

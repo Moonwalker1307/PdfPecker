@@ -497,7 +497,7 @@ internal sealed partial class PdfDocumentWriter
         RestoreState(saved);
         var dict = new ByteBuffer(256);
         dict.Ascii("/Type /XObject /Subtype /Form /BBox [").Num(left).Sp().Num(lower).Sp().Num(right).Sp().Num(upper)
-            .Ascii("] /Group << /S /Transparency /CS /DeviceRGB >> /Resources ").Int(_resourcesId).Ascii(" 0 R");
+            .Ascii("] /Group << /S /Transparency /CS ").Ascii(_rgbSpace).Ascii(" >> /Resources ").Int(_resourcesId).Ascii(" 0 R");
         _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span), true));
 
         b.Ascii("q /s").Int(_masks.Count).Ascii(" gs\n");
@@ -552,7 +552,7 @@ internal sealed partial class PdfDocumentWriter
         // full coverage, which draws a thin line of the shadow's colour where the blur should have faded out.
         var dict = new ByteBuffer(256);
         dict.Ascii("/Type /XObject /Subtype /Form /BBox [").Num(left).Sp().Num(lower).Sp().Num(right).Sp().Num(upper)
-            .Ascii("] /Group << /S /Transparency /CS /DeviceRGB /I true >> /Resources ").Int(_resourcesId).Ascii(" 0 R");
+            .Ascii("] /Group << /S /Transparency /CS ").Ascii(_rgbSpace).Ascii(" /I true >> /Resources ").Int(_resourcesId).Ascii(" 0 R");
         _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span), false));
 
         Mark(b, null); // the shadow is decoration
@@ -886,7 +886,7 @@ internal sealed partial class PdfDocumentWriter
             cell.Ascii("1 0 0 -1 0 ").Num(th).Ascii(" cm ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
                 .Ascii(" cm /Sh1 sh\n");
             dict.Ascii("<< /Shading << /Sh1 ");
-            tg.WriteShading(dict, 0, 0, tw, th, budget: GradientBudget);
+            tg.WriteShading(dict, 0, 0, tw, th, budget: GradientBudget, rgbSpace: _rgbSpace);
             dict.Ascii(" >> >>");
         }
         else
@@ -963,7 +963,7 @@ internal sealed partial class PdfDocumentWriter
     {
         int n = ++_patternCount;
         _patterns.Ascii(" /P").Int(n).Sp();
-        g.WritePattern(_patterns, InStream(toPage), minX, minY, maxX, maxY, channel, GradientBudget);
+        g.WritePattern(_patterns, InStream(toPage), minX, minY, maxX, maxY, channel, GradientBudget, _rgbSpace);
         return n;
     }
 
@@ -978,7 +978,7 @@ internal sealed partial class PdfDocumentWriter
         var dict = new ByteBuffer(256);
         dict.Ascii("/Type /XObject /Subtype /Form /BBox [").Num(x).Sp().Num(y).Sp().Num(x + w).Sp().Num(y + h)
             .Ascii("] /Group << /S /Transparency /CS /DeviceGray >> /Resources << /Pattern << /M ");
-        g.WritePattern(dict, toPage, minX, minY, maxX, maxY, GradientChannel.Alpha, GradientBudget);
+        g.WritePattern(dict, toPage, minX, minY, maxX, maxY, GradientChannel.Alpha, GradientBudget, _rgbSpace);
         dict.Ascii(" >> >>");
         _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span), false));
         return _masks.Count;

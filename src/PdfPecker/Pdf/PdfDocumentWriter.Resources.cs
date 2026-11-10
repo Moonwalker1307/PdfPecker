@@ -129,6 +129,9 @@ internal sealed partial class PdfDocumentWriter
         if (_fillAlphas.Count + _strokeAlphas.Count + _groupAlphas.Count + _blendStates.Count + _layerBlends.Count + _masks.Count > 0)
             WriteExtGStateResources(doc);
         if (_patterns.Length > 0) _out.Ascii(" /Pattern <<").Bytes(_patterns.Span).Ascii(" >>");
+        // PDF/X allows DeviceRGB only for an RGB press: content streams' sRGB colours (rg and RG) become ICC-based sRGB
+        // through the default colour space, as ISO 32000 provides.
+        if (IsPdfX) _out.Ascii(" /ColorSpace << /DefaultRGB ").Ascii(_rgbSpace).Ascii(" >>");
         _out.Ascii(" >>");
         End();
     }
