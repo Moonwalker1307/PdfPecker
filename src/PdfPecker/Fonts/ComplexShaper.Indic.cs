@@ -65,7 +65,7 @@ internal static partial class ComplexShaper
         [("rlig", AllGlyphs), ("calt", AllGlyphs), ("clig", AllGlyphs), ("rclt", AllGlyphs)];
 
     /// <summary>A GSUB stage of the Indic shaper: its lookups, the glyphs each applies to, and whether it stays inside a syllable.</summary>
-    private readonly record struct StageLookup(int Lookup, uint Mask, bool PerSyllable, bool ManualJoiners);
+    private readonly record struct StageLookup(int Lookup, uint Mask, bool PerSyllable, bool ManualJoiners, bool ManualZwj = false);
 
     /// <summary>How a font shapes one Indic script: its GSUB stages and what the reorderings need to know of it.</summary>
     private sealed class IndicPlan
@@ -223,6 +223,8 @@ internal static partial class ComplexShaper
         (0x0C12, 0x0C4C or 0x0C55) or (0x0C3F or 0x0C46 or 0x0C4A, 0x0C55) => true,
         (0x0C89 or 0x0C8B, 0x0CBE) or (0x0C92, 0x0CCC) => true,
         (0x0D07 or 0x0D09, 0x0D57) or (0x0D0E, 0x0D46) or (0x0D12, 0x0D3E or 0x0D57) => true,
+        (0x0D85, 0x0DCF or 0x0DD0 or 0x0DD1) or (0x0D8B or 0x0D8F or 0x0D94, 0x0DDF) or (0x0D8D, 0x0DD8) => true,
+        (0x0D91, 0x0DCA or 0x0DD9 or 0x0DDA or 0x0DDC or 0x0DDD or 0x0DDE) => true,
         _ => false,
     };
 
@@ -289,11 +291,20 @@ internal static partial class ComplexShaper
 
     /// <summary>
     /// The canonical decomposition that Indic normalization uses, which leaves Devanagari Rra, Bengali Rra and Rha and
-    /// Tamil Au whole, as HarfBuzz does.
+    /// Tamil Au whole, as HarfBuzz does. The Khmer split vowels, which Unicode does not decompose, become the vowel E
+    /// before the consonant and the vowel itself after it, which the font draws as the vowel's other part (HarfBuzz's
+    /// decompose_khmer); Sinhala, Tibetan and Myanmar decompose as Unicode has it.
     /// </summary>
     private static bool DecomposeIndic(int cp, out int first, out int second)
     {
         first = second = 0;
+        if (cp is 0x17BE or 0x17BF or 0x17C0 or 0x17C4 or 0x17C5)
+        {
+            (first, second) = (0x17C1, cp);
+            return true;
+        }
+        if (ScriptOf(cp) is Script.Sinhala or Script.Tibetan or Script.Myanmar)
+            return UnicodeTables.DecomposeCanonical(cp, out first, out second) && second != 0;
         if (cp is 0x0931 or 0x09DC or 0x09DD or 0x0B94 || cp is < 0x0900 or > 0x0D7F) return false;
         var table = IndicTables.Decompositions;
         for (int k = 0; k < table.Length; k += 3)

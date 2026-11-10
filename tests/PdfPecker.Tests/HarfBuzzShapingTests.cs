@@ -5,10 +5,10 @@ namespace PdfPecker.Tests;
 
 /// <summary>
 /// Shaping compared glyph for glyph with HarfBuzz on subsets of the Noto fonts of each script (SIL Open Font License
-/// 1.1, see Fixtures/fonts): Indic, Thai, Lao and Thaana, Latin, Greek and Cyrillic with combining marks, and Arabic
-/// letters with marks that compose with them. CI also runs it with invariant globalization, without ICU. The texts
-/// are in tools/ShapingReference/corpus.txt and HarfBuzz's glyphs in Fixtures/shaping/harfbuzz.txt, which
-/// tools/ShapingReference/generate.py writes.
+/// 1.1, see Fixtures/fonts): Indic, Khmer, Myanmar, Sinhala, Tibetan, Thai, Lao and Thaana, Latin, Greek and Cyrillic
+/// with combining marks, and Arabic letters with marks that compose with them. CI also runs it with invariant
+/// globalization, without ICU. The texts are in tools/ShapingReference/corpus.txt and HarfBuzz's glyphs in
+/// Fixtures/shaping/harfbuzz.txt, which tools/ShapingReference/generate.py writes.
 /// </summary>
 public class HarfBuzzShapingTests
 {

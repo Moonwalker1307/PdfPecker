@@ -170,6 +170,7 @@ are in `BUILD.md` and `TESTING.md`.
   - `tools/FontPackBuilder` → `Rendering/Fonts/StandardFonts.bin` and `Fonts/Bundled/*.ttf.br`
   - `tools/Hyphenation/build.cs` → `src/PdfPecker/Text/Hyphenation/*.br`
   - `tools/IndicTables/build.cs` → `src/PdfPecker/Fonts/IndicTables.g.cs`
+  - `tools/UseTables/build.cs` → `src/PdfPecker/Fonts/UseTables.g.cs`
   - `tools/StringPrep/build.cs` → `src/PdfPecker/Text/SaslPrep.g.cs`
   - `tools/HtmlEntities/build.cs` → `src/PdfPecker/Html/HtmlEntities.g.cs`
   - `tools/ShapingReference/generate.py` → `tests/PdfPecker.Tests/Fixtures/shaping/harfbuzz.txt`

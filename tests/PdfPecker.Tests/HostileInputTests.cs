@@ -4304,7 +4304,7 @@ public class MeshShadingLimitTests
 }
 
 /// <summary>
-/// Indic, Thai and Lao text built to be as hard to shape as possible: endless syllables, floods of signs with nothing to
+/// Indic, Khmer, Myanmar, Sinhala, Tibetan, Thai and Lao text built to be as hard to shape as possible: endless syllables, floods of signs with nothing to
 /// sit on (each of which gets a dotted circle), joiners and split vowels. Shaping stays linear in the text.
 /// </summary>
 [Collection(HostileInputCollection.Name)]
@@ -4324,6 +4324,14 @@ public class ComplexScriptShapingHostileTests
         { "NotoSansThai-Subset", "ำ" },                  // SARA AM decomposed with nothing before it
         { "NotoSansThai-Subset", "ป\u0E34\u0E48\u0E39" }, // marks that move to avoid a tall consonant
         { "NotoSansLao-Subset", "\u0EB3\u200D" },
+        { "NotoSansKhmer-Subset", "\u17D2\u179A" },      // Coeng Ro, each moved before a dotted circle
+        { "NotoSansKhmer-Subset", "\u1780\u17C4" },      // split vowels, each with its left part moved to the start
+        { "NotoSansMyanmar-Subset", "\u1004\u103A\u1039" }, // kinzi with nothing after it
+        { "NotoSansMyanmar-Subset", "\u1031" },          // pre-base vowels with no consonant
+        { "NotoSansSinhala-Subset", "\u0DCA\u200D" },    // al-lakuna and joiners with nothing to sit on
+        { "NotoSansSinhala-Subset", "\u0D9A\u0DD9" },    // pre-base vowel signs, each moved before its consonant
+        { "NotoSerifTibetan-Subset", "\u0F90" },         // one stack of subjoined letters that never ends
+        { "NotoSerifTibetan-Subset", "\u0F71\u034F" },  // marks and grapheme joiners
     };
 
     [Theory]
