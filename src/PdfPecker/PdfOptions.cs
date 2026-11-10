@@ -98,6 +98,19 @@ public enum PdfConformance
     /// any kind. It needs an attachment: use it with <see cref="PdfOptions.EInvoice"/>, whose XML it attaches.
     /// </summary>
     PdfA4f,
+    /// <summary>
+    /// PDF/A-2a (ISO 19005-2, level A, accessible): PDF/A-2u plus a tagged structure, as
+    /// <see cref="PdfAccessibility.Tagged"/> writes it, and the document's language. The structure is written even when
+    /// <see cref="PdfOptions.Accessibility"/> is <see cref="PdfAccessibility.None"/>; the language is
+    /// <see cref="PdfOptions.Language"/>, the HTML lang attribute or else "en". Combines with
+    /// <see cref="PdfAccessibility.PdfUA1"/>.
+    /// </summary>
+    PdfA2a,
+    /// <summary>
+    /// PDF/A-3a (ISO 19005-3, level A, accessible): PDF/A-3u plus a tagged structure and the document's language, as
+    /// <see cref="PdfA2a"/>; the part that also allows attached files.
+    /// </summary>
+    PdfA3a,
 }
 
 /// <summary>How the generated PDF serves screen readers and other assistive technology.</summary>
@@ -340,7 +353,9 @@ public sealed class PdfOptions
     /// <summary>
     /// Produce an archival PDF/A file. Default: <see cref="PdfConformance.None"/>. Cannot be combined with
     /// <see cref="Security"/>. PDF/A-4 levels write a PDF 2.0 file and combine only with <see cref="PdfAccessibility.PdfUA2"/>
-    /// among the PDF/UA levels; PDF/A-2 and PDF/A-3 only with <see cref="PdfAccessibility.PdfUA1"/>.
+    /// among the PDF/UA levels; PDF/A-2 and PDF/A-3 only with <see cref="PdfAccessibility.PdfUA1"/>. Level A
+    /// (<see cref="PdfConformance.PdfA2a"/>, <see cref="PdfConformance.PdfA3a"/>) tags the file whatever
+    /// <see cref="Accessibility"/> says.
     /// </summary>
     public PdfConformance Conformance { get; set; }
 

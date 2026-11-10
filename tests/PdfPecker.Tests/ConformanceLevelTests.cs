@@ -29,6 +29,8 @@ public class ConformanceLevelTests
     [InlineData(PdfConformance.PdfA2u, 2, "U")]
     [InlineData(PdfConformance.PdfA3b, 3, "B")]
     [InlineData(PdfConformance.PdfA3u, 3, "U")]
+    [InlineData(PdfConformance.PdfA2a, 2, "A")]
+    [InlineData(PdfConformance.PdfA3a, 3, "A")]
     public void PdfA2_and_3_are_pdf17_with_part_and_conformance(PdfConformance conformance, int part, string level)
     {
         var text = Convert(conformance);
@@ -39,6 +41,49 @@ public class ConformanceLevelTests
         Assert.Contains("/Author (Ann)", text);
         Assert.Contains("<pdfaSchema:prefix>pdfx</pdfaSchema:prefix>", text);
         Assert.Matches(@"trailer\n<< /Size \d+ /Root 1 0 R /Info \d+ 0 R", text);
+    }
+
+    [Theory]
+    [InlineData(PdfConformance.PdfA2a)]
+    [InlineData(PdfConformance.PdfA3a)]
+    public void PdfA_level_A_is_tagged_without_an_accessibility_setting(PdfConformance conformance)
+    {
+        var text = Convert(conformance);
+        Assert.Contains("/MarkInfo << /Marked true >>", text);
+        Assert.Contains("/StructTreeRoot ", text);
+        Assert.Contains("/Lang (en)", text);
+        Assert.Contains("/S /H1", text);
+        Assert.DoesNotContain("pdfuaid", text);
+    }
+
+    [Theory]
+    [InlineData(PdfConformance.PdfA2a)]
+    [InlineData(PdfConformance.PdfA3a)]
+    public void PdfA_level_A_declares_english_when_the_document_names_no_language(PdfConformance conformance)
+    {
+        var text = Encoding.UTF8.GetString(PdfTestHelpers.ConvertUncompressed("<p>Hello</p>", new PdfOptions { Conformance = conformance }));
+        Assert.Contains("/Lang (en)", text);
+        var danish = Encoding.UTF8.GetString(PdfTestHelpers.ConvertUncompressed("<p>Hej</p>", new PdfOptions { Conformance = conformance, Language = "da" }));
+        Assert.Contains("/Lang (da)", danish);
+    }
+
+    [Fact]
+    public void PdfA3a_carries_an_einvoice_and_PdfA2a_refuses_attachments()
+    {
+        var text = Convert(PdfConformance.PdfA3a, invoice: Invoice());
+        Assert.Contains("<pdfaid:part>3</pdfaid:part>\n<pdfaid:conformance>A</pdfaid:conformance>", text);
+        Assert.Contains("/AFRelationship /Alternative", text);
+        var error = Assert.Throws<ArgumentException>(() => HtmlToPdf.Convert("<p>x</p>",
+            new PdfOptions { Conformance = PdfConformance.PdfA2a, EInvoice = Invoice() }));
+        Assert.Contains("PdfA3a", error.Message);
+    }
+
+    [Fact]
+    public void PdfA_level_A_combines_with_PdfUA1()
+    {
+        var text = Convert(PdfConformance.PdfA2a, PdfAccessibility.PdfUA1);
+        Assert.Contains("<pdfaid:conformance>A</pdfaid:conformance>", text);
+        Assert.Contains("<pdfuaid:part>1</pdfuaid:part>", text);
     }
 
     [Fact]

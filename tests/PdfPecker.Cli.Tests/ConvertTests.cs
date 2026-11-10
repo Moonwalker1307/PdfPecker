@@ -142,9 +142,13 @@ public sealed class ConvertTests : IDisposable
         Assert.Equal(2, pdfa4.Exit);
         Assert.Contains("single input", pdfa4.Err);
         Assert.Equal(2, _cli.Run(a, b, _cli.Path_("x.pdf"), "--accessibility", "ua2").Exit);
+        var levelA = _cli.Run(a, b, _cli.Path_("x.pdf"), "--pdfa", "3a");
+        Assert.Equal(2, levelA.Exit);
+        Assert.Contains("level A", levelA.Err);
         Assert.False(File.Exists(_cli.Path_("x.pdf")));
         // A single input still has every level.
         _cli.Ok(a, _cli.Path_("one.pdf"), "--pdfa", "4");
+        _cli.Ok(a, _cli.Path_("one-a.pdf"), "--pdfa", "3a");
     }
 
     [Fact]
@@ -324,6 +328,8 @@ public sealed class ConvertTests : IDisposable
         var html = _cli.Html("in.html", "<p>archive</p>");
         _cli.Ok("convert", html, _cli.Path_("a.pdf"), "--pdfa", "2b");
         Assert.Contains("pdfaid", Encoding.Latin1.GetString(File.ReadAllBytes(_cli.Path_("a.pdf"))));
+        _cli.Ok("convert", html, _cli.Path_("2a.pdf"), "--pdfa", "2a");
+        Assert.Contains("/StructTreeRoot", Encoding.Latin1.GetString(File.ReadAllBytes(_cli.Path_("2a.pdf"))));
         _cli.Ok("convert", html, _cli.Path_("s.pdf"), "--user-password", "pw");
         Assert.True(PdfProtector.IsEncrypted(File.ReadAllBytes(_cli.Path_("s.pdf"))));
         Assert.Equal(2, _cli.Run("convert", html, "--pdfa", "9z").Exit);

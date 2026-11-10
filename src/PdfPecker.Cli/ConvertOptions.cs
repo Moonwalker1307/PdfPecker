@@ -145,9 +145,11 @@ internal static class ConvertOptions
         "2u" => PdfConformance.PdfA2u,
         "3b" => PdfConformance.PdfA3b,
         "3u" => PdfConformance.PdfA3u,
+        "2a" => PdfConformance.PdfA2a,
+        "3a" => PdfConformance.PdfA3a,
         "4" => PdfConformance.PdfA4,
         "4f" => PdfConformance.PdfA4f,
-        _ => throw new UsageException($"--pdfa must be 2b, 2u, 3b, 3u, 4 or 4f, not '{s}'."),
+        _ => throw new UsageException($"--pdfa must be 2b, 2u, 2a, 3b, 3u, 3a, 4 or 4f, not '{s}'."),
     };
 
     private static PdfAccessibility ParseAccessibility(string s) => s.ToLowerInvariant() switch
@@ -168,13 +170,15 @@ internal static class ConvertOptions
 
     /// <summary>
     /// With several inputs, refuses what the merged file cannot have: the merge keeps PDF/UA-1 but not PDF/UA-2, and
-    /// existing PDFs convert to PDF/A-2 and PDF/A-3 but not to PDF/A-4. Saying so is better than a file that silently
+    /// existing PDFs convert to PDF/A-2 and PDF/A-3 levels B and U but not to level A or PDF/A-4. Saying so is better than a file that silently
     /// lacks what was asked for.
     /// </summary>
     public static void CheckSeveralInputs(ParsedArgs a)
     {
         if (a.Get("pdfa") is { } pdfa && ParseConformance(pdfa) is PdfConformance.PdfA4 or PdfConformance.PdfA4f)
             throw new UsageException($"--pdfa {pdfa} needs a single input: the joined file can be made PDF/A-2 or PDF/A-3 (2b, 2u, 3b or 3u), not PDF/A-4. Convert the inputs one at a time, or choose another level.");
+        if (a.Get("pdfa") is { } levelA && ParseConformance(levelA) is PdfConformance.PdfA2a or PdfConformance.PdfA3a)
+            throw new UsageException($"--pdfa {levelA} needs a single input: the joined file can be made PDF/A-2 or PDF/A-3 level B or U (2b, 2u, 3b or 3u), not level A, which needs a structure tree the merge does not keep. Convert the inputs one at a time, or choose another level.");
         if (a.Get("accessibility") is { } acc && ParseAccessibility(acc) == PdfAccessibility.PdfUA2)
             throw new UsageException($"--accessibility {acc} needs a single input: the joined file can claim PDF/UA-1 (ua1) but not PDF/UA-2. Convert the inputs one at a time, or choose ua1.");
     }

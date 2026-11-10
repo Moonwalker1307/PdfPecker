@@ -198,7 +198,7 @@ public static partial class HtmlToPdf
             if (_canvasStyle != null) _canvasStyle.CanvasBackground = true;
 
             // The logical structure of a tagged PDF follows the HTML in document order, whatever the layout does.
-            _structure = _options.Accessibility != PdfAccessibility.None ? StructureTree.Build(_doc) : null;
+            _structure = _options.Accessibility != PdfAccessibility.None || _settings.IsPdfALevelA ? StructureTree.Build(_doc) : null;
             _headings?.Clear();
             _runs = _styles.UsedPageNames ? SplitByPageName(_doc) : new List<PageRun> { new() };
             int documentPage = 0;
