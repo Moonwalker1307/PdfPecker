@@ -47,7 +47,9 @@ internal sealed partial class PdfDocumentWriter
         SetFillAlpha(b, color);
         if (color == _fill) return;
         _fill = color;
-        WriteColor(b, color);
+        if (!_context.CmykColors.TryGet(color, out var cmyk)) WriteColor(b, color);
+        else if (IsPdfA) WriteColor(b, cmyk.Fallback);
+        else { WriteCmyk(b, cmyk); b.Ascii(" k\n"); return; }
         b.Ascii(" rg\n");
     }
 
@@ -56,7 +58,9 @@ internal sealed partial class PdfDocumentWriter
         SetStrokeAlpha(b, color);
         if (color == _stroke) return;
         _stroke = color;
-        WriteColor(b, color);
+        if (!_context.CmykColors.TryGet(color, out var cmyk)) WriteColor(b, color);
+        else if (IsPdfA) WriteColor(b, cmyk.Fallback);
+        else { WriteCmyk(b, cmyk); b.Ascii(" K\n"); return; }
         b.Ascii(" RG\n");
     }
 
@@ -87,6 +91,10 @@ internal sealed partial class PdfDocumentWriter
 
     private void RestoreState((uint Fill, uint Stroke, float LineWidth, int FillAlpha, int StrokeAlpha) s)
         => (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = s;
+
+    // A device-cmyk() colour is written as DeviceCMYK, except in PDF/A files, whose output intent is sRGB and which
+    // may use DeviceCMYK only with a CMYK one; they get the colour's plain conversion, without its stand-in's step.
+    private static void WriteCmyk(ByteBuffer b, Cmyk c) => b.Num(c.C).Sp().Num(c.M).Sp().Num(c.Y).Sp().Num(c.K);
 
     private static void WriteColor(ByteBuffer b, uint color)
     {

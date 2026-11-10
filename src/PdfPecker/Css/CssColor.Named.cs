@@ -51,6 +51,9 @@ internal static partial class CssColor
     };
 
     // CSS system colours, with the values Chrome uses in its light colour scheme.
+    /// <summary>The 0xRRGGBB values of the named colours, which a device-cmyk() stand-in keeps clear of.</summary>
+    internal static IEnumerable<uint> NamedValues => NamedColors.Values.Select(c => c & 0xFFFFFF);
+
     private static readonly Dictionary<string, uint> SystemColors = new(StringComparer.OrdinalIgnoreCase)
     {
         ["canvas"] = 0xFFFFFFFF, ["canvastext"] = Black, ["linktext"] = 0xFF0000EE, ["visitedtext"] = 0xFF551A8B,
