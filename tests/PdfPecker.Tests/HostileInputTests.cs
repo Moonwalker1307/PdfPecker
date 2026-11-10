@@ -2394,6 +2394,28 @@ public class HostileInputTests
         Assert.False(PdfSanitizer.HasActiveContent(clean));
     }
 
+    [Fact]
+    public void Redacting_a_word_a_page_repeats_many_times_stays_bounded()
+    {
+        // 200,000 copies of one word at scattered places: every match is an area, and each glyph was compared with
+        // every area.
+        var random = new Random(1);
+        var content = new StringBuilder("BT /F1 1 Tf ");
+        for (int i = 0; i < 200_000; i++)
+            content.Append(CultureInfo.InvariantCulture, $"1 0 0 1 {random.NextDouble() * 612:F2} {random.NextDouble() * 792:F2} Tm (ab) Tj ");
+        content.Append("ET");
+        var pdf = SimplePdf(new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+            $"<< /Length {content.Length} >>\nstream\n{content}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        });
+        var redacted = Bounded(() => PdfRedactor.RedactText(pdf, "ab"));
+        Assert.Empty(PdfRedactor.FindText(redacted, "ab"));
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static byte[] SimplePdf(List<string> objects)
