@@ -165,7 +165,7 @@ internal sealed partial class StyleResolver
         // element's own colour, whichever of the rules setting them comes first.
         for (int i = 0; i < _count; i++)
         {
-            if (_decls[i].Property != "color" || ResetByAll(i, allDecl) || RevertOverridden(i)) continue;
+            if (_decls[i].Property != "color" || ResetByAll(i, allDecl) || RevertOverridden(i) || SubstitutionOverridden(i)) continue;
             _applyIndex = i;
             ApplyDeclaration(s, parent, _decls[i]);
         }
@@ -178,7 +178,7 @@ internal sealed partial class StyleResolver
             var d = _decls[i];
             if (!UsedViewportHeight && d.HasViewportHeightUnit) UsedViewportHeight = true;
             if (d.Property is "font-size" or "color" or "all" || d.Property.StartsWith("--", StringComparison.Ordinal) || ResetByAll(i, allDecl)) continue;
-            if (fontFirst && _applied[i] || RevertOverridden(i)) continue;
+            if (fontFirst && _applied[i] || RevertOverridden(i) || SubstitutionOverridden(i)) continue;
             _applyIndex = i;
             ApplyDeclaration(s, parent, d);
         }
