@@ -60,6 +60,9 @@ internal sealed class ConversionContext
     /// <summary>The colour function pieces the document's tiled repeating gradients have written.</summary>
     public GradientTilingBudget GradientTiling { get; } = new();
 
+    /// <summary>The document's device-cmyk() colours and the sRGB stand-ins that carry them to the PDF writer.</summary>
+    public Css.CmykColors CmykColors { get; } = new();
+
     /// <summary>The work that headers and footers with page numbers have taken, laid out again for each page.</summary>
     public HtmlToPdf.NumberedBandBudget NumberedBands { get; } = new();
 }
