@@ -9,7 +9,7 @@ namespace PdfPecker.Tests;
 public class AnnotationAppearanceTests
 {
     /// <summary>A white page with the given annotations and, when given, some content under them.</summary>
-    private static byte[] Page(string content, params string[] annots)
+    internal static byte[] Page(string content, params string[] annots)
     {
         var pdf = new FixturePdf();
         var numbers = annots.Select(pdf.Add).ToList();
@@ -129,13 +129,18 @@ public class AnnotationAppearanceTests
         var img = Render(pdf.Build(200, 120, "", "", $"/Annots [{annot} 0 R]"));
         AssertAt(img, 50, 50, 255, 255, 255);
     }
+}
 
+/// <summary>Annotations without an appearance from hostile files; timed, so they run apart from the other tests.</summary>
+[Collection(HostileInputCollection.Name)]
+public class AnnotationAppearanceHostileTests
+{
     [Fact]
     public void Huge_markup_is_drawn_within_bounded_time()
     {
         // 200,000 squiggly quadrilaterals would make a drawing of hundreds of megabytes; it stops growing at a megabyte.
         var quads = string.Join(" ", Enumerable.Repeat("0 120 200 120 0 0 200 0", 200_000));
-        var pdf = Page("", $"<< /Type /Annot /Subtype /Squiggly /Rect [0 0 200 120] /QuadPoints [{quads}] >>");
+        var pdf = AnnotationAppearanceTests.Page("", $"<< /Type /Annot /Subtype /Squiggly /Rect [0 0 200 120] /QuadPoints [{quads}] >>");
         var watch = System.Diagnostics.Stopwatch.StartNew();
         Render(pdf);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(20), $"took {watch.Elapsed}");
