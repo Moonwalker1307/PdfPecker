@@ -231,6 +231,19 @@ public static partial class HtmlToPdf
         if (options.Linearize && options.Signature != null)
             throw new ArgumentException("A signature is added as an incremental update, which ends linearization: set PdfOptions.Linearize "
                 + "or PdfOptions.Signature, not both.", nameof(options));
+        if (options.PdfX != null)
+        {
+            // PDF/X-4 is PDF 1.6 with the press's output intent: PDF/A's sRGB intent, PDF/UA's PDF 1.7, encryption,
+            // attachments and the signature's widget are outside what it allows.
+            string? conflict = conformance != PdfConformance.None ? (options.EInvoice != null ? "PdfOptions.EInvoice" : "PdfOptions.Conformance")
+                : uaPart > 0 ? "PdfOptions.Accessibility (PDF/UA)"
+                : options.Security != null ? "PdfOptions.Security"
+                : options.Signature != null ? "PdfOptions.Signature"
+                : attachments.Count > 0 ? "PdfOptions.Attachments"
+                : null;
+            if (conflict != null)
+                throw new ArgumentException($"PDF/X-4 cannot be combined with {conflict}: set one or the other.", nameof(options));
+        }
         if (options.Watermark is { } wm && string.IsNullOrEmpty(wm.Text) && wm.Image == null)
             throw new ArgumentException("The watermark needs a Text or an Image.", nameof(options));
         // Only the caller's own options can be wrong in a way worth an exception; @page rules come from the document,

@@ -345,6 +345,16 @@ public sealed class PdfOptions
     public PdfConformance Conformance { get; set; }
 
     /// <summary>
+    /// Produce a PDF/X-4 file for a print shop (ISO 15930-7), for the press whose profile the options carry. Default:
+    /// null, a plain PDF. Every page gets a trim box and a bleed box (the paper, or the bleed of an @page rule),
+    /// <c>device-cmyk()</c> colours are written as the press's inks and sRGB ones are tagged as sRGB, fonts are
+    /// embedded, and links and fillable form fields are left out, since PDF/X allows no annotations on the printed
+    /// page. Cannot be combined with <see cref="Conformance"/>, <see cref="Accessibility"/> PDF/UA levels,
+    /// <see cref="Security"/>, <see cref="Signature"/>, <see cref="Attachments"/> or <see cref="EInvoice"/>.
+    /// </summary>
+    public PdfXOptions? PdfX { get; set; }
+
+    /// <summary>
     /// Tag the PDF for screen readers and other assistive technology, or make it PDF/UA. Default:
     /// <see cref="PdfAccessibility.None"/>.
     /// </summary>

@@ -136,7 +136,8 @@ internal sealed partial class PdfDocumentWriter
     private List<int> NumberPageAnnotations(WriteState doc, int p, List<(Placed Link, float Origin, float PageTop, Matrix? Transform)> pageLinks)
     {
         var annotIds = new List<int>();
-        foreach (var (lk, origin, linkTop, transform) in pageLinks)
+        // PDF/X allows no annotations on the printed page but trap networks and printer's marks, so links are left out.
+        foreach (var (lk, origin, linkTop, transform) in IsPdfX ? new() : pageLinks)
         {
             int id = doc.Next++;
             annotIds.Add(id);
@@ -242,6 +243,11 @@ internal sealed partial class PdfDocumentWriter
             _out.Num(-bleed).Sp().Num(-bleed).Sp().Num(paperW + bleed).Sp().Num(paperH + bleed).Ascii("] /BleedBox [")
                 .Num(-bleed).Sp().Num(-bleed).Sp().Num(paperW + bleed).Sp().Num(paperH + bleed).Ascii("] /TrimBox [0 0 ")
                 .Num(paperW).Sp().Num(paperH);
+        }
+        else if (IsPdfX)
+        {
+            // PDF/X needs every page's trim box: without a bleed it is the paper.
+            _out.Ascii("0 0 ").Num(paperW).Sp().Num(paperH).Ascii("] /TrimBox [0 0 ").Num(paperW).Sp().Num(paperH);
         }
         else _out.Ascii("0 0 ").Num(paperW).Sp().Num(paperH);
         _out.Ascii("] /Resources ").Int(doc.ResourcesId).Ascii(" 0 R /Contents ").Int(doc.ContentIds[p]).Ascii(" 0 R");

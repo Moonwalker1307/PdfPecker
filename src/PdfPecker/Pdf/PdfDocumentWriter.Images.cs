@@ -45,6 +45,8 @@ internal sealed partial class PdfDocumentWriter
     private void WriteImage(PdfImage img)
     {
         string colorSpace = img.ColorSpace;
+        // PDF/X tags sRGB images, and the base of indexed ones, with the sRGB profile.
+        if (IsPdfX) colorSpace = colorSpace.Replace("/DeviceRGB", _rgbSpace, StringComparison.Ordinal);
         // An indexed colour space carries its palette as a hex string, which must be encrypted like any other string.
         if (_crypt != null && colorSpace.IndexOf('<') is int lt and >= 0)
         {

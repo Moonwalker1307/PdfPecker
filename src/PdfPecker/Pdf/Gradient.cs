@@ -130,22 +130,23 @@ internal sealed class Gradient
     /// the bounds, in that same space, decide how far a repeating gradient has to be tiled.
     /// </summary>
     public void WritePattern(Pdf.ByteBuffer b, Matrix toPage, float minX, float minY, float maxX, float maxY,
-        GradientChannel channel = GradientChannel.Flattened, GradientTilingBudget? budget = null)
+        GradientChannel channel = GradientChannel.Flattened, GradientTilingBudget? budget = null, string rgbSpace = "/DeviceRGB")
     {
         var m = Transform.Then(toPage);
         b.Ascii("<< /PatternType 2 /Matrix [").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
             .Ascii("] /Shading ");
-        WriteShading(b, minX, minY, maxX, maxY, channel, budget);
+        WriteShading(b, minX, minY, maxX, maxY, channel, budget, rgbSpace);
         b.Ascii(" >>");
     }
 
     /// <summary>
     /// Writes the shading dictionary in gradient space (before <see cref="Transform"/>). The bounds are in the painted
     /// shape's space, as for <see cref="WritePattern"/>. A repeating gradient is tiled only while
-    /// <paramref name="budget"/>, the document's, allows it.
+    /// <paramref name="budget"/>, the document's, allows it. Colours are in <paramref name="rgbSpace"/>, which is
+    /// ICC-based sRGB in a PDF/X file.
     /// </summary>
     public void WriteShading(Pdf.ByteBuffer b, float minX, float minY, float maxX, float maxY,
-        GradientChannel channel = GradientChannel.Flattened, GradientTilingBudget? budget = null)
+        GradientChannel channel = GradientChannel.Flattened, GradientTilingBudget? budget = null, string rgbSpace = "/DeviceRGB")
     {
         var colors = channel switch
         {
@@ -154,15 +155,15 @@ internal sealed class Gradient
             _ => Colors,
         };
         bool gray = channel == GradientChannel.Alpha && Alphas != null;
-        if (Conic) WriteConicShading(b, minX, minY, maxX, maxY, gray);
-        else WriteAxialShading(b, minX, minY, maxX, maxY, colors, gray, budget);
+        if (Conic) WriteConicShading(b, minX, minY, maxX, maxY, gray, rgbSpace);
+        else WriteAxialShading(b, minX, minY, maxX, maxY, colors, gray, budget, rgbSpace);
     }
 
     /// <summary>
     /// A conic gradient: a function shading over the painted bounds, a little padded, whose calculator function
     /// (<see cref="ConicFunction"/>, written as its own object) does the rest.
     /// </summary>
-    private void WriteConicShading(Pdf.ByteBuffer b, float minX, float minY, float maxX, float maxY, bool gray)
+    private void WriteConicShading(Pdf.ByteBuffer b, float minX, float minY, float maxX, float maxY, bool gray, string rgbSpace)
     {
         // The domain is in gradient space: map the painted bounds back through the transform (a scaled slice of a
         // border image).
@@ -179,7 +180,7 @@ internal sealed class Gradient
                 minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
             }
         }
-        b.Ascii(gray ? "<< /ShadingType 1 /ColorSpace /DeviceGray /Domain [" : "<< /ShadingType 1 /ColorSpace /DeviceRGB /Domain [")
+        b.Ascii("<< /ShadingType 1 /ColorSpace ").Ascii(gray ? "/DeviceGray" : rgbSpace).Ascii(" /Domain [")
             .Num(minX - 1).Sp().Num(maxX + 1).Sp().Num(minY - 1).Sp().Num(maxY + 1).Ascii("] /Function ")
             .Int(gray ? AlphaFunctionId : FunctionId).Ascii(" 0 R >>");
     }
@@ -189,9 +190,9 @@ internal sealed class Gradient
     /// function per period the painted bounds cover, the geometry stretched to match.
     /// </summary>
     private void WriteAxialShading(Pdf.ByteBuffer b, float minX, float minY, float maxX, float maxY, uint[] colors, bool gray,
-        GradientTilingBudget? budget)
+        GradientTilingBudget? budget, string rgbSpace)
     {
-        b.Ascii("<< /ShadingType ").Int(Radial ? 3 : 2).Ascii(gray ? " /ColorSpace /DeviceGray /Coords [" : " /ColorSpace /DeviceRGB /Coords [");
+        b.Ascii("<< /ShadingType ").Int(Radial ? 3 : 2).Ascii(" /ColorSpace ").Ascii(gray ? "/DeviceGray" : rgbSpace).Ascii(" /Coords [");
         var (t0, t1) = TilingRange(minX, minY, maxX, maxY, colors, budget);
         float Lerp(float a, float c, float t) => a + (c - a) * t;
         if (Radial)

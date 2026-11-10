@@ -317,7 +317,36 @@ internal static class PdfA
         int uaPart = 0, int rev = 0)
     {
         string date = created.ToString("yyyy-MM-dd'T'HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
-        return Xmp(part, conformance, props, date, date, date, invoice, uaPart, rev);
+        return Xmp(part, conformance, props, date, date, date, invoice, uaPart, rev, null, null);
+    }
+
+    /// <summary>
+    /// The XMP packet of a PDF/X-4 file: the document's properties and dates, the PDF/X version, whether the file is
+    /// trapped, and the version and rendition of xmpMM that ISO 15930-7 asks for. The document identifier is a hash of
+    /// the properties and date when <paramref name="reproducible"/>, so the same input gives the same file, and random
+    /// otherwise.
+    /// </summary>
+    public static byte[] XmpPdfX(DocumentProperties props, DateTime created, bool trapped, bool reproducible)
+    {
+        string date = created.ToString("yyyy-MM-dd'T'HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
+        Guid id;
+        if (reproducible)
+        {
+            var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(
+                string.Join('\n', props.Title, props.Author, props.Subject, props.Keywords, props.Creator, date)));
+            id = new Guid(hash.AsSpan(0, 16));
+        }
+        else id = Guid.NewGuid();
+        string uuid = "uuid:" + id.ToString("D", System.Globalization.CultureInfo.InvariantCulture);
+        var pdfx = new StringBuilder(400)
+            .Append("<rdf:Description rdf:about=\"\" xmlns:pdfxid=\"http://www.npes.org/pdfx/ns/id/\" xmlns:xmpMM=\"http://ns.adobe.com/xap/1.0/mm/\">\n")
+            .Append("<pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>\n")
+            .Append("<xmpMM:DocumentID>").Append(uuid).Append("</xmpMM:DocumentID>\n")
+            .Append("<xmpMM:InstanceID>").Append(uuid).Append("</xmpMM:InstanceID>\n")
+            .Append("<xmpMM:VersionID>1</xmpMM:VersionID>\n")
+            .Append("<xmpMM:RenditionClass>default</xmpMM:RenditionClass>\n")
+            .Append("</rdf:Description>\n");
+        return Xmp(0, null, props, date, date, date, null, 0, 0, pdfx.ToString(), trapped);
     }
 
     /// <summary>
@@ -325,7 +354,7 @@ internal static class PdfA
     /// them) so that converting the same file again gives the same result.
     /// </summary>
     public static byte[] Xmp(int part, string? conformance, DocumentProperties props, DateTimeOffset? created, DateTimeOffset? modified)
-        => Xmp(part, conformance, props, XmpDate(created), XmpDate(modified), XmpDate(modified ?? created), null, 0, 0);
+        => Xmp(part, conformance, props, XmpDate(created), XmpDate(modified), XmpDate(modified ?? created), null, 0, 0, null, null);
 
     /// <summary>An XMP date with its offset from UTC, or null.</summary>
     private static string? XmpDate(DateTimeOffset? date)
@@ -339,7 +368,7 @@ internal static class PdfA
     }
 
     private static byte[] Xmp(int part, string? conformance, DocumentProperties props, string? createDate, string? modifyDate, string? metadataDate,
-        PdfEInvoice? invoice, int uaPart, int rev)
+        PdfEInvoice? invoice, int uaPart, int rev, string? pdfxDescription, bool? trapped)
     {
         bool pdfua = uaPart > 0;
         var custom = XmpCustomProperties(props.Custom);
@@ -372,9 +401,11 @@ internal static class PdfA
         if (createDate != null) sb.Append("<xmp:CreateDate>").Append(createDate).Append("</xmp:CreateDate>\n");
         if (modifyDate != null) sb.Append("<xmp:ModifyDate>").Append(modifyDate).Append("</xmp:ModifyDate>\n");
         if (metadataDate != null) sb.Append("<xmp:MetadataDate>").Append(metadataDate).Append("</xmp:MetadataDate>\n");
+        if (trapped is { } t) sb.Append("<pdf:Trapped>").Append(t ? "True" : "False").Append("</pdf:Trapped>\n");
         foreach (var (name, value) in custom)
             sb.Append("<pdfx:").Append(name).Append('>').Append(Escape(value)).Append("</pdfx:").Append(name).Append(">\n");
         sb.Append("</rdf:Description>\n");
+        if (pdfxDescription != null) sb.Append(pdfxDescription);
         if (pdfua)
             sb.Append("<rdf:Description rdf:about=\"\" xmlns:pdfuaid=\"").Append(PdfUaNamespace).Append("\">\n")
               .Append("<pdfuaid:part>").Append(uaPart).Append("</pdfuaid:part>\n")

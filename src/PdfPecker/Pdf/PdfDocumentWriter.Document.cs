@@ -7,18 +7,19 @@ namespace PdfPecker.Pdf;
 internal sealed partial class PdfDocumentWriter
 {
     /// <summary>
-    /// Writes the header: the version (PDF 1.7 for what PDF 1.4 lacks, PDF 2.0 for PDF/A-4 and PDF/UA-2) and a comment
+    /// Writes the header: the version (PDF 1.7 for what PDF 1.4 lacks, PDF 2.0 for PDF/A-4 and PDF/UA-2, PDF 1.6 for
+    /// PDF/X-4, which is based on it) and a comment
     /// of bytes above 127, which marks the file as binary for tools that guess.
     /// </summary>
     private void WriteHeader()
-        => _out.Ascii(Pdf20 ? "%PDF-2.0\n%" : IsPdfA || _crypt != null || Tagged || ViewerCatalog.NeedsPdf17(Viewer) ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
+        => _out.Ascii(Pdf20 ? "%PDF-2.0\n%" : IsPdfX ? "%PDF-1.6\n%" : IsPdfA || _crypt != null || Tagged || ViewerCatalog.NeedsPdf17(Viewer) ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
 
     private void WriteCatalog(WriteState doc)
     {
         Begin(doc.CatalogId).Ascii("<< /Type /Catalog /Pages ").Int(doc.PagesId).Ascii(" 0 R");
         if (doc.OutlinesId != 0) _out.Ascii(" /Outlines ").Int(doc.OutlinesId).Ascii(" 0 R");
         if (doc.MetadataId != 0) _out.Ascii(" /Metadata ").Int(doc.MetadataId).Ascii(" 0 R");
-        if (IsPdfA) _out.Ascii(" /OutputIntents [").Int(doc.OutputIntentId).Ascii(" 0 R]");
+        if (IsPdfA || IsPdfX) _out.Ascii(" /OutputIntents [").Int(doc.OutputIntentId).Ascii(" 0 R]");
         if (Tagged)
         {
             _out.Ascii(" /MarkInfo << /Marked true >> /StructTreeRoot ").Int(doc.StructRootId).Ascii(" 0 R");
@@ -65,20 +66,44 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Writes the document information dictionary (not in a PDF 2.0 file) and the XMP metadata (PDF/A and PDF/UA).</summary>
     private void WriteInfoAndMetadata(WriteState doc)
     {
-        var props = Properties.WithStandard(doc.Title, doc.Author, doc.Subject);
+        // PDF/X asks for a title; a document without one is named as untitled rather than left without.
+        var title = IsPdfX && string.IsNullOrWhiteSpace(doc.Title) ? "Untitled" : doc.Title;
+        var props = Properties.WithStandard(title, doc.Author, doc.Subject);
         if (doc.MetadataId != 0) props = props.Cleaned(); // Info and XMP must agree, and XML cannot carry control characters.
         if (doc.InfoId != 0)
         {
             Begin(doc.InfoId);
-            props.WriteInfo(_out, doc.Now, modDate: doc.MetadataId != 0, WriteTextString);
+            props.WriteInfo(_out, doc.Now, modDate: doc.MetadataId != 0, WriteTextString, PdfX);
             End();
         }
         if (doc.MetadataId != 0)
         {
             var (part, level, rev) = PdfA.Identification(Conformance);
-            var xmp = PdfA.Xmp(part, level, props, doc.Now, EInvoice, PdfUAPart, rev);
+            var xmp = IsPdfX ? PdfA.XmpPdfX(props, doc.Now, PdfX!.Trapped, FixedDate != null) : PdfA.Xmp(part, level, props, doc.Now, EInvoice, PdfUAPart, rev);
             WriteStream(doc.MetadataId, xmp, compress: false, "/Type /Metadata /Subtype /XML");
         }
+    }
+
+    /// <summary>
+    /// Writes PDF/X's output intent with the press's ICC profile, and the sRGB profile that tags the file's sRGB
+    /// colours and images.
+    /// </summary>
+    private void WritePdfXOutputIntent(WriteState doc)
+    {
+        var pdfx = PdfX!;
+        Begin(doc.OutputIntentId).Ascii("<< /Type /OutputIntent /S /GTS_PDFX /OutputConditionIdentifier ");
+        WriteTextString(_out, pdfx.OutputCondition);
+        _out.Ascii(" /Info ");
+        WriteTextString(_out, string.IsNullOrEmpty(pdfx.OutputConditionInfo) ? pdfx.OutputCondition : pdfx.OutputConditionInfo);
+        if (!string.IsNullOrEmpty(pdfx.RegistryName))
+        {
+            _out.Ascii(" /RegistryName ");
+            WriteTextString(_out, pdfx.RegistryName);
+        }
+        _out.Ascii(" /DestOutputProfile ").Int(doc.IccId).Ascii(" 0 R >>");
+        End();
+        WriteStream(doc.IccId, pdfx.OutputProfile, _compress, "/N 4");
+        WriteStream(doc.SrgbId, PdfA.SrgbProfile, _compress, "/N 3");
     }
 
     /// <summary>Writes PDF/A's sRGB output intent and its ICC profile.</summary>

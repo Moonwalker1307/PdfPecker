@@ -75,6 +75,9 @@ byte[] cut = PdfRedactor.Redact(pdf, new[] { new PdfRedactionArea(pageNumber: 1,
 var archived = PdfToPdfA.Convert(File.ReadAllBytes("received.pdf"));
 if (!archived.IsConformant) Console.WriteLine(string.Join("\n", archived.Problems));
 
+// PDF/X-4 for a print shop, for the press of the ICC profile it gives you, with a 3 mm bleed and crop marks from @page
+byte[] print = HtmlToPdf.Convert(flyerHtml, new PdfOptions { PdfX = new PdfXOptions(File.ReadAllBytes("PSOcoated_v3.icc"), "FOGRA51") });
+
 // Fast Web View: the first page shows while the rest of a large PDF is still downloading
 byte[] web = HtmlToPdf.Convert(html, new PdfOptions { Linearize = true });
 byte[] mergedForWeb = PdfLinearizer.Linearize(PdfMerger.Merge(invoicePdf, termsPdf));
@@ -293,6 +296,14 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption (passwords prepared with SASLprep, as PDF
   2.0 requires), and text, image and SVG watermarks.
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
+- **PDF/X-4 for print shops**: `new PdfOptions { PdfX = new PdfXOptions(File.ReadAllBytes("PSOcoated_v3.icc"), "FOGRA51") }`
+  writes a PDF/X-4 file (ISO 15930-7) for the press whose ICC output profile you pass: PDF 1.6 with the output intent,
+  a trim box on every page (the paper, inside the bleed box of `@page { bleed: 3mm }`), sRGB colours and images tagged
+  with an sRGB profile for the print shop's colour conversion, CMYK JPEGs as DeviceCMYK, embedded fonts and the PDF/X
+  metadata. PdfPecker bundles no press profile (the print shop, the ICC or the ECI provides one), does no trapping, and
+  leaves links and fillable fields out, since PDF/X allows no annotations on the printed page. veraPDF has no PDF/X
+  profile, so the files are checked by tests of each requirement and by rendering in Ghostscript and Poppler, not by a
+  PDF/X validator.
 - **Existing PDFs to PDF/A**: `PdfToPdfA` converts PDFs from any tool to PDF/A-2b, 2u, 3b or 3u without rasterizing
   them. It embeds fonts that are not embedded (with the bundled glyphs, at the document's own widths), repairs embedded
   TrueType fonts whose glyphs, widths or character maps disagree with the PDF, adds the output intent and XMP metadata,

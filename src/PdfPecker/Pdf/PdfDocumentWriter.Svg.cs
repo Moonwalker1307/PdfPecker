@@ -327,7 +327,7 @@ internal sealed partial class PdfDocumentWriter
         WriteSvgShapes(content, mask.Children!, toPage);
         _streamSpace = streamSpace;
         RestoreState(saved);
-        string dict = "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] /Group << /S /Transparency /CS /DeviceRGB >> /Resources "
+        string dict = "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] /Group << /S /Transparency /CS " + _rgbSpace + " >> /Resources "
             + _resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R";
         _masks.Add((content.Span.ToArray(), dict, mask.MaskAlpha));
         return _masks.Count;
