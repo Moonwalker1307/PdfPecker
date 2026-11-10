@@ -309,6 +309,34 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    // Fuzz finding (html, timeout-ef577db1): hundreds of copies of one rule with sibling-index() substituted and parsed
+    // every copy for every element, though only the last one counts. An overridden substitution is now skipped.
+    [Fact]
+    public void Many_overridden_substituted_declarations_stay_linear()
+    {
+        var sb = new StringBuilder("<style>");
+        for (int i = 0; i < 2000; i++) sb.Append("*{margin-left:calc(sibling-index() * 1pt)} p{color:var(--c, red)}");
+        sb.Append("p{color:var(--c, lime)}</style>");
+        for (int i = 0; i < 3000; i++) sb.Append(i == 2 ? "<p id=c>x</p>" : "<p>x</p>");
+        var html = sb.ToString();
+        var doc = Bounded(() => Styled(html));
+        var third = ById(doc, "c").Style;
+        Assert.Equal(3f, third.MarginLeft.Resolve(0));
+        Assert.Equal(0xFF00FF00u, third.Color);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    // A later declaration whose substitution fails still overrides an earlier one: the property is unset.
+    [Fact]
+    public void Failed_substitution_after_a_substituted_declaration_unsets_the_property()
+    {
+        var doc = Styled("<style>p{margin-left:5pt} p{margin-left:calc(sibling-index() * 1pt)} p{margin-left:var(--none)}"
+            + " p{color:var(--c, lime)} p{color:var(--none)}</style><div style='color:blue'><p id=a>a</p></div>");
+        var a = ById(doc, "a").Style;
+        Assert.Equal(0f, a.MarginLeft.Resolve(0));
+        Assert.Equal(0xFF0000FFu, a.Color);
+    }
+
     // Fuzz finding (css, timeout-d0d017cf): a variable that names itself in its reference and again in each nested
     // fallback was resolved twice per level down to the depth limit, about 2^32 substitutions.
     [Fact]
