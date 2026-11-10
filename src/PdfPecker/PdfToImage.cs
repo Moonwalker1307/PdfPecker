@@ -85,7 +85,10 @@ public sealed class ImageOptions
     /// <summary>Renders on a transparent background instead of <see cref="BackgroundColor"/>.</summary>
     public bool Transparent { get; set; }
 
-    /// <summary>Whether annotation appearances (form fields, stamps, comments) are drawn. Default true.</summary>
+    /// <summary>
+    /// Whether annotation appearances (form fields, stamps, comments) are drawn. Notes, text markup, shapes, lines, ink and
+    /// free text that have no appearance of their own are drawn from their properties, as viewers draw them. Default true.
+    /// </summary>
     public bool RenderAnnotations { get; set; } = true;
 
     /// <summary>Password for encrypted PDFs (user or owner password). Not needed for PDFs that only restrict permissions.</summary>
