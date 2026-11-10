@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using PdfPecker.Rendering.Graphics;
 using PdfPecker.Rendering.Parsing;
 
@@ -175,6 +177,35 @@ internal sealed class RenderDocument
     }
 
     /// <summary>
+    /// Composites premultiplied pixels over an opaque or translucent background. A page is mostly opaque or empty, so
+    /// four pixels that are all opaque or all empty are done at once, and the rest one at a time.
+    /// </summary>
+    internal static void PutOnBackground(uint[] px, uint background)
+    {
+        int i = 0;
+        if (Vector128.IsHardwareAccelerated)
+        {
+            var opaque = Vector128.Create(0xFF000000u);
+            var fill = Vector128.Create(background);
+            ref uint start = ref MemoryMarshal.GetArrayDataReference(px);
+            for (; i + 4 <= px.Length; i += 4)
+            {
+                var v = Vector128.LoadUnsafe(ref start, (nuint)i);
+                if ((v & opaque) == opaque) continue;
+                if (v == Vector128<uint>.Zero)
+                {
+                    fill.StoreUnsafe(ref start, (nuint)i);
+                    continue;
+                }
+                for (int k = i; k < i + 4; k++) px[k] = OnBackground(px[k], background);
+            }
+        }
+        for (; i < px.Length; i++) px[i] = OnBackground(px[i], background);
+    }
+
+    private static uint OnBackground(uint c, uint background) => c == 0 ? background : c < 0xFF000000 ? Canvas.Over(c, background) : c;
+
+    /// <summary>
     /// Renders a page at the given pixels per point (x and y) onto a canvas of premultiplied RGBA pixels, drawn on
     /// <paramref name="reuse"/> when it has the canvas's pixel count.
     /// </summary>
@@ -188,16 +219,7 @@ internal sealed class RenderDocument
         var m = PageMatrix(p, sx, sy);
         var r = new PageRenderer(File, _cache, canvas, cancel);
         using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, m, annotations);
-        if (background != 0)
-        {
-            var px = canvas.Pixels;
-            for (int i = 0; i < px.Length; i++)
-            {
-                uint c = px[i];
-                if (c == 0) px[i] = background;
-                else if (c < 0xFF000000) px[i] = Canvas.Over(c, background);
-            }
-        }
+        if (background != 0) PutOnBackground(canvas.Pixels, background);
         return canvas;
     }
 }

@@ -62,38 +62,75 @@ internal static class TiffDecoder
     /// <summary>Decodes one image of the file; <paramref name="page"/> counts the directories from 0.</summary>
     public static PdfImage? Decode(byte[] data, long maxPixels, int page = 0)
     {
-        if (!IsTiff(data)) return null;
+        if (!TryDecode(data, maxPixels, page, out var decoded)) return null;
+        if (decoded.Bilevel is { } bits)
+        {
+            // Bilevel images stay at 1 bit; the decode array says whether 0 is white or black.
+            return new PdfImage
+            {
+                Width = decoded.Width, Height = decoded.Height, ColorSpace = "/DeviceGray", BitsPerComponent = 1, Data = PdfImage.Deflate(bits),
+                Decode = decoded.WhiteIsZero ? "[1 0]" : null,
+            };
+        }
+        return decoded.Planes is { } planes ? PdfImage.FromPlanes(planes) : null;
+    }
+
+    /// <summary>
+    /// Decodes one image of the file to 8-bit grey or RGB samples with an alpha plane, as <see cref="Decode"/> embeds
+    /// them, without compressing them for a PDF; bilevel images become grey levels of 0 and 255.
+    /// </summary>
+    public static ImagePlanes? DecodePixels(byte[] data, long maxPixels, int page = 0)
+    {
+        if (!TryDecode(data, maxPixels, page, out var decoded)) return null;
+        if (decoded.Bilevel is not { } bits) return decoded.Planes;
+        int width = decoded.Width, height = decoded.Height, rowBytes = (width + 7) / 8;
+        byte zero = decoded.WhiteIsZero ? (byte)255 : (byte)0, one = (byte)(255 - zero);
+        var gray = new byte[width * height];
+        for (int y = 0, o = 0; y < height; y++)
+        {
+            int row = y * rowBytes;
+            for (int x = 0; x < width; x++, o++)
+                gray[o] = (bits[row + (x >> 3)] >> (7 - (x & 7)) & 1) == 0 ? zero : one;
+        }
+        return new ImagePlanes(width, height, gray, 1, null);
+    }
+
+    /// <summary>A decoded image: packed 1-bit rows for a bilevel one, 8-bit planes for any other.</summary>
+    private readonly record struct Decoded(int Width, int Height, byte[]? Bilevel, bool WhiteIsZero, ImagePlanes? Planes);
+
+    private static bool TryDecode(byte[] data, long maxPixels, int page, out Decoded decoded)
+    {
+        decoded = default;
+        if (!IsTiff(data)) return false;
         var directory = TiffDirectory.Read(data, page);
         if (directory == null
             || !TryReadFormat(directory, maxPixels, out var format)
             || !TryReadChunkLayout(directory, format, data.Length, maxPixels, out var layout))
-            return null;
+            return false;
 
         var planes = DecodePlanes(data, directory, format, layout, out bool decodedYCbCr);
-        if (planes == null) return null;
+        if (planes == null) return false;
         // The JPEG decoder has already turned YCbCr chunks into RGB.
         int photometric = decodedYCbCr ? Rgb : format.Photometric;
         int width = format.Width, height = format.Height;
 
         if (format.BitsPerSample == 1 && format.SamplesPerPixel == 1 && photometric is WhiteIsZero or BlackIsZero)
         {
-            // Bilevel images stay at 1 bit; the decode array says whether 0 is white or black.
-            return new PdfImage
-            {
-                Width = width, Height = height, ColorSpace = "/DeviceGray", BitsPerComponent = 1, Data = PdfImage.Deflate(planes[0]),
-                Decode = photometric == WhiteIsZero ? "[1 0]" : null,
-            };
+            decoded = new Decoded(width, height, planes[0], photometric == WhiteIsZero, null);
+            return true;
         }
 
         byte[]? palette = null;
-        if (photometric == Palette && (palette = ReadPalette(directory, format.BitsPerSample)) == null) return null;
+        if (photometric == Palette && (palette = ReadPalette(directory, format.BitsPerSample)) == null) return false;
 
         var samples = new SampleReader(planes, format.Planar, format.SamplesPerPixel, format.BitsPerSample,
             layout.PlaneRowBytes, directory.LittleEndian);
         var alpha = format.Alpha ? new byte[width * height] : null;
-        return photometric is WhiteIsZero or BlackIsZero
+        var image = photometric is WhiteIsZero or BlackIsZero
             ? ToGray(samples, width, height, photometric == WhiteIsZero, alpha, format.Premultiplied)
             : ToRgb(samples, width, height, photometric, palette, format.Colors, alpha, format.Premultiplied);
+        decoded = new Decoded(width, height, null, false, image);
+        return true;
     }
 
     private static bool TryReadFormat(TiffDirectory directory, long maxPixels, out ImageFormat format)
@@ -340,7 +377,7 @@ internal static class TiffDecoder
         return palette;
     }
 
-    private static PdfImage ToGray(in SampleReader samples, int width, int height, bool whiteIsZero, byte[]? alpha, bool premultiplied)
+    private static ImagePlanes ToGray(in SampleReader samples, int width, int height, bool whiteIsZero, byte[]? alpha, bool premultiplied)
     {
         var gray = new byte[width * height];
         for (int y = 0, o = 0; y < height; y++)
@@ -352,13 +389,10 @@ internal static class TiffDecoder
                 gray[o] = whiteIsZero ? (byte)(255 - value) : value;
             }
         }
-        var image = new PdfImage { Width = width, Height = height, ColorSpace = "/DeviceGray", Data = PdfImage.Deflate(gray) };
-        if (alpha != null && alpha.AsSpan().ContainsAnyExcept((byte)255))
-            image.SMask = new PdfImage { Width = width, Height = height, ColorSpace = "/DeviceGray", Data = PdfImage.Deflate(alpha) };
-        return image;
+        return new ImagePlanes(width, height, gray, 1, alpha);
     }
 
-    private static PdfImage? ToRgb(in SampleReader samples, int width, int height, int photometric, byte[]? palette, int colors,
+    private static ImagePlanes ToRgb(in SampleReader samples, int width, int height, int photometric, byte[]? palette, int colors,
         byte[]? alpha, bool premultiplied)
     {
         var rgb = new byte[width * height * 3];
@@ -392,7 +426,7 @@ internal static class TiffDecoder
                 rgb[o * 3 + 2] = blue;
             }
         }
-        return PdfImage.FromPixels(new DecodedImage(width, height, rgb, alpha));
+        return new ImagePlanes(width, height, rgb, 3, alpha);
     }
 
     private static byte Unpremultiply(byte color, byte alpha, bool premultiplied)

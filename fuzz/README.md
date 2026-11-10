@@ -36,7 +36,8 @@ supervisor), so a seed that hangs is reported once instead of on every restart. 
 `fuzz-findings` folder: a saved finding read back as a seed would hang every worker on the same input.
 
 Targets: `pdf-render`, `pdf-text`, `pdf-images`, `pdf-html`, `pdf-html-structured`, `pdf-markdown`, `pdf-merge`, `pdf-form`, `pdf-compact`, `pdf-sanitize`, `pdf-redact`, `pdf-pdfa`, `pdf-linearize`, `pdf-verify`, `pdf-properties`, `pdf-snapshot` (PdfPecker.Testing's snapshot comparison), `html`, `css` (as a `<style>` in a page), `svg`
-(inline in a page and as a data-URI image), `markdown`, `barcode` (QR, EPC, Code 128 and EAN-13 encoders), `png`, `jpeg`, `gif`, `webp`, `bmp`, `tiff`, `jpx`, `jbig2`,
+(inline in a page and as a data-URI image), `markdown`, `barcode` (QR, EPC, Code 128 and EAN-13 encoders), `png`, `jpeg`, `gif`, `webp`, `bmp`, `tiff`, `image-to-pixels` (the public
+`ImageToPixels`, every format and pixel format, which may throw only `InvalidDataException`), `jpx`, `jbig2`,
 `font-ttf`, `font-otf`, `font-woff`, `font-woff2`, `font-variable` (variable TrueType and CFF2 fonts) and `font-color` (COLR colour fonts). The font
 targets register the font and then lay out and embed text in it, because most font bugs are in shaping and subsetting
 rather than in loading.

@@ -6,8 +6,8 @@ using PdfPecker.Rendering;
 namespace PdfPecker.Tests;
 
 /// <summary>
-/// The PNG encoder's vectorised Paeth filter, its chunk CRCs and a decode of what it writes, at row lengths that end in
-/// the scalar tail of the vector loops.
+/// The PNG encoder's vectorised Paeth filter, the undoing of every filter, the encoder's chunk CRCs and a decode of what
+/// it writes, at row lengths that end in the scalar tail of the vector loops.
 /// </summary>
 public class PngEncoderTests
 {
@@ -31,6 +31,46 @@ public class PngEncoderTests
                 int left = i >= bytesPerPixel ? row[i - bytesPerPixel] : 0;
                 int aboveLeft = i >= bytesPerPixel ? above[i - bytesPerPixel] : 0;
                 Assert.Equal((byte)(row[i] - PngFilters.PaethPredictor(left, above[i], aboveLeft)), filtered[i]);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(6)]
+    [InlineData(8)]
+    public void Undoing_each_filter_matches_its_definition_byte_by_byte(int bytesPerPixel)
+    {
+        var random = new Random(100 + bytesPerPixel);
+        for (int length = 0; length <= 80; length++)
+        {
+            for (byte filter = 0; filter <= 5; filter++)
+            {
+                var row = new byte[length];
+                var above = new byte[length];
+                random.NextBytes(row);
+                random.NextBytes(above);
+                var undone = (byte[])row.Clone();
+                PngFilters.Undo(filter, undone, above, bytesPerPixel);
+                // The definition, byte by byte from the left, reading the bytes already undone; type 5 does not exist.
+                var expected = (byte[])row.Clone();
+                for (int i = 0; i < length; i++)
+                {
+                    int left = i >= bytesPerPixel ? expected[i - bytesPerPixel] : 0;
+                    int aboveLeft = i >= bytesPerPixel ? above[i - bytesPerPixel] : 0;
+                    expected[i] += filter switch
+                    {
+                        PngFilters.Sub => (byte)left,
+                        PngFilters.Up => above[i],
+                        PngFilters.Average => (byte)((left + above[i]) >> 1),
+                        PngFilters.Paeth => (byte)PngFilters.PaethPredictor(left, above[i], aboveLeft),
+                        _ => 0,
+                    };
+                }
+                Assert.Equal(expected, undone);
             }
         }
     }

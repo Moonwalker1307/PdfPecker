@@ -74,6 +74,20 @@ internal sealed class TiffDirectory
     }
 
     /// <summary>
+    /// The number of directories (pages) in the chain from the header, at most <paramref name="max"/>; a chain that
+    /// loops back to a directory already counted ends there.
+    /// </summary>
+    public static int Count(byte[] data, int max)
+    {
+        if (data.Length < HeaderLength) return 0;
+        var seen = new HashSet<long>();
+        long offset = ReadUInt32(data, FirstDirectoryOffset);
+        while (seen.Count < max && StartsDirectory(data, offset) && seen.Add(offset))
+            offset = ReadUInt32(data, offset + 2 + ReadUInt16(data, offset) * (long)EntryLength);
+        return seen.Count;
+    }
+
+    /// <summary>
     /// Reads the directory at <paramref name="offset"/> of data that starts with a TIFF header, such as an EXIF
     /// sub-directory. Returns null when the offset is outside the data.
     /// </summary>

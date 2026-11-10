@@ -50,7 +50,7 @@ internal static class PngEncoder
     }
 
     /// <summary>Rewrites the translucent pixels of <paramref name="bytes"/>, a copy of <paramref name="pixels"/>, with straight colour.</summary>
-    private static void UnpremultiplyTranslucent(ReadOnlySpan<uint> pixels, Span<byte> bytes)
+    internal static void UnpremultiplyTranslucent(ReadOnlySpan<uint> pixels, Span<byte> bytes)
     {
         for (int i = 0; i < pixels.Length; i++)
         {

@@ -65,6 +65,19 @@ internal sealed partial class PdfImage
         return image;
     }
 
+    /// <summary>Decoded grey or RGB planes, with a soft mask when some of their pixels are not opaque.</summary>
+    internal static PdfImage FromPlanes(ImagePlanes planes)
+    {
+        var image = new PdfImage
+        {
+            Width = planes.Width, Height = planes.Height, BitsPerComponent = 8, ColorSpace = planes.Colors == 1 ? DeviceGray : DeviceRgb,
+            Data = Deflate(planes.Color),
+        };
+        if (planes.Alpha != null && HasTransparency(planes.Alpha))
+            image.SMask = new PdfImage { Width = planes.Width, Height = planes.Height, BitsPerComponent = 8, ColorSpace = DeviceGray, Data = Deflate(planes.Alpha) };
+        return image;
+    }
+
     private static bool HasTransparency(byte[] alpha) => alpha.AsSpan().IndexOfAnyExcept((byte)255) >= 0;
 
     /// <summary>
