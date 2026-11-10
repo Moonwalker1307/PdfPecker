@@ -309,6 +309,34 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    // Fuzz finding (html, timeout-ef577db1): hundreds of copies of one rule with sibling-index() substituted and parsed
+    // every copy for every element, though only the last one counts. An overridden substitution is now skipped.
+    [Fact]
+    public void Many_overridden_substituted_declarations_stay_linear()
+    {
+        var sb = new StringBuilder("<style>");
+        for (int i = 0; i < 2000; i++) sb.Append("*{margin-left:calc(sibling-index() * 1pt)} p{color:var(--c, red)}");
+        sb.Append("p{color:var(--c, lime)}</style>");
+        for (int i = 0; i < 3000; i++) sb.Append(i == 2 ? "<p id=c>x</p>" : "<p>x</p>");
+        var html = sb.ToString();
+        var doc = Bounded(() => Styled(html));
+        var third = ById(doc, "c").Style;
+        Assert.Equal(3f, third.MarginLeft.Resolve(0));
+        Assert.Equal(0xFF00FF00u, third.Color);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    // A later declaration whose substitution fails still overrides an earlier one: the property is unset.
+    [Fact]
+    public void Failed_substitution_after_a_substituted_declaration_unsets_the_property()
+    {
+        var doc = Styled("<style>p{margin-left:5pt} p{margin-left:calc(sibling-index() * 1pt)} p{margin-left:var(--none)}"
+            + " p{color:var(--c, lime)} p{color:var(--none)}</style><div style='color:blue'><p id=a>a</p></div>");
+        var a = ById(doc, "a").Style;
+        Assert.Equal(0f, a.MarginLeft.Resolve(0));
+        Assert.Equal(0xFF0000FFu, a.Color);
+    }
+
     // Fuzz finding (css, timeout-d0d017cf): a variable that names itself in its reference and again in each nested
     // fallback was resolved twice per level down to the depth limit, about 2^32 substitutions.
     [Fact]
@@ -3019,6 +3047,24 @@ public class HostileInputTests
         var svg = "<svg width='800' height='600' viewBox='0 0 800 600'><defs><filter id='f'><feGaussianBlur stdDeviation='2'/></filter></defs>"
             + Repeat(chain, 16) + "</svg>";
         AssertStructurallyValid(Bounded("<p>before</p>" + svg + "<p>after</p>"));
+    }
+
+    [Fact]
+    public void Svg_filter_content_counts_the_pixels_each_shape_fills()
+    {
+        // Found by the fuzzer: target svg, timeout-78eeadf2. A filtered group scaled to the four-million-pixel cap held
+        // 1,451 star polygons filled with a gradient, each covering most of the region. The budget counted the region's
+        // pixels once for rendering the content, though every shape is filled over its own bounds.
+        string Group(int stars) => "<svg width='800' height='480' viewBox='0 0 200 120'><defs><radialGradient id='r'><stop offset='0' stop-color='#fff'/>"
+            + "<stop offset='1' stop-color='#000'/></radialGradient><filter id='f'><feGaussianBlur stdDeviation='2'/></filter></defs>"
+            + "<g transform='scale(4)'><g filter='url(#f)'>"
+            + Repeat("<polygon points='100,10 40,198 190,78 10,78 160,198' fill-rule='evenodd' fill='url(#r)'/>", stars) + "</g></g></svg>";
+        var options = new PdfOptions { Compress = false };
+        var pdf = Bounded(() => Bounded(Group(4000), options));
+        AssertStructurallyValid(pdf);
+        // Beyond the budget the group is drawn without the filter; a few shapes keep it.
+        Assert.DoesNotContain("/Subtype /Image", Latin1(pdf));
+        Assert.Contains("/Subtype /Image", Latin1(Bounded(Group(3), options)));
     }
 
     [Fact]

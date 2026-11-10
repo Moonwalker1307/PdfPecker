@@ -78,6 +78,7 @@ public static partial class HtmlToPdf
 
         public byte[] Run()
         {
+            using var cmyk = _context.CmykColors.Use();
             Parse();
             PrepareStyles();
             SetUpPage();

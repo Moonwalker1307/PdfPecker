@@ -221,7 +221,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables (collapsed borders also from `col` and `colgroup`; rows and
   columns with `visibility: collapse` leave), floats with `shape-outside`, `clip-path` shapes (also `rect()` and
   `xywh()`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for heights and
-  their limits), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders, backgrounds,
+  their limits), percentage heights inside flex items resolved as in Chrome (stretched items, and items flexed from a
+  length basis in a column whose container has only a `min-height`, as card and label layouts use), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders, backgrounds,
   shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
   computes it, for templates that shrink a page to fit), multi-column layout, gap decorations (`column-rule` and
   `row-rule` in grid and flex containers too, with lists and `repeat()`, `rule-break`, `rule-inset`,
@@ -259,7 +260,7 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   small `<font>` text, or an image alone in a table cell, is only as tall as its content. The old body attributes
   `topmargin`, `leftmargin`, `marginheight` and `marginwidth` set the page margins as they do in Chrome.
   [More](https://pdfpecker.net/docs/html-and-css/)
-- **Paged media**: `@page` sizes (also a page as tall as its content, `size: 80mm auto`, for receipts on a roll), borders, padding and background images (which cover the whole sheet) and margin boxes (also with running elements, `position: running()` and `element()`, as in Prince and WeasyPrint), a bleed with crop marks and registration crosses for a print shop (`bleed: 3mm; marks: crop cross`, written as the PDF's trim and bleed boxes, as in WeasyPrint), `@page :nth(2n+1)` and page groups, `:nth(1 of chapter)` (as in WeasyPrint; they style margin boxes and the page background, not the page size or margins), running headers and footers (also a first page of its own, even pages of their own for printing on both sides, and bands
+- **Paged media**: `@page` sizes (also a page as tall as its content, `size: 80mm auto`, for receipts on a roll), borders, padding and background images (which cover the whole sheet) and margin boxes (also with running elements, `position: running()` and `element()`, as in Prince and WeasyPrint), a bleed with crop marks and registration crosses for a print shop (`bleed: 3mm; marks: crop cross`, written as the PDF's trim and bleed boxes, as in WeasyPrint), CMYK colours for print with `device-cmyk()` of CSS Color 5 (`color: device-cmyk(0 0 0 1)` for text in black ink only, written as DeviceCMYK for text, backgrounds, borders, rules and SVG fills and strokes; gradients, shadows, filters and colour mixes use its plain sRGB conversion, as does PDF/A, whose output intent is sRGB), `@page :nth(2n+1)` and page groups, `:nth(1 of chapter)` (as in WeasyPrint; they style margin boxes and the page background, not the page size or margins), running headers and footers (also a first page of its own, even pages of their own for printing on both sides, and bands
   of their own for named pages), `position: fixed` boxes repeated on every page of their named page, also in the page margins with negative offsets, and over the running headers and footers unless their z-index is negative (for watermarks and page frames), footnotes, tables of contents with page numbers, the page count anywhere in the content (`counter(pages)`, as in Prince), the first and last page of a section and page numbers counted within it (`-pdfpecker-target-pages()`, and `{section-page:id}` in running headers and footers), page numbers in running headers and footers in any counter style (`{page:upper-roman}`, `{total-pages:lower-alpha}`, `{section-page:id:lower-roman}`, or a zero-padded `@counter-style` of your own), break control (also table row groups
   and group header rows kept together, as reports keep a group on one page, and forced breaks between table rows and between flex lines), table rows that break inside at a page's end as in Chrome, unless a cell would have nothing before the break, flex rows whose items break at a page's end as in Chrome (the row moves whole when an item is kept whole), table
   headers and footers repeated on every page (also around a row split across pages), boxes split across pages or
@@ -407,7 +408,7 @@ of their memory. How to read the table and how it was measured is in
 
 | Converter | Engine | To deploy | First PDF | Invoice, 1 page | Feature tour, 5 pages | Report, 30 pages | Parallel | Peak memory |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **PdfPecker** | own, managed | 5.8 MB DLL | 0.40 s | **0.92 ms** | **2.9 ms** | **33 ms** | **1,132 docs/s** | **92 MB** |
+| **PdfPecker** | own, managed | 6.3 MB DLL | 0.40 s | **0.92 ms** | **2.9 ms** | **33 ms** | **1,132 docs/s** | **92 MB** |
 | HtmlRenderer.PdfSharp 1.6.1 | own, managed (CSS 2) | 5.0 MB of DLLs | 0.54 s | 4.9 ms | 16 ms | 360 ms | 114 docs/s | 255 MB |
 | iText pdfHTML 6.3.4 | own, managed | 11 MB of DLLs | 1.18 s | 24 ms | 132 ms | 2.2 s | 15 docs/s | 707 MB |
 | wkhtmltopdf 0.12.6 | Qt WebKit, native | about 90 MB with Qt | 0.33 s | 282 ms | 309 ms | 600 ms | 12 docs/s | 165 MB |
@@ -426,7 +427,7 @@ dotnet run --project src/PdfPecker.Cli -c Release -- convert in.html out.pdf   #
 dotnet run --project samples/PdfPecker.Razor.Sample -c Release    # writes the PdfPecker.Razor invoice into ./output
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
 dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    # memory and CPU per conversion
-bench/compare-versions.sh v1.23.0                              # this checkout against a release, in turns on this machine
+bench/compare-versions.sh v1.24.0                              # this checkout against a release, in turns on this machine
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg         # the fluent package, with the same version
 dotnet pack src/PdfPecker.Cli -c Release -o ./nupkg            # the pdfpecker dotnet tool, with the same version

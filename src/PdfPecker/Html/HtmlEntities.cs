@@ -5,34 +5,84 @@ namespace PdfPecker.Html;
 
 internal static partial class HtmlEntities
 {
-    // The table is built on the first named reference, so documents without one never pay for its 2,125 entries.
+    // Both tables are sorted in ordinal order (the generator writes them so) and are searched by halving in the
+    // assembly's own string data. Only an index of where each entry starts is built, on the first named reference: a
+    // dictionary of the 2,231 names and their texts allocated about 300 KB in the first conversion of every process.
     private static class Table
     {
-        public static readonly Dictionary<string, string> Named = BuildNamed();
-        public static readonly HashSet<string> Legacy = new(LegacyNames.Split(' '), StringComparer.Ordinal);
+        public static readonly int[] Named = Starts(NamedTable);
+        public static readonly int[] Legacy = Starts(LegacyNames);
     }
 
     // The longest name, "CounterClockwiseContourIntegral", has 31 characters; the longest legacy name has 6.
     private const int MaxNameLength = 31, MaxLegacyLength = 6;
 
-    private static Dictionary<string, string> BuildNamed()
+    // A named reference decodes to at most two code points, so to at most four UTF-16 units.
+    private const int MaxValueLength = 4;
+
+    private static int[] Starts(string table)
     {
-        var d = new Dictionary<string, string>(2200, StringComparer.Ordinal);
-        foreach (var pair in NamedTable.Split(' '))
+        var starts = new int[table.AsSpan().Count(' ') + 1];
+        int n = 1;
+        for (int i = 0; i < table.Length; i++)
+            if (table[i] == ' ') starts[n++] = i + 1;
+        return starts;
+    }
+
+    // Returns where the entry for the name starts in the table, or -1. A named entry's name ends at its '=', a legacy
+    // entry at the next space or the table's end.
+    private static int Find(string table, int[] starts, ReadOnlySpan<char> name)
+    {
+        int lo = 0, hi = starts.Length - 1;
+        while (lo <= hi)
         {
-            int eq = pair.IndexOf('=');
-            int comma = pair.IndexOf(',', eq);
-            string value = char.ConvertFromUtf32(Hex(comma < 0 ? pair.AsSpan(eq + 1) : pair.AsSpan(eq + 1, comma - eq - 1)));
-            if (comma >= 0) value += char.ConvertFromUtf32(Hex(pair.AsSpan(comma + 1)));
-            d[pair.Substring(0, eq)] = value;
+            int mid = lo + ((hi - lo) >> 1);
+            var entry = table.AsSpan(starts[mid]);
+            int end = entry.IndexOfAny('=', ' ');
+            int cmp = (end < 0 ? entry : entry[..end]).SequenceCompareTo(name);
+            if (cmp == 0) return starts[mid];
+            if (cmp < 0) lo = mid + 1;
+            else hi = mid - 1;
         }
-        return d;
+        return -1;
+    }
+
+    // Writes the text of the named entry that starts at the index and returns its length.
+    private static int WriteValue(int start, Span<char> destination)
+    {
+        var value = NamedTable.AsSpan(start);
+        value = value[(value.IndexOf('=') + 1)..];
+        int space = value.IndexOf(' ');
+        if (space >= 0) value = value[..space];
+        int comma = value.IndexOf(',');
+        int length = WriteCodePoint(Hex(comma < 0 ? value : value[..comma]), destination);
+        if (comma >= 0) length += WriteCodePoint(Hex(value[(comma + 1)..]), destination[length..]);
+        return length;
 
         static int Hex(ReadOnlySpan<char> s) => int.Parse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+
+        static int WriteCodePoint(int codePoint, Span<char> destination) => new Rune(codePoint).EncodeToUtf16(destination);
+    }
+
+    private static void AppendValue(StringBuilder sb, int start)
+    {
+        Span<char> value = stackalloc char[MaxValueLength];
+        sb.Append(value[..WriteValue(start, value)]);
     }
 
     /// <summary>Looks up a named character reference (without '&amp;' and ';').</summary>
-    public static bool TryGetNamed(string name, out string value) => Table.Named.TryGetValue(name, out value!);
+    public static bool TryGetNamed(string name, out string value)
+    {
+        int start = name.Length <= MaxNameLength ? Find(NamedTable, Table.Named, name) : -1;
+        if (start < 0)
+        {
+            value = null!;
+            return false;
+        }
+        Span<char> text = stackalloc char[MaxValueLength];
+        value = new string(text[..WriteValue(start, text)]);
+        return true;
+    }
 
     /// <summary>Decodes character references in text. Returns the input when it has none.</summary>
     public static string Decode(string s) => Decode(s, attribute: false);
@@ -96,20 +146,21 @@ internal static partial class HtmlEntities
         int run = end - start;
         if (run == 0) return 0;
         if (run <= MaxNameLength && end < s.Length && s[end] == ';'
-            && Table.Named.TryGetValue(s.Substring(start, run), out var full))
+            && Find(NamedTable, Table.Named, s.AsSpan(start, run)) is >= 0 and var full)
         {
-            sb.Append(full);
+            AppendValue(sb, full);
             return end + 1 - i;
         }
         for (int len = Math.Min(run, MaxLegacyLength); len >= 2; len--)
         {
-            string name = s.Substring(start, len);
-            if (!Table.Legacy.Contains(name)) continue;
+            var name = s.AsSpan(start, len);
+            if (Find(LegacyNames, Table.Legacy, name) < 0) continue;
             // In an attribute, a legacy name followed by a letter, a digit or '=' is not a reference (HTML 13.2.5.73),
             // which keeps query strings such as "&region=eu" intact.
             int after = start + len;
             if (attribute && after < s.Length && (char.IsAsciiLetterOrDigit(s[after]) || s[after] == '=')) return 0;
-            sb.Append(Table.Named[name]);
+            // The generator checks that every legacy name is also in the full table.
+            AppendValue(sb, Find(NamedTable, Table.Named, name));
             return after - i;
         }
         return 0;

@@ -88,6 +88,7 @@ internal static class Targets
         "<style>li{width:calc(sibling-index() * 1e9px);z-index:sibling-count()}</style>", "<style>*{margin-left:calc(sibling-index() * 1em)}</style>",
         "width:if(media(print): 1e9px; supports(display:grid): 1px; else: 2px)", "color:if(style(--a: 1): red; else: if(style(--b): blue))",
         "color:contrast-color(var(--bg))", "background:contrast-color(contrast-color(red))", "color:contrast-color(transparent)",
+        "color:device-cmyk(0 0 0 1e30 / -1)", "background:color-mix(in srgb, device-cmyk(1, 0, 0, 0), device-cmyk(none 1 0 0))",
         "<img src=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>\" style=\"object-view-box:inset(-1e9% 100% 1e9px 0)\">",
         "object-view-box:xywh(0 0 1e-9px 1e-9px)", "object-view-box:rect(1e9px auto 0 auto)",
         "<span style=\"box-shadow:inset 0 0 1e9px 1e9px red,inset 1px 1px blue;border-radius:50%\">x<br>y</span>",
@@ -120,7 +121,7 @@ internal static class Targets
         "bleed: 3mm", "bleed: -1e30px", "marks: crop cross", "marks: cross",
         "@page :nth(2n+1) {", "@page :nth(1 of chapter) {", ":nth(-n+3)",
         "sibling-index()", "sibling-count()", "calc(sibling-index() * 1e9px)", "if(", "media(print): ", "supports(display: grid): ", "style(--a: 1): ",
-        "; else: ", "contrast-color(", "contrast-color(currentcolor)", "object-view-box: ", "inset(10% 1e9px)", "xywh(0 0 100% 100%)",
+        "; else: ", "contrast-color(", "contrast-color(currentcolor)", "device-cmyk(", "device-cmyk(0 0 0 1)", "device-cmyk(0, 1, 1, 0)", "object-view-box: ", "inset(10% 1e9px)", "xywh(0 0 100% 100%)",
         "box-shadow: inset 0 0 9px red",
     };
 

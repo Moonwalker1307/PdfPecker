@@ -471,7 +471,10 @@ internal sealed partial class PdfDocumentWriter
         double pw = Math.Ceiling(f.W * kx), ph = Math.Ceiling(f.H * ky);
         if (!(pw >= 1 && ph >= 1)) return;
         var (w, h) = FilterPixels(pw, ph);
-        if (!f.WithinBudget(w, h) || !FilterBudget.TrySpend(f.DocumentWork(w, h)))
+        // The content is rendered once over the region before the filter runs, each shape over its own bounds, so a
+        // thousand shapes that cover the region cost a thousand of its images.
+        long fillWork = SvgFillWork(shape.Children!, f, w / (double)f.W, h / (double)f.H, (long)w * h);
+        if (fillWork > SvgFilter.MaxDocumentWork || !f.WithinBudget(w, h) || !FilterBudget.TrySpend(f.DocumentWork(w, h) + fillWork))
         {
             // Too much work: the content is drawn without the filter, as a filter that can not run is left out.
             WriteSvgShapes(b, shape.Children!, toPage);
@@ -487,6 +490,34 @@ internal sealed partial class PdfDocumentWriter
         b.Ascii("q ").Num(f.W).Ascii(" 0 0 ").Num(-f.H).Sp().Num(f.X).Sp().Num(f.Y + f.H).Ascii(" cm /Xr").Int(_rasters.Count).Ascii(" Do Q\n");
         // The image hides the text in it from search and selection: the same text again, invisible, brings it back.
         WriteInvisibleSvgText(b, shape.Children!, 0);
+    }
+
+    /// <summary>
+    /// The work of rendering SVG shapes over a filter's region at sx × sy pixels per root unit: each shape's bounds, with
+    /// its stroke, cut to the region and to <paramref name="imagePixels"/>, at the fill or gradient cost per pixel. Groups
+    /// count the shapes in them; the sum stops once it is beyond the document's budget.
+    /// </summary>
+    private static long SvgFillWork(List<SvgShape> shapes, SvgFilter f, double sx, double sy, long imagePixels)
+    {
+        long work = 0;
+        foreach (var s in shapes)
+        {
+            if (s.Children is { } children)
+                work += SvgFillWork(children, f, sx, sy, imagePixels);
+            else if (s.Kind is SvgShape.KindPath or SvgShape.KindText or SvgShape.KindImage)
+            {
+                double pad = s.HasStroke && !s.NonScalingStroke ? s.StrokeWidth / 2.0 : 0;
+                double w = Math.Min(s.MaxX + pad, f.X + f.W) - Math.Max(s.MinX - pad, f.X);
+                double h = Math.Min(s.MaxY + pad, f.Y + f.H) - Math.Max(s.MinY - pad, f.Y);
+                if (!(w > 0 && h > 0)) continue;
+                double pixels = Math.Min(Math.Ceiling(w * sx) * Math.Ceiling(h * sy), imagePixels);
+                long perPixel = s.FillGradient != null || s.StrokeGradient != null || s.FillPattern != null || s.StrokePattern != null
+                    ? GradientWorkPerPixel : FillWorkPerPixel;
+                work += (long)pixels * perPixel;
+            }
+            if (work > SvgFilter.MaxDocumentWork) break;
+        }
+        return work;
     }
 
     /// <summary>A filter's result (premultiplied sRGB floats) as an RGB image with an alpha mask; null when it is all transparent.</summary>

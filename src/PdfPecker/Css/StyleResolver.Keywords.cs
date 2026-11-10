@@ -92,6 +92,24 @@ internal sealed partial class StyleResolver
     {
         var d = _decls[i];
         if (d.HasVar || _attrUsed && d.UsesAttr || !IsRevert(d.Value, out _)) return false;
+        return OverriddenLater(i);
+    }
+
+    /// <summary>
+    /// Whether the declaration at <paramref name="i"/> substitutes var(), attr() or a tree-counting function while a
+    /// later declaration of the same property follows. That one sets the property again, or unsets it when its own
+    /// substitution fails, so the earlier value never counts; substituting and parsing it for every element would cost
+    /// the elements times the rules that set the property, as with hundreds of copies of one sibling-index() rule.
+    /// </summary>
+    private bool SubstitutionOverridden(int i)
+    {
+        var d = _decls[i];
+        return (d.HasVar || _attrUsed && d.UsesAttr) && OverriddenLater(i);
+    }
+
+    /// <summary>Whether a later declaration in the working buffer sets the same property.</summary>
+    private bool OverriddenLater(int i)
+    {
         if (!_overriddenKnown)
         {
             _overriddenKnown = true;
