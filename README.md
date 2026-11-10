@@ -348,7 +348,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **PDF to image**: renders any PDF page to PNG, JPEG or WebP, or a whole PDF to a multi-page TIFF, and
   `HtmlToImage` goes from HTML to images in one call. `PdfRenderer.RenderPage(page, buffer, ImagePixelFormat.Gray)`
   renders a page straight into a buffer of yours as grey, RGB or RGBA pixels, sized by `GetPixelSize`, for OCR and image
-  processing. [More](https://pdfpecker.net/docs/pdf-to-image/)
+  processing. Comments that carry no appearance of their own (notes, highlights, underlines, strike-outs, squiggly
+  lines, shapes, lines with their arrowheads, ink and free text) are drawn from their properties, as viewers draw them.
+  [More](https://pdfpecker.net/docs/pdf-to-image/)
 - **Image decoding**: `ImageToPixels.Convert(image)` reads a PNG, JPEG, GIF, WebP, BMP or TIFF file (any page of a
   multi-page TIFF) straight to grey, RGB or RGBA pixels, with the same colour conversions, EXIF orientation and size
   limits as `ImageToPdf` and without making a PDF of it: for OCR, image analysis and thumbnails.
