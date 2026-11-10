@@ -3050,6 +3050,24 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_filter_content_counts_the_pixels_each_shape_fills()
+    {
+        // Found by the fuzzer: target svg, timeout-78eeadf2. A filtered group scaled to the four-million-pixel cap held
+        // 1,451 star polygons filled with a gradient, each covering most of the region. The budget counted the region's
+        // pixels once for rendering the content, though every shape is filled over its own bounds.
+        string Group(int stars) => "<svg width='800' height='480' viewBox='0 0 200 120'><defs><radialGradient id='r'><stop offset='0' stop-color='#fff'/>"
+            + "<stop offset='1' stop-color='#000'/></radialGradient><filter id='f'><feGaussianBlur stdDeviation='2'/></filter></defs>"
+            + "<g transform='scale(4)'><g filter='url(#f)'>"
+            + Repeat("<polygon points='100,10 40,198 190,78 10,78 160,198' fill-rule='evenodd' fill='url(#r)'/>", stars) + "</g></g></svg>";
+        var options = new PdfOptions { Compress = false };
+        var pdf = Bounded(() => Bounded(Group(4000), options));
+        AssertStructurallyValid(pdf);
+        // Beyond the budget the group is drawn without the filter; a few shapes keep it.
+        Assert.DoesNotContain("/Subtype /Image", Latin1(pdf));
+        Assert.Contains("/Subtype /Image", Latin1(Bounded(Group(3), options)));
+    }
+
+    [Fact]
     public void Nested_boxes_kept_whole_in_columns_are_not_tried_again_at_every_level()
     {
         // Found by the fuzzer: target html, timeout-14fbab57, 1.4 KB. A box with break-inside: avoid that crosses a
