@@ -42,6 +42,7 @@ internal sealed partial class Redaction
     private readonly HashSet<PdfDict> _replaced = new(ReferenceEqualityComparer.Instance);
     private SortedDictionary<int, PdfObject>? _parentTree;
     private List<Area> _areas = new();
+    private AreaGrid? _grid;
     private Matrix _display;
     private int _names;
     private int _formWalks;
@@ -60,6 +61,7 @@ internal sealed partial class Redaction
         var page = info.Dict;
         _areas = areas.Where(a => a.X1 > a.X0 && a.Y1 > a.Y0).ToList();
         if (_areas.Count == 0) return;
+        _grid = AreaGrid.Build(_areas);
         _display = doc.DisplayMatrix(index);
         _structHits.Clear();
         _formWalks = 0;
@@ -158,11 +160,110 @@ internal sealed partial class Redaction
     private bool Covered(Box b, double share)
     {
         if (!double.IsFinite(b.X0) || !double.IsFinite(b.Y0) || !double.IsFinite(b.X1) || !double.IsFinite(b.Y1)) return false;
+        if (_grid is { } grid && grid.Candidates(b.X0, b.Y0, b.X1, b.Y1, out var candidates))
+        {
+            foreach (int i in candidates)
+            {
+                var a = _areas[i];
+                if (Side(b.X0, b.X1, a.X0, a.X1, share) && Side(b.Y0, b.Y1, a.Y0, a.Y1, share)) return true;
+            }
+            return false;
+        }
         foreach (var a in _areas)
         {
             if (Side(b.X0, b.X1, a.X0, a.X1, share) && Side(b.Y0, b.Y1, a.Y0, a.Y1, share)) return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// The areas of a page by the cells of a grid they reach, so that a box is compared only with the areas near it.
+    /// Redacting every match of a word that a page repeats 200,000 times compared each glyph with every area, which
+    /// took minutes.
+    /// </summary>
+    private sealed class AreaGrid
+    {
+        private const int MinAreas = 64, MaxSide = 256, MaxEntries = 8_000_000;
+
+        // A box reaching more cells than this is compared with every area: it is rare, and walking the cells of a
+        // large box would cost more than the areas.
+        private const int MaxBoxCells = 256;
+
+        private readonly double _x0, _y0, _x1, _y1, _cellWidth, _cellHeight;
+        private readonly int _side;
+        private readonly int[] _starts, _entries;
+
+        private AreaGrid(double x0, double y0, double x1, double y1, int side, int[] starts, int[] entries)
+        {
+            (_x0, _y0, _x1, _y1, _side, _starts, _entries) = (x0, y0, x1, y1, side, starts, entries);
+            _cellWidth = Math.Max((x1 - x0) / side, 1e-9);
+            _cellHeight = Math.Max((y1 - y0) / side, 1e-9);
+        }
+
+        /// <summary>The grid over the areas, or null when there are few of them or they would fill it too much.</summary>
+        public static AreaGrid? Build(List<Area> areas)
+        {
+            if (areas.Count < MinAreas) return null;
+            double x0 = double.MaxValue, y0 = double.MaxValue, x1 = double.MinValue, y1 = double.MinValue;
+            foreach (var a in areas)
+            {
+                if (!double.IsFinite(a.X0) || !double.IsFinite(a.Y0) || !double.IsFinite(a.X1) || !double.IsFinite(a.Y1)) return null;
+                x0 = Math.Min(x0, a.X0);
+                y0 = Math.Min(y0, a.Y0);
+                x1 = Math.Max(x1, a.X1);
+                y1 = Math.Max(y1, a.Y1);
+            }
+            int side = Math.Clamp((int)Math.Ceiling(Math.Sqrt(areas.Count)), 1, MaxSide);
+            var grid = new AreaGrid(x0, y0, x1, y1, side, new int[side * side + 1], Array.Empty<int>());
+            long total = 0;
+            foreach (var a in areas)
+            {
+                var (cx0, cy0, cx1, cy1) = grid.Cells(a.X0, a.Y0, a.X1, a.Y1);
+                total += (long)(cx1 - cx0 + 1) * (cy1 - cy0 + 1);
+                if (total > MaxEntries) return null;
+                for (int cy = cy0; cy <= cy1; cy++)
+                    for (int cx = cx0; cx <= cx1; cx++) grid._starts[cy * side + cx + 1]++;
+            }
+            for (int c = 1; c < grid._starts.Length; c++) grid._starts[c] += grid._starts[c - 1];
+            var entries = new int[total];
+            var next = grid._starts.AsSpan(0, side * side).ToArray();
+            for (int i = 0; i < areas.Count; i++)
+            {
+                var (cx0, cy0, cx1, cy1) = grid.Cells(areas[i].X0, areas[i].Y0, areas[i].X1, areas[i].Y1);
+                for (int cy = cy0; cy <= cy1; cy++)
+                    for (int cx = cx0; cx <= cx1; cx++) entries[next[cy * side + cx]++] = i;
+            }
+            return new AreaGrid(x0, y0, x1, y1, side, grid._starts, entries);
+        }
+
+        /// <summary>
+        /// The indexes of the areas that may touch the box, an area once for each cell they share; false when the box is
+        /// too large and every area has to be looked at.
+        /// </summary>
+        public bool Candidates(double x0, double y0, double x1, double y1, out IEnumerable<int> candidates)
+        {
+            candidates = Array.Empty<int>();
+            // An area touches only boxes that reach its own extent, and all of them lie inside the grid's.
+            if (x1 < _x0 || x0 > _x1 || y1 < _y0 || y0 > _y1) return true;
+            var (cx0, cy0, cx1, cy1) = Cells(x0, y0, x1, y1);
+            if ((long)(cx1 - cx0 + 1) * (cy1 - cy0 + 1) > MaxBoxCells) return false;
+            candidates = Enumerate(cx0, cy0, cx1, cy1);
+            return true;
+        }
+
+        private IEnumerable<int> Enumerate(int cx0, int cy0, int cx1, int cy1)
+        {
+            for (int cy = cy0; cy <= cy1; cy++)
+                for (int cx = cx0; cx <= cx1; cx++)
+                    for (int k = _starts[cy * _side + cx], end = _starts[cy * _side + cx + 1]; k < end; k++) yield return _entries[k];
+        }
+
+        private (int X0, int Y0, int X1, int Y1) Cells(double x0, double y0, double x1, double y1)
+            => (Cell(x0, _x0, _cellWidth), Cell(y0, _y0, _cellHeight), Cell(x1, _x0, _cellWidth), Cell(y1, _y0, _cellHeight));
+
+        // The cell a coordinate falls in, clamped to the grid; computed in double first, since a cast of a value out of
+        // range differs between runtimes.
+        private int Cell(double v, double origin, double size) => (int)Math.Clamp(Math.Floor((v - origin) / size), 0, _side - 1);
     }
 
     private static bool Side(double b0, double b1, double a0, double a1, double share)
