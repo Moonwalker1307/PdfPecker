@@ -183,6 +183,9 @@ internal sealed partial class LayoutEngine
     {
         if (!_paginate) return y;
         int p = PageOf(y);
+        // Content that ends right at a page end puts what follows at the very start of the next page, where a header
+        // repeated over a split table row or a cell spanning rows takes the room first.
+        if (_splitRow != null && y < FlowStart(p) - Eps) y = FlowStart(p);
         _columnNotes?.Exact(p, y, h, _grid);
         // A page grid moves content at most once, to the next page. The columns of a multi-column box can be shorter
         // than later ones, so there content moves on until a column holds it, while a later one can.

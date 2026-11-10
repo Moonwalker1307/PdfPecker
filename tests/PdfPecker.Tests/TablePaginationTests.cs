@@ -382,21 +382,66 @@ public class TablePaginationTests
     }
 
     [Fact]
-    public void A_row_whose_spanning_cell_would_run_past_the_page_end_moves_to_the_next_page()
+    public void A_spanning_cell_that_runs_past_the_page_end_goes_on_below_the_repeated_header()
     {
-        // The first row of the span fits, but the spanning cell's ten lines do not: before, the row stayed and the cell's
-        // text ran on past the page end, under the repeated header. Now the row moves and the span stays together.
+        // As in Chrome, the span stays where it starts and its cell breaks: its first four lines end the page exactly,
+        // and the rest goes on under the header repeated on the next page rather than over it.
         var html = "<table style='border-spacing: 0'><thead><tr><th>Head</th></tr></thead><tbody>"
                    + string.Concat(Enumerable.Range(1, 8).Select(i => $"<tr><td style='height: 30pt'>Row {i}</td><td></td></tr>"))
                    + "<tr><td rowspan='2'>" + string.Join("<br>", Enumerable.Range(1, 10).Select(i => "Span " + i)) + "</td><td>First</td></tr>"
                    + "<tr><td>Second</td></tr></tbody></table>";
         var pages = Pages(html);
         Assert.Equal(2, pages.Count);
-        var second = pages[1].Lines.Select(l => l.Text).ToList();
-        Assert.Equal("Head", second[0]);
-        Assert.StartsWith("Span 1", second[1], StringComparison.Ordinal);
-        Assert.Contains(second, l => l.Contains("Span 10", StringComparison.Ordinal));
-        Assert.DoesNotContain(pages[0].Lines, l => l.Text.Contains("Span", StringComparison.Ordinal));
+        Assert.Contains(pages[0].Lines, l => l.Text.StartsWith("Span 1", StringComparison.Ordinal));
+        Assert.Contains(pages[0].Lines, l => l.Text.Contains("Second", StringComparison.Ordinal));
+        var second = pages[1].Lines;
+        Assert.Equal("Head", second[0].Text);
+        Assert.Equal("Span 5", second[1].Text);
+        Assert.True(second[1].Y - second[0].Y > 10);
+        Assert.Contains(second, l => l.Text == "Span 10");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void A_row_in_a_span_breaks_inside_as_other_rows_do(int tallRow)
+    {
+        // As in Chrome, a row that starts a span, lies under one or ends it breaks inside when it does not fit, with the header
+        // and footer repeated around the break, instead of moving to the next page whole.
+        string Note(int i) => i == tallRow ? string.Join("<br>", Enumerable.Range(1, 20).Select(k => "Line " + k)) : "short";
+        var html = "<table style='border-spacing: 0'><thead><tr><th>Head</th></tr></thead><tbody>"
+                   + string.Concat(Enumerable.Range(1, 3).Select(i => $"<tr><td style='height: 30pt'>Row {i}</td><td></td></tr>"))
+                   + $"<tr><td rowspan='3'>Group</td><td>{Note(0)}</td></tr><tr><td>{Note(1)}</td></tr><tr><td>{Note(2)}</td></tr>"
+                   + "</tbody><tfoot><tr><td>Foot</td></tr></tfoot></table>";
+        var pages = Pages(html);
+        Assert.Equal(2, pages.Count);
+        Assert.Contains(pages[0].Lines, l => l.Text.Contains("Group", StringComparison.Ordinal));
+        Assert.Contains(pages[0].Lines, l => l.Text.Contains("Line 1", StringComparison.Ordinal));
+        Assert.Contains(pages[1].Lines, l => l.Text.Contains("Line 20", StringComparison.Ordinal));
+        foreach (var page in pages)
+        {
+            Assert.Equal("Head", page.Lines[0].Text);
+            Assert.Equal("Foot", page.Lines[^1].Text);
+        }
+    }
+
+    [Fact]
+    public void A_spanning_cell_taller_than_a_page_leaves_room_for_the_header_on_each_page()
+    {
+        var html = "<table style='border-spacing: 0'><thead><tr><th>Head</th></tr></thead><tbody>"
+                   + "<tr><td rowspan='2'>" + string.Join("<br>", Enumerable.Range(1, 60).Select(i => "Span " + i)) + "</td><td>First</td></tr>"
+                   + "<tr><td>Second</td></tr></tbody></table>";
+        var pages = Pages(html);
+        Assert.True(pages.Count >= 3);
+        var spans = new List<string>();
+        foreach (var page in pages)
+        {
+            Assert.Equal("Head", page.Lines[0].Text);
+            Assert.True(page.Lines[1].Y - page.Lines[0].Y > 10);
+            spans.AddRange(page.Lines.Select(l => l.Text.Split(' ', 3)).Where(w => w[0] == "Span").Select(w => w[0] + " " + w[1]));
+        }
+        Assert.Equal(Enumerable.Range(1, 60).Select(i => "Span " + i), spans);
     }
 
     [Fact]

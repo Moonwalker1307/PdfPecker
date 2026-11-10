@@ -1227,10 +1227,20 @@ internal sealed partial class LayoutEngine
             // The first layout of such a row is thrown away, so the probe stops here and the table is laid out in full.
             if (percent) _rowProbe = null;
             if (percent) _measuringRows++;
+            SplitRowRoom? spanRoom = SpanRoom(m, r, rowTop, colX, widths, hs, vs, collapse);
             foreach (var cell in row.Cells)
             {
                 var probe = _rowProbe;
-                LayoutCell(cell, rowTop, colX, widths, hs, collapse, m.Rtl, probe: probe);
+                var outerRoom = _splitRow;
+                if (cell.RowSpan > 1 && spanRoom != null) _splitRow = spanRoom;
+                try
+                {
+                    LayoutCell(cell, rowTop, colX, widths, hs, collapse, m.Rtl, probe: probe);
+                }
+                finally
+                {
+                    _splitRow = outerRoom;
+                }
                 if (probe == null) continue;
                 // Once the first content is placed, the probe has its answer. The cell's flow may have kept looking
                 // while a chain in it could still move, but the cell is complete now. Past the chain's page, the table
@@ -1251,7 +1261,18 @@ internal sealed partial class LayoutEngine
                 rowGroup = new GroupOp();
                 _ops.Add(rowGroup);
                 foreach (var cell in row.Cells)
-                    LayoutCell(cell, rowTop, colX, widths, hs, collapse, m.Rtl, cell.RowSpan == 1 && IsDefiniteCell(m, cell) ? rowH : null);
+                {
+                    var outerRoom = _splitRow;
+                    if (cell.RowSpan > 1 && spanRoom != null) _splitRow = spanRoom;
+                    try
+                    {
+                        LayoutCell(cell, rowTop, colX, widths, hs, collapse, m.Rtl, cell.RowSpan == 1 && IsDefiniteCell(m, cell) ? rowH : null);
+                    }
+                    finally
+                    {
+                        _splitRow = outerRoom;
+                    }
+                }
                 // Content that the percentages made taller than the row (with margins, say) still makes it grow.
                 rowH = Math.Max(rowH, RowHeight(m, r, shareOfTable: false));
             }
@@ -1289,8 +1310,7 @@ internal sealed partial class LayoutEngine
             bool move = forced || allowMove && attempt == 0 && MayLayOutAgain && !AtPageTop(rowTop)
                         && (CrossesPage(rowTop, rowBottom + reserve) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1)
                             && !(mayBreakInside && !footRow && BreaksInside(m, r, rowTop, reserve, collapse))
-                            || keepWith > 0 && CrossesPage(rowTop, keptBottom + reserve)
-                            || SpanContentCrossesPage(m, r, rowTop, reserve));
+                            || keepWith > 0 && CrossesPage(rowTop, keptBottom + reserve));
             if (move && !CrossesPage(rowTop, rowBottom + reserve)) rowBottom = keptBottom;
             // A row that starts a page or column because the row before it ended right at the break, or the spacing
             // after it reached past the break, gets the header too; after the header itself, the whole table moves.
@@ -1371,7 +1391,8 @@ internal sealed partial class LayoutEngine
         {
             Truncate(rowStartOps);
             // A row that could have moved whole breaks only where each of its cells keeps content on the first page.
-            bool mayMove = mayBreakInside && !AtPageTop(rowTop) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1);
+            bool mayMove = mayBreakInside && !AtPageTop(rowTop) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1)
+                           && !SpanContentBelow(m, r, rowTop);
             float splitBottom = LayoutSplitRow(m, r, rowTop, rowBottom, colX, widths, hs, vs, collapse, pageColumns, mayMove);
             if (!float.IsNaN(splitBottom)) return splitBottom;
             mayBreakInside = false;
@@ -1400,22 +1421,53 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Whether a cell spanning rows down from row <paramref name="r"/> has content that goes on past the end of the page
-    /// the row starts on, while the cell would fit on the next page. Its rows are laid out one at a time, so the row it
-    /// starts in may fit and stay while its content runs on past the break, where the cell's background and borders and
-    /// the repeated header do not make room for it. As when a row's own cell does not fit, the row moves to the next
-    /// page, and the rows the cell spans follow it; a spanning cell whose content fits before the break, such as a group
-    /// label, still lets its rows break between them as in Chrome.
+    /// The room a cell spanning rows down from body row <paramref name="r"/> leaves on the pages it goes on to, or null when
+    /// there is none to leave. Its rows are laid out one at a time and may break anywhere below it, and wherever they do,
+    /// the table's header is repeated at the top of the next page and its footer at the bottom of each page, as over a row
+    /// split across pages; so the spanning cell's content stops above that footer and goes on below that header.
     /// </summary>
-    private bool SpanContentCrossesPage(TableModel m, int r, float rowTop, float reserve)
+    private SplitRowRoom? SpanRoom(TableModel m, int r, float rowTop, float[] colX, float[] widths, float hs, float vs, bool collapse)
     {
-        foreach (var cell in m.Rows[r].Cells)
+        if (!_paginate || _splitRow != null || _grid is ColumnGrid || r < m.HeadCount || r >= m.Rows.Count - m.FootCount) return null;
+        if (m.HeadCount == 0 && m.FootReserve == 0) return null;
+        bool spans = false;
+        foreach (var cell in m.Rows[r].Cells) spans |= cell.RowSpan > 1;
+        if (!spans) return null;
+        int first = PageOf(rowTop);
+        float head = HeadRoom(m, colX, widths, hs, vs, collapse);
+        // Headers too tall to repeat are not repeated, as when a row moves to the next page.
+        if (head > 0 && !Repeats(head - vs, first + 1)) head = 0;
+        return head == 0 && m.FootReserve == 0 ? null : new SplitRowRoom(first, head, m.FootReserve);
+    }
+
+    /// <summary>
+    /// Whether a cell spanning rows from above row <paramref name="r"/> down over it has content on the page the row
+    /// starts on, below the row's top. Moving the row to the next page would leave that content outside the table there,
+    /// over the footer repeated where the row would have started, so the row breaks inside instead, as the cell does.
+    /// </summary>
+    private bool SpanContentBelow(TableModel m, int r, float rowTop)
+    {
+        int page = PageOf(rowTop);
+        for (int c = 0; c < m.ColCount; c++)
         {
-            if (cell.RowSpan == 1) continue;
-            float bottom = cell.Top + cell.ContentH;
-            if (CrossesPage(rowTop, bottom + reserve) && bottom - rowTop <= _grid.Height(PageOf(rowTop) + 1)) return true;
+            if (m.Grid[r, c] is not { } cell || cell.Row >= r || cell.Col != c) continue;
+            for (int i = cell.OpsStart; i < cell.OpsEnd && i < _ops.Count; i++)
+                if (LastContentBottom(_ops[i], page) > rowTop + Eps) return true;
         }
         return false;
+    }
+
+    /// <summary>The bottom of the lowest text line, image or drawing on <paramref name="page"/> among an op and the ops in it.</summary>
+    private float LastContentBottom(DrawOp op, int page)
+    {
+        float bottom = float.NegativeInfinity;
+        if (op is GroupOp g)
+        {
+            foreach (var o in g.Ops) bottom = Math.Max(bottom, LastContentBottom(o, page));
+            return bottom;
+        }
+        if (FirstContentBox(op) is var (top, b) && PageOf(top) == page) bottom = b;
+        return bottom;
     }
 
     /// <summary>
@@ -1423,7 +1475,7 @@ internal sealed partial class LayoutEngine
     /// Chrome breaks it rather than moving to the next page: its cells are broken one by one, so each cell the break goes
     /// through must have content before it, above the room the footer repeated there takes. A cell whose first line,
     /// image or drawing is past the break (with orphans, its first lines) would leave a break before its content, which
-    /// Chrome avoids by moving the row. Rows kept whole by break-inside: avoid and rows spanned by cells of other rows move.
+    /// Chrome avoids by moving the row. Rows kept whole by break-inside: avoid move; a cell spanning rows breaks with them.
     /// </summary>
     private bool BreaksInside(TableModel m, int r, float rowTop, float reserve, bool collapse)
     {
@@ -1433,10 +1485,11 @@ internal sealed partial class LayoutEngine
         float limit = FlowEnd(page) - reserve;
         // A row that starts where the room for the footer does has nothing to leave before the break.
         if (rowTop >= limit - Eps) return false;
+        // A cell spanning the row from above with content below the row's top keeps the row from moving: the row breaks
+        // with it, even where its own cells have nothing before the break.
+        if (SpanContentBelow(m, r, rowTop)) return true;
         foreach (var cell in row.Cells)
-            if (cell.RowSpan > 1 || !ContentBeforeBreak(cell, page, limit, collapse)) return false;
-        foreach (var cell in row.Ending)
-            if (cell.RowSpan > 1) return false;
+            if (!ContentBeforeBreak(cell, page, limit, collapse)) return false;
         return true;
     }
 
@@ -1478,20 +1531,14 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// Whether body row <paramref name="r"/>, laid out where it stays, is split across pages with a header or footer to
-    /// repeat around it. Rows spanned by cells of other rows, rows in columns and rows inside a split row keep their layout.
+    /// repeat around it. Rows in columns and rows inside a split row keep their layout.
     /// </summary>
     private bool RepeatsAroundSplit(TableModel m, int r, float rowTop, float rowBottom)
     {
         if (!_paginate || _measuringRows > 0 || _splitRow != null || _grid is ColumnGrid || !MayLayOutAgain) return false;
         if (r < m.HeadCount || r >= m.Rows.Count - m.FootCount || m.HeadCount == 0 && m.FootReserve == 0) return false;
         // The room for the footer counts: a row that ends in it goes on past it.
-        if (!CrossesPage(rowTop, rowBottom + m.FootReserve)) return false;
-        var row = m.Rows[r];
-        foreach (var cell in row.Cells)
-            if (cell.RowSpan > 1) return false;
-        foreach (var cell in row.Ending)
-            if (cell.RowSpan > 1) return false;
-        return true;
+        return CrossesPage(rowTop, rowBottom + m.FootReserve);
     }
 
     /// <summary>
