@@ -264,6 +264,27 @@ internal sealed partial class StyleResolver
             _ => s.TextSpacingTrim,
         };
 
+    // sideways-right is the old name of sideways, which Chrome still reads; vertical-right is the -webkit- name of mixed.
+    private static void ApplyTextOrientation(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+        => s.TextOrientation = d.Lower switch
+        {
+            "mixed" or "vertical-right" or "initial" => TextOrientation.Mixed,
+            "upright" => TextOrientation.Upright,
+            "sideways" or "sideways-right" => TextOrientation.Sideways,
+            "inherit" or "unset" => parent.TextOrientation,
+            _ => s.TextOrientation,
+        };
+
+    // -webkit-text-combine: horizontal is the old form of all. The digits form of the specification is not in Chrome.
+    private static void ApplyTextCombineUpright(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+        => s.TextCombineUpright = d.Lower switch
+        {
+            "all" or "horizontal" => true,
+            "none" or "initial" => false,
+            "inherit" or "unset" => parent.TextCombineUpright,
+            _ => s.TextCombineUpright,
+        };
+
     /// <summary>text-indent: a length or percentage, with hanging and each-line in any order; anything else is dropped.</summary>
     private void ApplyTextIndent(ComputedStyle s, in DeclaredValue d)
     {

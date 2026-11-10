@@ -177,9 +177,8 @@ internal sealed partial class InlineLayout
             into.Add(start == it.TrimStart && end == it.TrimEnd ? it : it.Trimmed(start, end));
             return;
         }
-        var style = it.Style;
         int length = to - from;
-        var piece = it.Slice(from, length, TextWidth(style.Font, it.Source, it.Start + from, length, style.TextSize, style.LetterSpacing));
+        var piece = it.Slice(from, length, ItemWidth(it, it.Start + from, length));
         if (to < it.Length) piece.BreakAfter = BreakAfter.None;
         into.Add(piece.Trimmed(start, end));
     }

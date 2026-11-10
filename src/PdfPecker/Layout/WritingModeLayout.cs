@@ -8,7 +8,9 @@ namespace PdfPecker.Layout;
 /// Vertical writing modes. A block whose writing mode turns it against its parent's (an orthogonal flow) is laid out as
 /// horizontal text in a box with its height and width swapped, then turned a quarter turn into place. Lines therefore
 /// run down the page (vertical-rl, vertical-lr, sideways-rl) or up it (sideways-lr) with every glyph turned, as Chrome
-/// draws Latin text in those modes; upright CJK glyphs are not done. A vertical-lr box is turned by a reflection in its
+/// draws Latin text in those modes. In vertical-rl and vertical-lr the characters that stand upright (Chinese, Japanese
+/// and the others text-orientation names) are turned back where they stand, and so are pictures in every vertical
+/// mode (see <see cref="InlineLayout"/> and <see cref="StandPicturesUp"/>). A vertical-lr box is turned by a reflection in its
 /// diagonal instead, which puts its first line on the left and the lines after it to the right, and each line is
 /// flipped back in its own line box so that its glyphs are turned rather than mirrored.
 /// </summary>
@@ -42,6 +44,13 @@ internal sealed partial class LayoutEngine
     /// </summary>
     internal bool _transposed;
 
+    /// <summary>
+    /// The quarter turn, in degrees clockwise, that the content being laid out gets on the page: 90 inside a box of a
+    /// vertical writing mode laid out turned, -90 inside sideways-lr, and 0 where it is drawn as laid out (nested boxes
+    /// that turn back included).
+    /// </summary>
+    internal int FlowTurn { get; private set; }
+
     /// <summary>The diagonal reflection that turns horizontal layout at the origin into vertical-lr.</summary>
     private static readonly Matrix Transpose = new(0, 1, 1, 0, 0, 0);
 
@@ -57,8 +66,25 @@ internal sealed partial class LayoutEngine
         var layer = WrapLayer(start, 0, stackingContext: false);
         layer.Transform = Matrix.Scale(1, -1);
         layer.OriginY = centerY;
+        layer.FlipsBack = true;
         return layer;
     }
+
+    /// <summary>
+    /// Turns the ops from <paramref name="start"/> on a quarter turn of <paramref name="degrees"/> about
+    /// (<paramref name="x"/>, <paramref name="y"/>), which stands them upright again in a flow turned the other way;
+    /// returns the layer that holds them.
+    /// </summary>
+    internal LayerOp TurnBack(int start, float x, float y, int degrees)
+    {
+        var layer = WrapLayer(start, 0, stackingContext: false);
+        layer.Transform = QuarterTurn(degrees);
+        (layer.OriginX, layer.OriginY) = (x, y);
+        return layer;
+    }
+
+    /// <summary>A turn of 90 degrees clockwise or anticlockwise, without the rounding of the sine and cosine.</summary>
+    internal static Matrix QuarterTurn(int degrees) => degrees > 0 ? new Matrix(0, 1, -1, 0, 0, 0) : new Matrix(0, -1, 1, 0, 0, 0);
 
     /// <summary>
     /// Lays out a block-level box in an orthogonal flow at (<paramref name="x"/>, <paramref name="y"/>) and returns its
@@ -134,6 +160,8 @@ internal sealed partial class LayoutEngine
         e.Style = Turned(s, turn, transposed);
         _turning.Add(e);
         _transposed = transposed;
+        int outerTurn = FlowTurn;
+        FlowTurn = ((outerTurn + turn + 360) % 360) switch { 90 => 90, 270 => -90, _ => 0 };
         // The boxes inside are laid out turned too, so their widths, heights, margins, padding and borders, which are
         // physical, turn with them: a float 40px wide and 50px tall in vertical text stays so on the page.
         var inner = TurnDescendants(e, turn, transposed);
@@ -141,10 +169,12 @@ internal sealed partial class LayoutEngine
         {
             var c = CaptureBox(e, lineLength ?? pageHeight, shrinkToFit: lineLength == null, lineLength, depth);
             if (transposed) FlipPictures(c.Ops);
+            if (FlowTurn != 0) StandPicturesUp(c.Ops, FlowTurn);
             return c;
         }
         finally
         {
+            FlowTurn = outerTurn;
             _transposed = outerTransposed;
             foreach (var (d, style) in inner)
             {
@@ -292,7 +322,48 @@ internal sealed partial class LayoutEngine
 
     private static LayerOp FlippedBack(DrawOp op, float centerY)
     {
-        var layer = new LayerOp { Transform = Matrix.Scale(1, -1), OriginY = centerY };
+        var layer = new LayerOp { Transform = Matrix.Scale(1, -1), OriginY = centerY, FlipsBack = true };
+        layer.Ops.Add(op);
+        return layer;
+    }
+
+    /// <summary>
+    /// Turns the images and SVG drawings laid out in a flow turned <paramref name="turn"/> degrees back about their
+    /// centres, as Chrome keeps pictures upright in vertical text. Their boxes were laid out with the width and height
+    /// swapped, and their natural sizes with them (see <see cref="ImageSize(Element, float, out float, out float, out SvgImage?, float)"/>),
+    /// so each one stands in the same box on the page. Boxes that are turned again inside did so for themselves.
+    /// </summary>
+    private static void StandPicturesUp(List<DrawOp> ops, int turn)
+    {
+        for (int i = 0; i < ops.Count; i++)
+        {
+            switch (ops[i])
+            {
+                case ImageOp img:
+                    ops[i] = StoodUp(img, img.X, img.Y, img.W, img.H, turn);
+                    break;
+                case SvgOp svg:
+                    ops[i] = StoodUp(svg, svg.X, svg.Y, svg.W, svg.H, turn);
+                    break;
+                case LayerOp { Transform: not null, FlipsBack: false }:
+                    break;
+                case GroupOp g:
+                    StandPicturesUp(g.Ops, turn);
+                    break;
+            }
+        }
+    }
+
+    // The picture is drawn in the box of the same centre with the sides swapped, and turned back into its own box.
+    private static LayerOp StoodUp(DrawOp op, float x, float y, float w, float h, int turn)
+    {
+        float cx = x + w / 2, cy = y + h / 2;
+        switch (op)
+        {
+            case ImageOp img: (img.X, img.Y, img.W, img.H) = (cx - h / 2, cy - w / 2, h, w); break;
+            case SvgOp svg: (svg.X, svg.Y, svg.W, svg.H) = (cx - h / 2, cy - w / 2, h, w); break;
+        }
+        var layer = new LayerOp { Transform = QuarterTurn(-turn), OriginX = cx, OriginY = cy };
         layer.Ops.Add(op);
         return layer;
     }

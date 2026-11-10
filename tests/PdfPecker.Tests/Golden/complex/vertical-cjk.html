@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh"><head><title>Vertical CJK text</title>
+<style>
+@font-face { font-family: CJK; src: url('../../Fixtures/fonts/NotoSansSC-Subset.woff2') }
+@page { size: 148mm 105mm; margin: 10mm }
+body { font: 10pt/1.6 CJK, sans-serif; margin: 0 }
+h1 { font-size: 13pt; margin: 0 0 4pt; border-bottom: 1pt solid #c0392b }
+.row { display: flex; gap: 5mm; align-items: flex-start }
+.v { writing-mode: vertical-rl; height: 62mm; border: 0.5pt solid #999; padding: 3pt }
+.lr { writing-mode: vertical-lr }
+.up { text-orientation: upright }
+.side { text-orientation: sideways }
+.tcy { text-combine-upright: all }
+.mark { display: inline-block; width: 12pt; height: 6pt; background: #c0392b }
+svg { width: 14pt; height: 8pt }
+</style></head>
+<body>
+<h1>中文 text-orientation</h1>
+<div class="row">
+<div class="v">这是中文排版的测试文本，汉字都是正的。「引号」和（括号）有自己的样式：点在右上。</div>
+<div class="v">第<span class="tcy">12</span>章，第<span class="tcy">2024</span>页。PDF 文本、ソフトウェアーの数字。</div>
+<div class="v up">PDF 文本</div>
+<div class="v side">中文 sideways 12</div>
+<div class="v">汉字<svg viewBox="0 0 14 8"><rect width="14" height="8" fill="#2471a3"/><rect width="14" height="2" fill="#f1c40f"/></svg>和<span class="mark"></span>是正的。</div>
+<div class="v lr">这是第一行的文本，第三行在右。</div>
+</div>
+</body></html>

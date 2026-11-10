@@ -22,6 +22,13 @@ internal enum LineBreakClass : byte
     EX, IN, OP, CL, CP, NS, CJ, ID, H2, H3, JL, JV, JT,
 }
 
+/// <summary>
+/// The Vertical_Orientation values of UAX #50, in the order tools/UnicodeTables writes them: R is turned sideways in
+/// vertical text, U stands upright, Tu and Tr take the font's vertical form and otherwise stand upright (Tu) or are
+/// turned (Tr).
+/// </summary>
+internal enum VerticalOrientation : byte { R, U, Tu, Tr }
+
 /// <summary>Lookups in the generated Unicode tables.</summary>
 internal static partial class UnicodeTables
 {
@@ -70,6 +77,10 @@ internal static partial class UnicodeTables
         wide = (v & 0x80) != 0;
         return (LineBreakClass)(v & 0x7F);
     }
+
+    /// <summary>The Vertical_Orientation of a character (UAX #50).</summary>
+    public static VerticalOrientation Vertical(int cp)
+        => cp < 0xA7 ? VerticalOrientation.R : (VerticalOrientation)VerticalOrientationValues[FindRange(VerticalOrientationStarts, cp)];
 
     /// <summary>True for characters that are strong right-to-left, Arabic numbers, or explicit bidi controls.</summary>
     public static bool NeedsBidi(int cp)

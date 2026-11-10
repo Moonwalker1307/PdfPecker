@@ -2033,6 +2033,9 @@ internal sealed partial class LayoutEngine
             iw /= density;
             ih /= density;
         }
+        // In a turned flow the picture stands upright (see StandPicturesUp), so its box is laid out with its natural
+        // width and height swapped, as the box's own width and height are.
+        if (FlowTurn != 0) (iw, ih) = (ih, iw);
         ReplacedSize(e, iw, ih, availW, out w, out h, percentW);
         return img;
     }
@@ -2052,11 +2055,13 @@ internal sealed partial class LayoutEngine
         if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny);
         var (iw, ih) = SvgNaturalSize(svg, availW);
         if (e.Style.Zoom != 1 && (svg.Width != null || svg.Height != null)) (iw, ih) = (iw * e.Style.Zoom, ih * e.Style.Zoom);
+        if (FlowTurn != 0) (iw, ih) = (ih, iw);
         ReplacedSize(e, iw, ih, availW, out w, out h, percentW);
         // Percentages in an svg without a viewBox refer to its used size (width="100%" on the svg and a rect 100% wide),
         // so the drawing is built again for that size.
-        if (svg.UsesPercentages && !_measuring && w > 0 && h > 0 && !svg.FitsViewport(w, h))
-            _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny, (w / 0.75f, h / 0.75f));
+        var (vw, vh) = FlowTurn != 0 ? (h, w) : (w, h);
+        if (svg.UsesPercentages && !_measuring && vw > 0 && vh > 0 && !svg.FitsViewport(vw, vh))
+            _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny, (vw / 0.75f, vh / 0.75f));
         return svg;
     }
 
@@ -2158,6 +2163,7 @@ internal sealed partial class LayoutEngine
             return;
         }
         float nw = image.Width * 0.75f / density, nh = image.Height * 0.75f / density;
+        if (FlowTurn != 0) (nw, nh) = (nh, nw);
         float contain = Math.Min(w / nw, h / nh);
         float k = s.ObjectFit switch
         {
