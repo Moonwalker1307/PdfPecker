@@ -35,8 +35,8 @@ internal static class AnnotationAppearance
     private static readonly double[] Yellow = { 1, 1, 0 }, Black = { 0, 0, 0 }, NoteYellow = { 1, 0.85, 0.2 };
 
     // A damaged or hostile annotation can list millions of points; the drawing stops growing past this many characters,
-    // which is far more than any real markup takes.
-    private const int MaxContentLength = 4 << 20;
+    // which is far more than any real markup takes and keeps drawing it to a fraction of a second.
+    private const int MaxContentLength = 1 << 20;
 
     // Free text: the most characters laid out, and the padding inside the border, in points.
     private const int MaxFreeTextLength = 64 * 1024;

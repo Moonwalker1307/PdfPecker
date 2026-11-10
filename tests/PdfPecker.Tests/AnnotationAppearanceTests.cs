@@ -133,7 +133,7 @@ public class AnnotationAppearanceTests
     [Fact]
     public void Huge_markup_is_drawn_within_bounded_time()
     {
-        // 200,000 squiggly quadrilaterals would make a drawing of hundreds of megabytes; it stops growing at a few.
+        // 200,000 squiggly quadrilaterals would make a drawing of hundreds of megabytes; it stops growing at a megabyte.
         var quads = string.Join(" ", Enumerable.Repeat("0 120 200 120 0 0 200 0", 200_000));
         var pdf = Page("", $"<< /Type /Annot /Subtype /Squiggly /Rect [0 0 200 120] /QuadPoints [{quads}] >>");
         var watch = System.Diagnostics.Stopwatch.StartNew();
