@@ -90,9 +90,34 @@ public class GraphicsFeatureTests
     {
         var g = CssGradient.Parse("linear-gradient(90deg, red, rgba(0,0,255,0.5) 25%, lime, 60pt, black 100pt)", CssColor.Black, 12, 12, 5, 8)!
             .Resolve(200, 50, 0xFF000000);
-        Assert.Equal(4, g.Offsets.Length); // the 60pt colour hint is ignored
-        Near(0.25f, g.Offsets[1]); Near(0.375f, g.Offsets[2]); Near(0.5f, g.Offsets[3]);
-        Assert.Equal(0xFF000080u, g.Colors[1]); // half-transparent blue over black
+        // The 60pt colour hint is ignored. The spans on either side of the translucent blue gain seven stops each, so that
+        // they interpolate premultiplied (see the test below); the opaque lime to black span gains none.
+        Assert.Equal(4 + 2 * 7, g.Offsets.Length);
+        Near(0.25f, g.Offsets[8]); Near(0.375f, g.Offsets[16]); Near(0.5f, g.Offsets[17]);
+        Assert.Equal(0xFF000080u, g.Colors[8]); // half-transparent blue over black
+    }
+
+    [Fact]
+    public void Translucent_stops_interpolate_premultiplied_colours()
+    {
+        // Between red and a fifth of blue, Chrome keeps the colour red until the blue gains weight: halfway along, the
+        // unblended colour is a sixth blue, not half. Over white that is a light red, not pink.
+        var g = CssGradient.Parse("linear-gradient(90deg, red, rgba(0,0,255,0.2))", CssColor.Black, 12, 12, 5, 8)!.Resolve(100, 10, 0xFFFFFFFF);
+        Assert.Equal(g.Offsets.Length, g.StraightColors!.Length);
+        Assert.Equal(g.Offsets.Length, g.Alphas!.Length);
+        Assert.Equal(0xFFFF0000u, g.StraightColors[0]);
+        Assert.Equal(0xFF0000FFu, g.StraightColors[^1]);
+        for (int i = 1; i < g.Offsets.Length; i++)
+        {
+            float t = g.Offsets[i];
+            float a = 1 + (0.2f - 1) * t;
+            float blue = 0.2f * t / a; // the weight of blue in the premultiplied mix
+            Assert.InRange(g.StraightColors[i] & 0xFF, MathF.Floor(blue * 255) - 1, MathF.Ceiling(blue * 255) + 1);
+            Assert.InRange(g.Alphas[i], MathF.Floor(a * 255) - 1, MathF.Ceiling(a * 255) + 1);
+        }
+        // Stops of one alpha and a fade to transparent stay as they were.
+        Assert.Equal(2, CssGradient.Parse("linear-gradient(rgba(255,0,0,.5), rgba(0,0,255,.5))", CssColor.Black, 12, 12, 5, 8)!.Resolve(10, 10, 0xFFFFFFFF).Offsets.Length);
+        Assert.Equal(2, CssGradient.Parse("linear-gradient(red, transparent)", CssColor.Black, 12, 12, 5, 8)!.Resolve(10, 10, 0xFFFFFFFF).Offsets.Length);
     }
 
     [Fact]

@@ -68,9 +68,10 @@ internal sealed class Gradient
     /// <summary>
     /// Keeps translucent stops for a soft mask: <see cref="StraightColors"/> and <see cref="Alphas"/>. A fully transparent
     /// stop takes the colour of its nearest visible neighbour, so that fading to transparent does not pass through
-    /// black (browsers interpolate premultiplied colours).
+    /// black (browsers interpolate premultiplied colours). <paramref name="premultiplied"/> interpolates the other
+    /// translucent stops premultiplied as well, as Chrome does for CSS gradients (not for SVG ones).
     /// </summary>
-    public void KeepAlpha(List<(float Offset, uint Color)> stops)
+    public void KeepAlpha(List<(float Offset, uint Color)> stops, bool premultiplied = false)
     {
         bool translucent = false;
         foreach (var s in stops) if (s.Color >> 24 != 0xFF) translucent = true;
@@ -96,6 +97,72 @@ internal sealed class Gradient
         }
         StraightColors = colors;
         Alphas = alphas;
+        if (premultiplied) Premultiply();
+    }
+
+    // The pieces a span between two stops of different colours and alphas is cut into; see Premultiply.
+    private const int PremultipliedPieces = 8;
+
+    /// <summary>
+    /// Browsers interpolate translucent stops in premultiplied colours: between a red stop and a faint blue one the
+    /// colour stays red until the blue gains weight, where interpolating the unblended colours turns pink at once. The
+    /// soft mask paints the unblended colours, which a PDF function can only interpolate linearly, so a span between
+    /// stops whose colours and alphas both differ gets stops of its own at equal steps of the second colour's weight,
+    /// each with the colour premultiplied interpolation gives there. Spans with one alpha, or one colour, are exact as
+    /// they are, and the flattened colours are linear in premultiplied colour already, so they only gain the same stops.
+    /// </summary>
+    private void Premultiply()
+    {
+        var straight = StraightColors!;
+        var alphas = Alphas!;
+        int n = Offsets.Length, spans = 0;
+        for (int i = 0; i + 1 < n; i++)
+            if (NeedsPieces(i)) spans++;
+        if (spans == 0) return;
+        int count = n + spans * (PremultipliedPieces - 1);
+        var offsets = new float[count];
+        var flat = new uint[count];
+        var colors = new uint[count];
+        var alpha = new uint[count];
+        int k = 0;
+        for (int i = 0; i < n; i++)
+        {
+            offsets[k] = Offsets[i];
+            flat[k] = Colors[i];
+            colors[k] = straight[i];
+            alpha[k++] = alphas[i];
+            if (i + 1 == n || !NeedsPieces(i)) continue;
+            float a0 = alphas[i] / 255f, a1 = alphas[i + 1] / 255f;
+            for (int p = 1; p < PremultipliedPieces; p++)
+            {
+                // w is the weight of the second colour in the premultiplied mix; t is where along the span it is.
+                float w = (float)p / PremultipliedPieces;
+                float t = w * a0 / (w * a0 + (1 - w) * a1);
+                offsets[k] = Offsets[i] + (Offsets[i + 1] - Offsets[i]) * t;
+                flat[k] = Lerp(Colors[i], Colors[i + 1], t);
+                colors[k] = Lerp(straight[i], straight[i + 1], w);
+                alpha[k++] = (uint)MathF.Round(alphas[i] + (alphas[i + 1] - (float)alphas[i]) * t);
+            }
+        }
+        Offsets = offsets;
+        Colors = flat;
+        StraightColors = colors;
+        Alphas = alpha;
+
+        bool NeedsPieces(int i)
+            => alphas[i] != alphas[i + 1] && alphas[i] != 0 && alphas[i + 1] != 0
+               && straight[i] != straight[i + 1] && Offsets[i + 1] > Offsets[i];
+    }
+
+    private static uint Lerp(uint a, uint b, float t)
+    {
+        uint result = 0xFF000000;
+        for (int shift = 0; shift < 24; shift += 8)
+        {
+            float ca = (a >> shift) & 0xFF, cb = (b >> shift) & 0xFF;
+            result |= (uint)MathF.Round(ca + (cb - ca) * t) << shift;
+        }
+        return result;
     }
 
     /// <summary>A copy with every stop colour mapped (a filter's colour functions); the alphas stay.</summary>

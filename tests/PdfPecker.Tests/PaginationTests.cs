@@ -388,4 +388,19 @@ public class PaginationTests
                          + $"<div style='display:flex'><div style='flex:1'><p>{words}</p></div>{item}</div>");
         Assert.Equal(1, Page(Lines(ops, "word")[0].LineTop));
     }
+
+    [Theory]
+    [InlineData("cover")]
+    [InlineData("none")]
+    public void A_flex_row_with_an_image_reaching_out_of_its_box_moves_whole(string fit)
+    {
+        // An image with object-fit: cover is drawn clipped to its box and reaches above it; that cut-off part is not
+        // drawn, so it does not keep the row's top border on the first page. Chrome moves the whole row.
+        const string png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAB4AAAA8CAIAAAD+Np3IAAAANUlEQVR4nO3MQREAMAgAoLlcJjGdUU3h+YEARHa9HX/pVavVarVarVar1Wq1Wq1Wq9Xqs3oA5/QBroz+AvMAAAAASUVORK5CYII=";
+        var ops = Layout("<style>" + Body + "</style><div style='height:150pt'></div>"
+                         + "<div style='display:flex;border:2pt solid'>"
+                         + $"<img src='{png}' style='width:60pt;height:80pt;object-fit:{fit}'><p>Beside</p></div>");
+        Assert.Equal(1, Page(Lines(ops, "Beside").Single().LineTop));
+        Assert.DoesNotContain(ops, o => DrawnTop(o) is { } top && Page(top) == 0);
+    }
 }

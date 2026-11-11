@@ -229,11 +229,12 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   `rule-visibility-items` and `rule-overlap`, cut where a grid or flex container breaks across pages),
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
-  list markers), `contrast-color()` (black or white text, whichever reads better on a brand colour, as in Chrome), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
+  list markers; translucent stops blend premultiplied, as in Chrome), `contrast-color()` (black or white text, whichever reads better on a brand colour, as in Chrome), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
   media and container queries, `@scope` (scope roots, limits and proximity, as in Chrome), logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
   order; Chinese and Japanese characters stand upright with the font's vertical forms, as `text-orientation` says,
   `text-combine-upright` sets dates and numbers across the line, and images stay upright, as in Chrome), `text-wrap` and `white-space-collapse`, hanging indents (`text-indent` with `hanging` and `each-line`), emphasis
-  marks (`text-emphasis`), trimming lines to the cap height and baseline (`text-box`, for optically centred
+  marks (`text-emphasis`), ruby annotations such as Japanese furigana (`<ruby>`, `<rt>` and `<rp>`: the annotation at half
+  size over its base, spread around it and over the kana beside it, in the line's leading where it fits, as in Chrome), trimming lines to the cap height and baseline (`text-box`, for optically centred
   buttons and badges), `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
   (`text-underline-position`), drop caps, `::first-line` styles with a background, `::marker` styles (a larger marker font or a tall marker image makes its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
@@ -284,7 +285,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   front matter. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, contextual alternates
   (as Chrome applies them, such as Fira Code's ligatures), variable fonts and OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
-  versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, with the default palette.
+  versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, in the default palette or the one `font-palette` picks: `light`, `dark` or an
+  `@font-palette-values` rule with `base-palette` and `override-colors`.
   Variation sequences pick the glyph the font gives them (cmap format 14), such as the forms of a CJK ideograph that
   ideographic variation selectors choose, and copy as written.
   `@font-face` takes `size-adjust`, `ascent-override`, `descent-override` and `line-gap-override`, so a fallback face

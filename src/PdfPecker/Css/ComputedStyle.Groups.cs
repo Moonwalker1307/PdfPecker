@@ -67,6 +67,7 @@ internal sealed partial class ComputedStyle
     public FontSizeAdjust SizeAdjust { get => _typography.SizeAdjust; set => Typography.SizeAdjust = value; }
     public string? FontVariantEastAsian { get => _typography.FontVariantEastAsian; set => Typography.FontVariantEastAsian = value; }
     public string? FontVariantPosition { get => _typography.FontVariantPosition; set => Typography.FontVariantPosition = value; }
+    public FontPalette? FontPalette { get => _typography.FontPalette; set => Typography.FontPalette = value; }
     public string? FontVariantNumeric { get => _typography.FontVariantNumeric; set => Typography.FontVariantNumeric = value; }
     public string? FontFeatureSettings { get => _typography.FontFeatureSettings; set => Typography.FontFeatureSettings = value; }
     public bool CaptionBottom { get => _typography.CaptionBottom; set => Typography.CaptionBottom = value; }
@@ -116,6 +117,7 @@ internal sealed partial class ComputedStyle
         public FontSizeAdjust SizeAdjust;    // font-size-adjust; none by default
         public string? FontVariantEastAsian; // font-variant-east-asian keywords; null = normal
         public string? FontVariantPosition;  // font-variant-position: sub or super; null = normal
+        public FontPalette? FontPalette;     // font-palette: the colour font palette; null = normal
         public string? FontVariantNumeric;   // font-variant-numeric keywords; null = normal
         public string? FontFeatureSettings;  // font-feature-settings as written; null = normal
         public bool CaptionBottom;    // caption-side: bottom (inherited)

@@ -2305,7 +2305,7 @@ internal sealed partial class LayoutEngine
         var s = e.Style;
         float basisW = float.IsNaN(percentW) ? availW : percentW; // what percentages of the width are of
         float? cbH = HeightBasis(e);
-        float? specifiedH = HeightOf(s.Height, cbH), maxH = HeightOf(s.MaxHeight, cbH);
+        float? specifiedH = HeightOf(s.Height, cbH), maxHeight = HeightOf(s.MaxHeight, cbH);
         bool hasW = !s.Width.IsAuto && !(_measuring && s.Width.IsPercent), hasH = specifiedH != null;
         w = hasW ? s.Width.Resolve(Math.Max(basisW, 0)) : 0;
         h = specifiedH ?? 0;
@@ -2317,19 +2317,27 @@ internal sealed partial class LayoutEngine
         // aspect-ratio replaces the natural ratio, unless it says "auto" and the element has one.
         bool ratioOverride = s.AspectRatio > 0 && !(s.AspectRatioAuto && iw > 0 && ih > 0);
         float rw = ratioOverride ? s.AspectRatio : iw, rh = ratioOverride ? 1 : ih;
-        if (hasW && !hasH) h = rw > 0 ? w * rh / rw : 0;
-        else if (!hasW && hasH) w = rh > 0 ? h * rw / rh : 0;
-        else if (!hasW && !hasH) { w = iw; h = ratioOverride ? iw / s.AspectRatio : ih; }
-
-        if (!s.MaxWidth.IsAuto)
+        // The limits, in the terms of the content box. A maximum below the minimum loses to it.
+        float frameW = s.BorderBox ? s.PaddingLeft.Resolve(basisW) + s.PaddingRight.Resolve(basisW) + s.BorderLeft + s.BorderRight : 0;
+        float frameH = s.BorderBox ? s.PaddingTop.Resolve(basisW) + s.PaddingBottom.Resolve(basisW) + s.BorderTop + s.BorderBottom : 0;
+        float minW = s.MinWidth.IsAuto ? 0 : Math.Max(0, s.MinWidth.Resolve(basisW) - frameW);
+        float maxW = s.MaxWidth.IsAuto ? float.PositiveInfinity : Math.Max(minW, s.MaxWidth.Resolve(basisW) - frameW);
+        float minH = HeightOf(s.MinHeight, cbH) is float mnh ? Math.Max(0, mnh - frameH) : 0;
+        float maxH = maxHeight is float mxh ? Math.Max(minH, mxh - frameH) : float.PositiveInfinity;
+        if (hasW || hasH)
         {
-            float mw = s.MaxWidth.Resolve(basisW);
-            if (w > mw && w > 0) { h *= mw / w; w = mw; }
+            // A width or height that is given is limited on its own, and the other one, when it is auto, follows it
+            // through the ratio before its own limits apply, so the picture can be stretched (CSS 2.1 §10.3.2, §10.6.2).
+            if (hasW) w = Math.Clamp(w, minW, maxW);
+            if (hasH) h = Math.Clamp(h, minH, maxH);
+            if (!hasH) h = Math.Clamp(rw > 0 ? w * rh / rw : 0, minH, maxH);
+            if (!hasW) w = Math.Clamp(rh > 0 ? h * rw / rh : 0, minW, maxW);
         }
-        if (maxH is float mh && h > mh && h > 0)
+        else
         {
-            w *= mh / h;
-            h = mh;
+            w = iw;
+            h = ratioOverride ? iw / s.AspectRatio : ih;
+            (w, h) = ConstrainedNaturalSize(w, h, minW, maxW, minH, maxH);
         }
         // An image wider than its box overflows it, as in Chrome, but is never let run off the page: it shrinks the page
         // to fit instead, and only beyond that is it made smaller. Headers, footers and margin boxes have no page width
@@ -2345,6 +2353,27 @@ internal sealed partial class LayoutEngine
         if (_paginate && h > _grid.MinHeight) { w *= _grid.MinHeight / h; h = _grid.MinHeight; }
         if (w < 0) w = 0;
         if (h < 0) h = 0;
+    }
+
+    /// <summary>
+    /// The size of a replaced element whose width and height are both auto, from its natural size and its limits: the
+    /// table of CSS 2.1 §10.4, which keeps the ratio where the limits allow it, as Chrome does.
+    /// </summary>
+    internal static (float W, float H) ConstrainedNaturalSize(float w, float h, float minW, float maxW, float minH, float maxH)
+    {
+        if (w <= 0 || h <= 0) return (Math.Clamp(w, minW, maxW), Math.Clamp(h, minH, maxH));
+        bool wide = w > maxW, narrow = w < minW, tall = h > maxH, low = h < minH;
+        if (wide && tall)
+            return maxW / w <= maxH / h ? (maxW, Math.Max(minH, maxW * h / w)) : (Math.Max(minW, maxH * w / h), maxH);
+        if (narrow && low)
+            return minW / w <= minH / h ? (Math.Min(maxW, minH * w / h), minH) : (minW, Math.Min(maxH, minW * h / w));
+        if (narrow && tall) return (minW, maxH);
+        if (wide && low) return (maxW, minH);
+        if (wide) return (maxW, Math.Max(maxW * h / w, minH));
+        if (narrow) return (minW, Math.Min(minW * h / w, maxH));
+        if (tall) return (Math.Max(maxH * w / h, minW), maxH);
+        if (low) return (Math.Min(minH * w / h, maxW), minH);
+        return (w, h);
     }
 
     // ------------------------------------------------------------------ anchors, captured layout, size overrides
