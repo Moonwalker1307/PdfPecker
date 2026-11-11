@@ -118,6 +118,13 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Text_autospace_in_one_long_word_stays_linear()
+    {
+        // keep-all leaves the alternating letters one word, which every space splits.
+        AssertStructurallyValid(Bounded("<p style='text-autospace:normal;word-break:keep-all'>" + Repeat("日a", 100_000) + "</p>"));
+    }
+
+    [Fact]
     public void Font_relative_units_stay_linear()
     {
         // A value with thousands of ex, ch and lh lengths is rewritten only up to a limit, and every element with such a

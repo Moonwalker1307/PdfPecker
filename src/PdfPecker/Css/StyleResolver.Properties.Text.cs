@@ -264,6 +264,38 @@ internal sealed partial class StyleResolver
             _ => s.TextSpacingTrim,
         };
 
+    private static void ApplyTextAutospace(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Lower == "inherit") s.TextAutospace = parent.TextAutospace;
+        else if (ParseTextAutospace(d.Lower) is { } value) s.TextAutospace = value;
+    }
+
+    /// <summary>
+    /// A text-autospace value: normal, auto (which this library takes as normal), no-autospace, or ideograph-alpha,
+    /// ideograph-numeric and punctuation in any order, with insert or replace. Punctuation spacing is not applied, and
+    /// replace acts as insert. Null when the value is not valid.
+    /// </summary>
+    internal static TextAutospace? ParseTextAutospace(string value)
+    {
+        switch (value)
+        {
+            case "normal" or "auto": return TextAutospace.Normal;
+            case "no-autospace": return TextAutospace.None;
+        }
+        TextAutospace result = TextAutospace.None;
+        bool any = false, punctuation = false, mode = false;
+        foreach (var token in value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (token == "ideograph-alpha" && (result & TextAutospace.IdeographAlpha) == 0) result |= TextAutospace.IdeographAlpha;
+            else if (token == "ideograph-numeric" && (result & TextAutospace.IdeographNumeric) == 0) result |= TextAutospace.IdeographNumeric;
+            else if (token == "punctuation" && !punctuation) punctuation = true;
+            else if (token is "insert" or "replace" && !mode) { mode = true; continue; }
+            else return null;
+            any = true;
+        }
+        return any ? result : null;
+    }
+
     // sideways-right is the old name of sideways, which Chrome still reads; vertical-right is the -webkit- name of mixed.
     private static void ApplyTextOrientation(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
         => s.TextOrientation = d.Lower switch

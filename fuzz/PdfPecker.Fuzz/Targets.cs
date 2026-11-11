@@ -92,6 +92,7 @@ internal static class Targets
         "<img src=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>\" style=\"object-view-box:inset(-1e9% 100% 1e9px 0)\">",
         "object-view-box:xywh(0 0 1e-9px 1e-9px)", "object-view-box:rect(1e9px auto 0 auto)",
         "<span style=\"box-shadow:inset 0 0 1e9px 1e9px red,inset 1px 1px blue;border-radius:50%\">x<br>y</span>",
+        "text-autospace:normal", "text-autospace:ideograph-alpha ideograph-numeric replace", "<p style=\"text-autospace:auto;word-break:keep-all\">日a1本<b>b</b>語</p>",
     };
 
     private static readonly (string, string)[] HtmlNesters =
