@@ -118,6 +118,13 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Text_autospace_in_one_long_word_stays_linear()
+    {
+        // keep-all leaves the alternating letters one word, which every space splits.
+        AssertStructurallyValid(Bounded("<p style='text-autospace:normal;word-break:keep-all'>" + Repeat("日a", 100_000) + "</p>"));
+    }
+
+    [Fact]
     public void Deeply_nested_ruby_stays_bounded()
     {
         // Each ruby pair is an inline-block whose annotation and base are measured; a base holding the next ruby nests
