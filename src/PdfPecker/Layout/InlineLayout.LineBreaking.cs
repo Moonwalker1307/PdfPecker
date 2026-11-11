@@ -244,7 +244,7 @@ internal sealed partial class InlineLayout
                 {
                     int cut = target - at, length = it.Length - cut;
                     var s = it.Style;
-                    var rest = it.Slice(cut, length, TextWidth(s.Font, it.Source, it.Start + cut, length, s.TextSize, s.LetterSpacing));
+                    var rest = it.Slice(cut, length, ItemWidth(it, it.Start + cut, length));
                     var items = new List<Item>(after.Count - m) { rest };
                     for (int r = m + 1; r < after.Count; r++) items.Add(after[r]);
                     _items = items;
@@ -626,12 +626,12 @@ internal sealed partial class InlineLayout
             float fw = 0;
             while (fit < len)
             {
-                float cw = CharAdvance(font, src[start + fit], size, ls);
+                float cw = g.Upright ? ItemCharAdvance(g, start + fit) : CharAdvance(font, src[start + fit], size, ls);
                 if (fw + cw > room + Eps) break;
                 fw += cw;
                 fit++;
             }
-            if (fit == 0 && !_hasContent) { fit = 1; fw = CharAdvance(font, src[start], size, ls); }
+            if (fit == 0 && !_hasContent) { fit = 1; fw = g.Upright ? ItemCharAdvance(g, start) : CharAdvance(font, src[start], size, ls); }
             if (fit == 0) return g;
             var head = g.Slice(0, fit, fw);
             head.BreakAfter = BreakAfter.None;
@@ -640,7 +640,7 @@ internal sealed partial class InlineLayout
             // so subtracting is enough.
             float restW = g.Width + g.TrimStart + g.TrimEnd - fw;
             int restLen = len - fit;
-            if (restW <= _availW + Eps) restW = TextWidth(font, src, start + fit, restLen, size, ls);
+            if (restW <= _availW + Eps) restW = g.Upright ? ItemWidth(g, start + fit, restLen) : TextWidth(font, src, start + fit, restLen, size, ls);
             return g.Slice(fit, restLen, restW);
         }
     }

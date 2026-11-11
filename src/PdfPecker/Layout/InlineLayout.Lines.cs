@@ -146,7 +146,8 @@ internal sealed partial class InlineLayout
     /// </summary>
     internal static void AtomicMetrics(Item it, ComputedStyle block, out float a, out float d)
     {
-        float baseline = it.Kind == ItemKind.Box ? it.BoxBaseline : it.Height;
+        // In a vertical line an image is centred on the central baseline, as Chrome aligns pictures among upright text.
+        float baseline = it.Kind == ItemKind.Box ? it.BoxBaseline : it.Upright ? it.Height / 2 + CentralBaseline(it.Style.ParentStyle ?? block) : it.Height;
         switch (it.Style.VerticalAlign)
         {
             case VerticalAlign.Middle:
@@ -695,10 +696,17 @@ internal sealed partial class InlineLayout
             float bl = baseline + TextShift(style, baseline - lineTop, descent) + first.RelY;
             string text = sb.ToString();
             float wordSpacing = style.WordSpacing + spaceExtra - letterExtra, letterSpacing = style.LetterSpacing + letterExtra;
-            if (style.TextShadows != null) TextShadows(style, textX, runEnd - textX, bl, lineTop, text, wordSpacing, letterSpacing, rtlRun);
-            var op = new TextOp(textX, bl, lineTop, style.Font, style.TextSize, CssColor.Fade(style.TextFillColor ?? style.Color, style.InlineFade), text,
-                wordSpacing, letterSpacing) { Tag = first.Tag, Rtl = rtlRun }.WithStroke(style);
-            _engine.Ops.Add(op);
+            uint color = CssColor.Fade(style.TextFillColor ?? style.Color, style.InlineFade);
+            TextOp? op = null;
+            if (first.Upright && !rtlRun && AnyUpright(items, start, end))
+                DrawUprightRun(items, start, end, xs, rx, bl, lineTop, color, wordSpacing, letterSpacing);
+            else
+            {
+                if (style.TextShadows != null) TextShadows(style, textX, runEnd - textX, bl, lineTop, text, wordSpacing, letterSpacing, rtlRun);
+                op = new TextOp(textX, bl, lineTop, style.Font, style.TextSize, color, text, wordSpacing, letterSpacing) { Tag = first.Tag, Rtl = rtlRun }
+                    .WithStroke(style);
+                _engine.Ops.Add(op);
+            }
             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl, text: op);
             if (style.EmphasisShape != EmphasisShape.None && style.EmphasisMark is { } mark) DrawEmphasisMarks(items, start, end, xs, rx, bl, lineTop, style, mark);
         }

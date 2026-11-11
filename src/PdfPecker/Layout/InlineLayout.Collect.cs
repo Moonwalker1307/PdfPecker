@@ -309,6 +309,7 @@ internal sealed partial class InlineLayout
         image.Image = s.Visible ? img : null;
         image.Width = w;
         image.Height = h;
+        image.Upright = HasUprightText(s);
         // A percentage width or max-width makes the image compressible (CSS Sizing 3 §5.2.2): as in Chrome, it has no
         // min-content width, so it does not hold a table column or a shrink-to-fit box open at its natural width.
         if (_engine._measuring && IsCompressible(s)) image.MinWidth = 0;
@@ -352,7 +353,8 @@ internal sealed partial class InlineLayout
         if (ml > 0) AddSpacer(st, around, ml, href);
         st.Items.Add(new Item
         {
-            Kind = ItemKind.Box, Style = s, Width = boxW, Height = boxH, BoxBaseline = boxH, BoxOps = ops, Href = href ?? LinkOf(e),
+            Kind = ItemKind.Box, Style = s, Width = boxW, Height = boxH, Href = href ?? LinkOf(e),
+            BoxBaseline = HasUprightText(s) ? boxH / 2 + CentralBaseline(MarginStyle(s)) : boxH, BoxOps = ops,
             MinWidth = _engine._measuring && IsCompressible(s) ? pl + pr : -1,
         });
         if (mr > 0) AddSpacer(st, around, mr, href);

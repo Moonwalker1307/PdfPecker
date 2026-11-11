@@ -180,6 +180,11 @@ internal sealed class LayerOp : GroupOp
     public bool StackingContext;
     /// <summary>The CSS transform, y-down, about the origin.</summary>
     public Matrix? Transform;
+    /// <summary>
+    /// The layer turns a line or a picture of a vertical-lr box back the right way round (<see cref="Transform"/> is a
+    /// flip), so what is inside is still drawn in the box's turned flow.
+    /// </summary>
+    public bool FlipsBack;
     public float OriginX, OriginY;
     /// <summary>
     /// What a parent's perspective needs to draw this layer's 3D transform again: set only when the transform has a depth

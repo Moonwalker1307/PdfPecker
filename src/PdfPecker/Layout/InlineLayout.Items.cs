@@ -57,13 +57,16 @@ internal sealed partial class InlineLayout
         // text-spacing-trim: the blank half of fullwidth punctuation that the text's first character loses on its left
         // (the text is drawn that much further left) and its last on its right. Width leaves both out.
         public float TrimStart, TrimEnd;
+        // Text in a vertical-rl or vertical-lr line whose text-orientation stands some characters upright: each of those
+        // takes one em of the line (see InlineLayout.Upright.cs).
+        public bool Upright;
 
         public void Reset()
         {
             Source = "";
             Start = Length = 0;
             Width = Height = BoxBaseline = PageExcess = 0;
-            Breakable = false;
+            Breakable = Upright = false;
             BreakAfter = BreakAfter.None;
             Href = null;
             Deco = null;
