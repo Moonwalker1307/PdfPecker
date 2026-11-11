@@ -85,7 +85,33 @@ public class TextDecorationStyleTests
     [Fact]
     public void A_solid_line_keeps_its_own_thickness()
     {
+        // A tenth of the font size (15pt is 20px), in whole CSS pixels rounded down, as in Chrome.
         var line = Assert.Single(Layout("underline").OfType<RectOp>(), r => r.IsDecoration);
-        Assert.Equal(0.055f * 15, line.H, 0.01f);
+        Assert.Equal(2 * 0.75f, line.H, 0.01f);
+    }
+
+    [Theory]
+    // font size, then Chrome's thickness, underline gap below the baseline and line-through top above it, in pixels
+    // (Liberation Sans in Chrome 153, whose ascent is about 0.9 of the size, as Helvetica's standard font metrics are).
+    [InlineData(13, 1, 1)]
+    [InlineData(25, 2, 2)]
+    [InlineData(35, 3, 2)]
+    [InlineData(100, 10, 5)]
+    public void Solid_lines_are_as_thick_and_placed_as_in_Chrome(int px, int thickness, int gap)
+    {
+        var doc = HtmlParser.Parse($"<p style='font-size: {px}px; margin: 0; line-height: 2'><span style='text-decoration: underline overline line-through; text-decoration-skip-ink: none'>H</span></p>");
+        new StyleResolver(new Stylesheet(), 400, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var engine = new LayoutEngine(PageHeight, new ImageLoader(null, null, false));
+        engine.Layout(doc, 400);
+        var text = engine.Ops.OfType<TextOp>().Single();
+        var lines = engine.Ops.OfType<RectOp>().Where(r => r.IsDecoration).OrderBy(r => r.Y).ToList();
+        Assert.Equal(3, lines.Count);
+        float ascent = text.Font.Ascent * px * Px;
+        foreach (var line in lines) Assert.Equal(thickness * Px, line.H, 0.01f);
+        // The overline stands on the ascent, the line-through is centred a third of the ascent above the baseline and
+        // the underline hangs half the unrounded thickness below it, in whole pixels.
+        Assert.Equal(text.Baseline - ascent, lines[0].Y + lines[0].H, 0.01f);
+        Assert.Equal(text.Baseline - ascent / 3, lines[1].Y + lines[1].H / 2, 0.01f);
+        Assert.Equal(text.Baseline + gap * Px, lines[2].Y, 0.01f);
     }
 }

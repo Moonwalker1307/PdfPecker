@@ -118,6 +118,13 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Text_autospace_in_one_long_word_stays_linear()
+    {
+        // keep-all leaves the alternating letters one word, which every space splits.
+        AssertStructurallyValid(Bounded("<p style='text-autospace:normal;word-break:keep-all'>" + Repeat("日a", 100_000) + "</p>"));
+    }
+
+    [Fact]
     public void Deeply_nested_ruby_stays_bounded()
     {
         // Each ruby pair is an inline-block whose annotation and base are measured; a base holding the next ruby nests
@@ -1899,6 +1906,20 @@ public class HostileInputTests
             }
             AssertStructurallyValid(Bounded(html, ColorFont(data)));
         }
+    }
+
+    [Fact]
+    public void Many_font_feature_values_stay_linear()
+    {
+        // 100,000 names in unterminated and nested blocks, and an alternates value that names thousands of them.
+        var sb = new StringBuilder("<style>@font-feature-values A, B, C { ");
+        for (int i = 0; i < 100_000; i++) sb.Append(CultureInfo.InvariantCulture, $"@styleset {{ n{i}: 1 2 3 }} @character-variant {{ c{i}: 99 7 }} @x {{ ");
+        sb.Append("} ");
+        var names = string.Join(", ", Enumerable.Range(0, 5_000).Select(i => "n" + i.ToString(CultureInfo.InvariantCulture)));
+        sb.Append($"</style><p style='font-family: A, B, C; font-variant-alternates: styleset({names}) historical-forms'>x</p>");
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded(sb.ToString()));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"{watch.Elapsed}");
     }
 
     [Fact]

@@ -92,6 +92,7 @@ internal static class Targets
         "<img src=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>\" style=\"object-view-box:inset(-1e9% 100% 1e9px 0)\">",
         "object-view-box:xywh(0 0 1e-9px 1e-9px)", "object-view-box:rect(1e9px auto 0 auto)",
         "<span style=\"box-shadow:inset 0 0 1e9px 1e9px red,inset 1px 1px blue;border-radius:50%\">x<br>y</span>",
+        "text-autospace:normal", "text-autospace:ideograph-alpha ideograph-numeric replace", "<p style=\"text-autospace:auto;word-break:keep-all\">日a1本<b>b</b>語</p>",
         "<ruby>漢<rt>かん</rt>字<rp>(</rp><rt>じ</rt><rp>)</rp></ruby>", "<ruby><rt>a</rt><rt>b</rt><rb>c</rb></ruby>", "<rt>x</rt>",
         "<ruby style=\"display:block;line-height:0\"><ruby>a<rt>b</rt></ruby><rt style=\"font-size:1e9px\">c</rt></ruby>",
     };
@@ -108,7 +109,7 @@ internal static class Targets
     private static readonly string[] CssWords =
     {
         "var(--a)", "calc(", "min(", "max(", "clamp(", "!important", "@media print {", "@media (min-width: 1px) {", "@supports (display:grid) {", "@page {", "@font-face {", "@keyframes a {",
-        "@import url(x);", "@container (min-width:1px) {", "@counter-style a {", "@font-palette-values --a { font-family: Fz; base-palette: 99; override-colors: 0 red, 65535 blue }", "font-palette:--a", "font-palette:dark", ":is(", ":not(", ":where(", ":has(", ":nth-child(2n+1 of p)", "::before", "::after", "::marker",
+        "@import url(x);", "@container (min-width:1px) {", "@counter-style a {", "@font-feature-values a { @styleset { b: 1 2 20; } @character-variant { c: 99 9; } }", "font-variant-alternates:styleset(b) character-variant(c) historical-forms", "@font-palette-values --a { font-family: Fz; base-palette: 99; override-colors: 0 red, 65535 blue }", "font-palette:--a", "font-palette:dark", ":is(", ":not(", ":where(", ":has(", ":nth-child(2n+1 of p)", "::before", "::after", "::marker",
         "*", ">", "~", "+", "|", "[a=b i]", "url(data:,)", "linear-gradient(", "radial-gradient(", "conic-gradient(", "repeating-linear-gradient(", "-webkit-gradient(", "-webkit-", "rotate(", "matrix(",
         "attr(a)", "attr(data-x type(*), ", "attr(data-x px, ", "attr(class type(<length>+))", "attr(id raw-string)", "attr(title number)", "type(<color>)", "width:attr(data-x %)", "counter(a)", "counters(a, \".\")", "content:", "display:grid", "grid-template-columns: repeat(999999, 1fr)", "grid-column: 1 / span 99999", "flex: 1e9",
         "1e9px", "-1e9px", "100000%", "calc(1/0)", "calc(0/0)", "inherit", "initial", "unset", "revert", "all:unset", "--a:", "var(--a, var(--b, var(--a)))",

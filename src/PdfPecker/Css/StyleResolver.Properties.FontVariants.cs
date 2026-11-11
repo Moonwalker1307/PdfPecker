@@ -75,6 +75,17 @@ internal sealed partial class StyleResolver
     }
 
     /// <summary>
+    /// font-variant-alternates: historical-forms, and functions whose names @font-feature-values rules give numbers. The
+    /// names stay case-sensitive, so the value as written is parsed, not its lowercase form.
+    /// </summary>
+    private void ApplyFontVariantAlternates(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit || d.Lower == "unset") s.FontVariantAlternates = parent.FontVariantAlternates;
+        else if (d.Lower == "initial") s.FontVariantAlternates = null;
+        else if (FontAlternates.Parse(d.Value, _fontFeatureValues, out bool valid) is var alternates && valid) s.FontVariantAlternates = alternates;
+    }
+
+    /// <summary>
     /// font-palette: normal, light, dark or the name of an @font-palette-values rule. A name without a rule draws the
     /// font's own palette, as in Chrome; palette-mix() is not supported and leaves the value as it was.
     /// </summary>

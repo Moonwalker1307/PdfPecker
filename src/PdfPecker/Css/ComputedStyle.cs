@@ -126,6 +126,10 @@ internal enum TextJustify : byte { Auto, None, InterWord, InterCharacter }
 // at the end of a line when that makes it fit; space-first also at the start of every line but a paragraph's first,
 // trim-start at the start of every line, and space-all never.
 internal enum TextSpacingTrim : byte { Normal, SpaceAll, SpaceFirst, TrimStart }
+// text-autospace: where an eighth of an em goes between ideographs (Chinese, Japanese and Korean letters) and other
+// letters or digits. The initial value is no-autospace, as in Chrome; normal sets both kinds.
+[Flags]
+internal enum TextAutospace : byte { None = 0, IdeographAlpha = 1, IdeographNumeric = 2, Normal = IdeographAlpha | IdeographNumeric }
 
 /// <summary>
 /// Values of text-orientation in vertical-rl and vertical-lr: mixed stands the characters that UAX #50 makes upright
@@ -405,8 +409,10 @@ internal sealed partial class ComputedStyle
         get
         {
             var f = BaseFont;
-            if ((FontVariantNumeric != null || FontFeatureSettings != null || FontVariantEastAsian != null || FontVariantPosition != null || SmallCaps != 0)
-                && FontFeatures.Key(FontVariantNumeric, FontFeatureSettings, FontVariantEastAsian, FontVariantPosition, SmallCaps) is { } features)
+            // font-variant-alternates goes in as feature settings before font-feature-settings, which win over it.
+            var settings = FontVariantAlternates is { } alternates ? alternates.Settings(FontFamilyName, FontFeatureSettings) : FontFeatureSettings;
+            if ((FontVariantNumeric != null || settings != null || FontVariantEastAsian != null || FontVariantPosition != null || SmallCaps != 0)
+                && FontFeatures.Key(FontVariantNumeric, settings, FontVariantEastAsian, FontVariantPosition, SmallCaps) is { } features)
                 f = f.WithFeatures(features);
             if (NoKerning) f = f.WithoutKerning();
             // Chrome leaves out contextual alternates when letter-spacing is set, as it does the optional ligatures,

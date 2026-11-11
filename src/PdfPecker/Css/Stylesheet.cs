@@ -191,6 +191,7 @@ internal sealed class Stylesheet
     public readonly List<List<Declaration>> FontFaces = new(); // @font-face descriptors, one list per rule
     public readonly List<RegisteredProperty> RegisteredProperties = new();
     public readonly List<CounterStyleRule> CounterStyles = new(); // @counter-style rules, in source order
+    public readonly FontFeatureValues FontFeatureValues = new(); // the names of @font-feature-values rules
     public readonly List<FontPaletteValuesRule> FontPaletteValues = new(); // @font-palette-values rules, in source order
     public readonly CascadeLayer LayerRoot = new("");
     public MediaContext Media = new();

@@ -45,6 +45,7 @@ internal sealed partial class ComputedStyle
     public TextAlign? TextAlignLast { get => _typography.TextAlignLast; set => Typography.TextAlignLast = value; }
     public TextJustify TextJustify { get => _typography.TextJustify; set => Typography.TextJustify = value; }
     public TextSpacingTrim TextSpacingTrim { get => _typography.TextSpacingTrim; set => Typography.TextSpacingTrim = value; }
+    public TextAutospace TextAutospace { get => _typography.TextAutospace; set => Typography.TextAutospace = value; }
     public TextOrientation TextOrientation { get => _typography.TextOrientation; set => Typography.TextOrientation = value; }
     public bool TextCombineUpright { get => _typography.TextCombineUpright; set => Typography.TextCombineUpright = value; }
     public TextAlign? BlockAlign { get => _typography.BlockAlign; set => Typography.BlockAlign = value; }
@@ -66,6 +67,7 @@ internal sealed partial class ComputedStyle
     public FontSizeAdjust SizeAdjust { get => _typography.SizeAdjust; set => Typography.SizeAdjust = value; }
     public string? FontVariantEastAsian { get => _typography.FontVariantEastAsian; set => Typography.FontVariantEastAsian = value; }
     public string? FontVariantPosition { get => _typography.FontVariantPosition; set => Typography.FontVariantPosition = value; }
+    public FontAlternates? FontVariantAlternates { get => _typography.FontVariantAlternates; set => Typography.FontVariantAlternates = value; }
     public FontPalette? FontPalette { get => _typography.FontPalette; set => Typography.FontPalette = value; }
     public string? FontVariantNumeric { get => _typography.FontVariantNumeric; set => Typography.FontVariantNumeric = value; }
     public string? FontFeatureSettings { get => _typography.FontFeatureSettings; set => Typography.FontFeatureSettings = value; }
@@ -94,6 +96,7 @@ internal sealed partial class ComputedStyle
         public TextAlign? TextAlignLast;         // null = auto
         public TextJustify TextJustify;
         public TextSpacingTrim TextSpacingTrim;
+        public TextAutospace TextAutospace;
         public TextOrientation TextOrientation;  // text-orientation: how characters stand in vertical lines
         public bool TextCombineUpright;          // text-combine-upright: all, the text set across one vertical em
         public TextAlign? BlockAlign;            // -webkit-left, -webkit-center or -webkit-right: also aligns child blocks
@@ -115,6 +118,7 @@ internal sealed partial class ComputedStyle
         public FontSizeAdjust SizeAdjust;    // font-size-adjust; none by default
         public string? FontVariantEastAsian; // font-variant-east-asian keywords; null = normal
         public string? FontVariantPosition;  // font-variant-position: sub or super; null = normal
+        public FontAlternates? FontVariantAlternates; // font-variant-alternates; null = normal
         public FontPalette? FontPalette;     // font-palette: the colour font palette; null = normal
         public string? FontVariantNumeric;   // font-variant-numeric keywords; null = normal
         public string? FontFeatureSettings;  // font-feature-settings as written; null = normal

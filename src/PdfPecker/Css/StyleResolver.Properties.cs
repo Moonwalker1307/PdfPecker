@@ -201,12 +201,14 @@ internal sealed partial class StyleResolver
             case "font-size-adjust": ApplyFontSizeAdjust(s, parent, in d); break;
             case "font-variant-east-asian": ApplyFontVariantEastAsian(s, parent, in d); break;
             case "font-variant-position": ApplyFontVariantPosition(s, parent, in d); break;
+            case "font-variant-alternates": ApplyFontVariantAlternates(s, parent, in d); break;
             case "font-palette": ApplyFontPalette(s, parent, in d); break;
             case "line-height": ApplyLineHeight(s, parent, in d); break;
             case "text-align": ApplyTextAlign(s, parent, in d); break;
             case "text-align-last": ApplyTextAlignLast(s, parent, in d); break;
             case "text-justify": ApplyTextJustify(s, parent, in d); break;
             case "text-spacing-trim": ApplyTextSpacingTrim(s, parent, in d); break;
+            case "text-autospace": ApplyTextAutospace(s, parent, in d); break;
             case "text-orientation": ApplyTextOrientation(s, parent, in d); break;
             case "text-combine-upright": ApplyTextCombineUpright(s, parent, in d); break;
             case "text-indent": ApplyTextIndent(s, in d); break;

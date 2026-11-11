@@ -241,7 +241,7 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   marks (`text-emphasis`), ruby annotations such as Japanese furigana (`<ruby>`, `<rt>` and `<rp>`: the annotation at half
   size over its base, spread around it and over the kana beside it, in the line's leading where it fits, as in Chrome), trimming lines to the cap height and baseline (`text-box`, for optically centred
   buttons and badges), `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
-  (`text-underline-position`), drop caps, `::first-line` styles with a background, `::marker` styles (a larger marker font or a tall marker image makes its
+  (`text-underline-position`), solid underlines, overlines and line-throughs as thick and placed as Chrome draws them, drop caps, `::first-line` styles with a background, `::marker` styles (a larger marker font or a tall marker image makes its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
   text, as in Chrome), images and gradients in `::before` and `::after` content, inline SVG (with
   percentage coordinates and sizes, as in Bootstrap's placeholder images, `cx`, `cy`, `r`, `rx`, `ry`, `x`, `y`, `width`, `height`, `d: path()` and `stop-color` set from style sheets, HTML in `<foreignObject>`, and icons drawn
@@ -292,6 +292,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   (as Chrome applies them, such as Fira Code's ligatures), variable fonts and OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
   versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, in the default palette or the one `font-palette` picks: `light`, `dark` or an
   `@font-palette-values` rule with `base-palette` and `override-colors`.
+  `font-variant-alternates` turns on historical forms and the stylistic sets, character variants, stylistic, swash,
+  ornament and annotation alternates that `@font-feature-values` names for a family.
   Variation sequences pick the glyph the font gives them (cmap format 14), such as the forms of a CJK ideograph that
   ideographic variation selectors choose, and copy as written.
   `@font-face` takes `size-adjust`, `ascent-override`, `descent-override` and `line-gap-override`, so a fallback face
@@ -300,7 +302,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   [More](https://pdfpecker.net/docs/fonts/)
 - **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts, Khmer, Myanmar, Sinhala, Tibetan, Thai and
   Lao (copied and extracted as written, with `/ActualText` where shaping reorders or shares glyphs), CJK line breaking
-  and justification, and hyphenation in eleven languages (with `hyphenate-limit-lines`), plus TeX patterns of your
+  and justification, `text-autospace` (an eighth of an em between Chinese, Japanese or Korean text and Latin letters or
+  digits, as in Chrome), and hyphenation in eleven languages (with `hyphenate-limit-lines`), plus TeX patterns of your
   own, which `HyphenationPatterns.Deferred` reads only when a document uses their language. [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2 and 3 (levels B, U and A, the accessible level, tagged from the HTML)
   and PDF/A-4, AES-256 encryption (passwords prepared with SASLprep, as PDF
