@@ -229,7 +229,7 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   `rule-visibility-items` and `rule-overlap`, cut where a grid or flex container breaks across pages),
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
-  list markers), `contrast-color()` (black or white text, whichever reads better on a brand colour, as in Chrome), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
+  list markers; translucent stops blend premultiplied, as in Chrome), `contrast-color()` (black or white text, whichever reads better on a brand colour, as in Chrome), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
   media and container queries, `@scope` (scope roots, limits and proximity, as in Chrome), logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
   order; Chinese and Japanese characters stand upright with the font's vertical forms, as `text-orientation` says,
   `text-combine-upright` sets dates and numbers across the line, and images stay upright, as in Chrome), `text-wrap` and `white-space-collapse`, hanging indents (`text-indent` with `hanging` and `each-line`), emphasis
