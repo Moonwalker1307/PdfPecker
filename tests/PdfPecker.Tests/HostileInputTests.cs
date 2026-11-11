@@ -1909,6 +1909,20 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Many_font_feature_values_stay_linear()
+    {
+        // 100,000 names in unterminated and nested blocks, and an alternates value that names thousands of them.
+        var sb = new StringBuilder("<style>@font-feature-values A, B, C { ");
+        for (int i = 0; i < 100_000; i++) sb.Append(CultureInfo.InvariantCulture, $"@styleset {{ n{i}: 1 2 3 }} @character-variant {{ c{i}: 99 7 }} @x {{ ");
+        sb.Append("} ");
+        var names = string.Join(", ", Enumerable.Range(0, 5_000).Select(i => "n" + i.ToString(CultureInfo.InvariantCulture)));
+        sb.Append($"</style><p style='font-family: A, B, C; font-variant-alternates: styleset({names}) historical-forms'>x</p>");
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded(sb.ToString()));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"{watch.Elapsed}");
+    }
+
+    [Fact]
     public void Damaged_palettes_draw_the_first_palette_or_nothing()
     {
         // The palette types and palette records of a version 1 CPAL table, damaged, under every kind of font-palette.

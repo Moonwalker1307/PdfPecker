@@ -409,8 +409,10 @@ internal sealed partial class ComputedStyle
         get
         {
             var f = BaseFont;
-            if ((FontVariantNumeric != null || FontFeatureSettings != null || FontVariantEastAsian != null || FontVariantPosition != null || SmallCaps != 0)
-                && FontFeatures.Key(FontVariantNumeric, FontFeatureSettings, FontVariantEastAsian, FontVariantPosition, SmallCaps) is { } features)
+            // font-variant-alternates goes in as feature settings before font-feature-settings, which win over it.
+            var settings = FontVariantAlternates is { } alternates ? alternates.Settings(FontFamilyName, FontFeatureSettings) : FontFeatureSettings;
+            if ((FontVariantNumeric != null || settings != null || FontVariantEastAsian != null || FontVariantPosition != null || SmallCaps != 0)
+                && FontFeatures.Key(FontVariantNumeric, settings, FontVariantEastAsian, FontVariantPosition, SmallCaps) is { } features)
                 f = f.WithFeatures(features);
             if (NoKerning) f = f.WithoutKerning();
             // Chrome leaves out contextual alternates when letter-spacing is set, as it does the optional ligatures,

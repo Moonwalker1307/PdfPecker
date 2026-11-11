@@ -592,7 +592,7 @@ internal static partial class CssParser
         longhands.Add("justify-" + suffix, tokens.Count > 1 ? tokens[tokens.Count - 1] : tokens[0]);
     }
 
-    /// <summary>The caps, ligature, numeric, east-asian and position parts of font-variant; alternates are not supported.</summary>
+    /// <summary>The caps, ligature, numeric, east-asian, position and alternates parts of font-variant.</summary>
     private static void ExpandFontVariant(string value, LonghandWriter longhands)
     {
         var lower = value.Trim().ToLowerInvariant();
@@ -603,8 +603,12 @@ internal static partial class CssParser
             longhands.Add("font-variant-numeric", lower == "none" ? "normal" : lower);
             longhands.Add("font-variant-east-asian", lower == "none" ? "normal" : lower);
             longhands.Add("font-variant-position", lower == "none" ? "normal" : lower);
+            longhands.Add("font-variant-alternates", lower == "none" ? "normal" : lower);
             return;
         }
+        // The names in the alternates functions are case-sensitive, so they are taken from the value as written.
+        var alternates = Tokens(value.Trim()).Where(t => t.Equals("historical-forms", StringComparison.OrdinalIgnoreCase)
+            || t.Contains('(') && t.Substring(0, t.IndexOf('(')).ToLowerInvariant() is "stylistic" or "styleset" or "character-variant" or "swash" or "ornaments" or "annotation").ToList();
         string caps = "normal", position = "normal";
         var ligatures = new List<string>();
         var numeric = new List<string>();
@@ -622,6 +626,7 @@ internal static partial class CssParser
         longhands.Add("font-variant-numeric", numeric.Count == 0 ? "normal" : string.Join(" ", numeric));
         longhands.Add("font-variant-east-asian", eastAsian.Count == 0 ? "normal" : string.Join(" ", eastAsian));
         longhands.Add("font-variant-position", position);
+        longhands.Add("font-variant-alternates", alternates.Count == 0 ? "normal" : string.Join(" ", alternates));
     }
 
     /// <summary>grid-template: none, "rows / columns", or area strings each optionally followed by a row size, then "/ columns".</summary>
@@ -799,6 +804,7 @@ internal static partial class CssParser
         longhands.Add("font-variant-numeric", "normal");
         longhands.Add("font-variant-east-asian", "normal");
         longhands.Add("font-variant-position", "normal");
+        longhands.Add("font-variant-alternates", "normal");
         longhands.Add("font-kerning", "auto");
         longhands.Add("font-size-adjust", "none");
         if (family.Length > 0 || IsCssWideKeyword(value)) longhands.Add("font-family", family);

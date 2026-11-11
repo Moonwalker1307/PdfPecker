@@ -81,6 +81,8 @@ internal sealed partial class StyleResolver
     /// <summary>The counter styles of list-style-type and counter(): the predefined ones and the sheet's @counter-style rules.</summary>
     public CounterStyles CounterStyles { get; init; }
 
+    // The names of the document's @font-feature-values rules; null when it has none.
+    private readonly FontFeatureValues? _fontFeatureValues;
     // The palettes of the document's @font-palette-values rules, by name; null when it has none.
     private readonly Dictionary<string, FontPalette>? _fontPalettes;
 
@@ -194,6 +196,7 @@ internal sealed partial class StyleResolver
         _attrUsed = authorSheet.HasAttrSubstitution;
         _media = authorSheet.Media;
         CounterStyles = CounterStyles.From(authorSheet.CounterStyles);
+        if (!authorSheet.FontFeatureValues.IsEmpty) _fontFeatureValues = authorSheet.FontFeatureValues;
         if (authorSheet.FontPaletteValues.Count > 0)
         {
             // The last rule of a name wins, as in Chrome.
