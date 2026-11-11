@@ -47,13 +47,13 @@
        ASP.NET Core release of its own .NET version, so an app never gets a newer ASP.NET Core than its runtime; the
        version is the minimum, and an ASP.NET Core app uses the copy in its shared framework instead. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.33" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.34" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="9.0.22" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="9.0.23" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.14" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.15" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net11.0'">
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="11.0.0" />
