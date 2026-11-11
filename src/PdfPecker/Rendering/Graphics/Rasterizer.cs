@@ -26,6 +26,13 @@ internal sealed class Rasterizer
     private int _x0, _y0, _w, _h, _stride;
     private int _minRow, _maxRow;
 
+    /// <summary>
+    /// The pixel rows the segments added from now on may still cross, which the renderer sets to what is left of its
+    /// page budget. Once it runs out, further segments are skipped: a few thousand bytes of long lines repeated through
+    /// form XObjects otherwise cross billions of rows within the operator budget.
+    /// </summary>
+    public long RowsLeft { get; set; } = long.MaxValue;
+
     /// <summary>Starts a new path clipped to the device rectangle [x0, x1) × [y0, y1). Returns false if it is empty.</summary>
     public bool Begin(int x0, int y0, int x1, int y1)
     {
@@ -142,6 +149,7 @@ internal sealed class Rasterizer
         // same row position.
         float fay = float.CreateTruncating(ay), fby = float.CreateTruncating(by);
         if (fby <= fay) return;
+        if ((RowsLeft -= (int)MathF.Ceiling(fby) - (int)fay) < 0) return;
         Accumulate(float.CreateTruncating(ax), fay, float.CreateTruncating(bx), fby, dir);
     }
 

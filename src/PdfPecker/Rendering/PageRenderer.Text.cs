@@ -173,7 +173,9 @@ internal sealed partial class PageRenderer
             return;
         }
         _flat.Flatten(clipPath, Matrix.Identity, Tolerance);
+        long rows = ArmRows();
         _gs.Clip = _gs.Clip.IntersectPath(_flat, false, _raster);
+        ChargeRows(rows);
     }
 
     /// <summary>Fills a glyph with the current painter setup, through the glyph bitmap cache when it is small enough.</summary>

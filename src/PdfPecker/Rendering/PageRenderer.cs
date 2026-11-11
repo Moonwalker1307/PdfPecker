@@ -25,6 +25,13 @@ internal sealed partial class PageRenderer
     /// masks would otherwise do billions of pixels of work within the operator budget.
     /// </summary>
     private const int LayerPixelsPerOperation = 64;
+
+    /// <summary>
+    /// Pixel rows that segments of filled, stroked and clipping paths cross for one operator. A segment costs the rows it
+    /// spans, so a long line drawn through a form XObject a thousand times would otherwise do minutes of work within the
+    /// operator budget.
+    /// </summary>
+    private const int RowsPerOperation = 32;
     /// <summary>
     /// The offscreen canvases a page keeps for its next transparency group or soft mask. Each is the size of the canvas
     /// and is handed back clean, so a group costs only the area it draws rather than a page to allocate and clear.
@@ -528,8 +535,21 @@ internal sealed partial class PageRenderer
         int x0 = Math.Max(clip.X0, (int)MathF.Floor(dev.MinX)), y0 = Math.Max(clip.Y0, (int)MathF.Floor(dev.MinY));
         int x1 = Math.Min(clip.X1, (int)MathF.Ceiling(dev.MaxX) + 1), y1 = Math.Min(clip.Y1, (int)MathF.Ceiling(dev.MaxY) + 1);
         if (!_raster.Begin(x0, y0, x1, y1)) return;
+        long rows = ArmRows();
         _raster.AddPath(dev);
+        ChargeRows(rows);
         _raster.Render(evenOdd, _painter);
+    }
+
+    /// <summary>Lets the rasterizer cross as many pixel rows as the rest of the page's budget allows, which it returns.</summary>
+    private long ArmRows() => _raster.RowsLeft = Math.Max(0, MaxOperations - _ops) * RowsPerOperation;
+
+    /// <summary>Charges the rows the rasterizer crossed since <see cref="ArmRows"/> against the operation budget.</summary>
+    private void ChargeRows(long armed)
+    {
+        long left = _raster.RowsLeft;
+        _raster.RowsLeft = long.MaxValue;
+        if (left < 0 || (_ops += (armed - left) / RowsPerOperation) > MaxOperations) throw new BudgetExceeded();
     }
 
     private void Stroke()
@@ -586,7 +606,9 @@ internal sealed partial class PageRenderer
             return;
         }
         _flat.Flatten(_path, ctm, Tolerance);
+        long rows = ArmRows();
         _gs.Clip = _gs.Clip.IntersectPath(_flat, evenOdd, _raster);
+        ChargeRows(rows);
     }
 
     // ------------------------------------------------------------------ extended graphics state
