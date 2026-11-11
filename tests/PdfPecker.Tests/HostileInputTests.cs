@@ -668,6 +668,21 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Tables_nested_without_cells_count_against_the_relayout_budget()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0 (another one). Tables written straight inside each other's
+        // header rows, with a thousand more at the parser's depth limit, have no cells. Each level moved to the next page
+        // whole and laid out all the levels inside it again, but only cells and text counted against the relayout budget,
+        // so the work doubled level by level: 2.3 GB.
+        var html = "<style>@page { size: 120mm 170mm } table { border-collapse: collapse; width: 100% } .sub { margin-top: 3pt; width: 90% }</style>"
+                   + "<h1>Nested tables</h1><p>Before the tables.</p>"
+                   + Repeat("<table class=sub><thead><tr>", 30) + Repeat("<table class=sub>", 2000);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 400L << 20);
+    }
+
+    [Fact]
     public void Deeply_nested_cells_spanning_rows_with_percentage_heights_are_laid_out_a_bounded_number_of_times()
     {
         // A definite cell spanning rows is laid out again once its rows end, which lays out everything inside it again,

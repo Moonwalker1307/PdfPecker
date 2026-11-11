@@ -747,6 +747,10 @@ internal sealed partial class LayoutEngine
 
     private float LayoutTable(Element table, float x, float y, float availW, PageBox? pages = null)
     {
+        // A table counts as a box laid out, as its cells do: tables nested in each other without cells, each moved to
+        // the next page whole and so laid out again, doubled the work at every level and never reached the relayout
+        // budget, which only their cells and text count.
+        _boxLayouts++;
         var s = table.Style;
         var probe = _childProbe;
         _childProbe = null;
