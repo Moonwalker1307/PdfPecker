@@ -90,7 +90,7 @@ public static partial class HtmlToPdf
             MaxPages = _options.MaxPages,
             Structure = _structure,
             PdfUAPart = _settings.PdfUAPart,
-            Language = _structure == null ? null : _options.Language ?? _structure.Language ?? (_settings.IsPdfUA ? "en" : null),
+            Language = _structure == null ? null : _options.Language ?? _structure.Language ?? (_settings.IsPdfUA || _settings.IsPdfALevelA ? "en" : null),
             Properties = new DocumentProperties
             {
                 Keywords = _options.Keywords,

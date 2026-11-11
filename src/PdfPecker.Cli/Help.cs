@@ -42,7 +42,7 @@ internal static class Help
 
             {(command == "watch" ? "Converts once, then again each time the input, its folder or the style sheet changes. A failed\nconversion is shown and watching goes on. Press Ctrl+C to stop.\n" : "")}
             With several inputs the last argument is the output and must end in .pdf; the inputs are joined, [page] and
-            [topage] count the whole output, and --pdfa 4|4f and --accessibility ua2 need a single input.
+            [topage] count the whole output, and --pdfa 2a|3a|4|4f and --accessibility ua2 need a single input.
             Without an output the PDF is written next to the input. Markdown is recognised by the extension.
 
             Page:        -s, --page-size A4|Letter|B5|100x150mm   --page-width, --page-height   -O, --orientation Landscape|Portrait
@@ -54,7 +54,7 @@ internal static class Help
             Styling:     --user-style-sheet FILE (--css)   --font FILE   --font-dir DIR   --system-fonts   --base-dir DIR
             Files:       --enable-local-file-access (--allow-file-access) lets the document read files outside its folder;
                          a document from standard input reads local files only from --base-dir
-            Output:      --pdfa 2b|2u|3b|3u|4|4f   --accessibility tagged|ua1|ua2   --user-password, --owner-password
+            Output:      --pdfa 2b|2u|2a|3b|3u|3a|4|4f   --accessibility tagged|ua1|ua2   --user-password, --owner-password
                          (--user-password-env, --owner-password-env read them from an environment variable)
                          --linearize   --no-pdf-compression   -o, --output FILE   -q, --quiet   --markdown / --html
 

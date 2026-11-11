@@ -110,16 +110,22 @@ var profiles = new (string Name, PdfConformance Conformance, PdfAccessibility Ac
     ("pdfa-2u", PdfConformance.PdfA2u, PdfAccessibility.None, ["2u"], false),
     ("pdfa-3b", PdfConformance.PdfA3b, PdfAccessibility.None, ["3b"], false),
     ("pdfa-3u", PdfConformance.PdfA3u, PdfAccessibility.None, ["3u"], false),
+    // Level A tags the file without Accessibility being set.
+    ("pdfa-2a", PdfConformance.PdfA2a, PdfAccessibility.None, ["2a"], false),
+    ("pdfa-3a", PdfConformance.PdfA3a, PdfAccessibility.None, ["3a"], false),
     ("pdfa-4", PdfConformance.PdfA4, PdfAccessibility.None, ["4"], false),
     ("pdfua-1", PdfConformance.None, PdfAccessibility.PdfUA1, ["ua1"], false),
     ("pdfua-2-pdfa-4", PdfConformance.PdfA4, PdfAccessibility.PdfUA2, ["4", "ua2"], false),
     ("pdfa-2b-pdfua-1", PdfConformance.PdfA2b, PdfAccessibility.PdfUA1, ["2b", "ua1"], false),
     ("pdfa-3b-pdfua-1", PdfConformance.PdfA3b, PdfAccessibility.PdfUA1, ["3b", "ua1"], false),
+    ("pdfa-2a-pdfua-1", PdfConformance.PdfA2a, PdfAccessibility.PdfUA1, ["2a", "ua1"], false),
+    ("pdfa-3a-pdfua-1", PdfConformance.PdfA3a, PdfAccessibility.PdfUA1, ["3a", "ua1"], false),
     // Tagged PDF has no veraPDF profile of its own: these files are only generated, and the PDF/UA-1 profiles above
     // cover the structure tree. The empty flavour list tells check.py to skip them.
     ("tagged", PdfConformance.None, PdfAccessibility.Tagged, [], false),
     // Linearized (Fast Web View) files are rewritten after writing, so they are checked again for each standard.
     ("pdfa-2b-linearized", PdfConformance.PdfA2b, PdfAccessibility.None, ["2b"], true),
+    ("pdfa-2a-linearized", PdfConformance.PdfA2a, PdfAccessibility.None, ["2a"], true),
     ("pdfua-1-linearized", PdfConformance.None, PdfAccessibility.PdfUA1, ["ua1"], true),
     ("pdfua-2-pdfa-4-linearized", PdfConformance.PdfA4, PdfAccessibility.PdfUA2, ["4", "ua2"], true),
 };
@@ -188,6 +194,7 @@ foreach (var profile in profiles)
 foreach (var (name, conformance, accessibility, flavours, linearize) in new (string, PdfConformance, PdfAccessibility, string[], bool)[]
 {
     ("pdfa-3b-einvoice", PdfConformance.PdfA3b, PdfAccessibility.None, ["3b"], false),
+    ("pdfa-3a-einvoice", PdfConformance.PdfA3a, PdfAccessibility.None, ["3a"], false),
     ("pdfa-4f-einvoice", PdfConformance.PdfA4f, PdfAccessibility.None, ["4f"], false),
     ("pdfa-3b-pdfua-1-einvoice", PdfConformance.PdfA3b, PdfAccessibility.PdfUA1, ["3b", "ua1"], false),
     ("pdfa-3b-einvoice-linearized", PdfConformance.PdfA3b, PdfAccessibility.None, ["3b"], true),

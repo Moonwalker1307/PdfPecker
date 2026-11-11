@@ -295,7 +295,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   Lao (copied and extracted as written, with `/ActualText` where shaping reorders or shares glyphs), CJK line breaking
   and justification, and hyphenation in eleven languages (with `hyphenate-limit-lines`), plus TeX patterns of your
   own, which `HyphenationPatterns.Deferred` reads only when a document uses their language. [More](https://pdfpecker.net/docs/languages/)
-- **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption (passwords prepared with SASLprep, as PDF
+- **PDF/A, passwords and watermarks**: PDF/A-2 and 3 (levels B, U and A, the accessible level, tagged from the HTML)
+  and PDF/A-4, AES-256 encryption (passwords prepared with SASLprep, as PDF
   2.0 requires), and text, image and SVG watermarks.
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **PDF/X-4 for print shops**: `new PdfOptions { PdfX = new PdfXOptions(File.ReadAllBytes("PSOcoated_v3.icc"), "FOGRA51") }`

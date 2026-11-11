@@ -300,6 +300,8 @@ internal static class PdfA
         PdfConformance.PdfA2u => (2, "U", 0),
         PdfConformance.PdfA3b => (3, "B", 0),
         PdfConformance.PdfA3u => (3, "U", 0),
+        PdfConformance.PdfA2a => (2, "A", 0),
+        PdfConformance.PdfA3a => (3, "A", 0),
         PdfConformance.PdfA4 => (4, null, 2020),
         PdfConformance.PdfA4f => (4, "F", 2020),
         _ => (0, null, 0),
@@ -307,6 +309,9 @@ internal static class PdfA
 
     /// <summary>Whether a PDF/A level is based on PDF 2.0 (PDF/A-4), so the file is written as PDF 2.0.</summary>
     public static bool IsPdf20(PdfConformance conformance) => conformance is PdfConformance.PdfA4 or PdfConformance.PdfA4f;
+
+    /// <summary>Whether a PDF/A level is level A (accessible), which needs a tagged structure and a language.</summary>
+    public static bool IsLevelA(PdfConformance conformance) => conformance is PdfConformance.PdfA2a or PdfConformance.PdfA3a;
 
     /// <summary>
     /// The XMP packet. Its values must match the document information dictionary. <paramref name="part"/> is the PDF/A

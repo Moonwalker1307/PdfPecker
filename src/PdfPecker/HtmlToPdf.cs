@@ -184,6 +184,9 @@ public static partial class HtmlToPdf
     private readonly record struct ConversionSettings(PdfConformance Conformance, List<PdfAttachment> Attachments, int PdfUAPart)
     {
         public bool IsPdfUA => PdfUAPart > 0;
+
+        /// <summary>Whether the PDF/A level is level A, which is tagged whatever PdfOptions.Accessibility says.</summary>
+        public bool IsPdfALevelA => PdfA.IsLevelA(Conformance);
     }
 
     /// <summary>
@@ -203,16 +206,16 @@ public static partial class HtmlToPdf
         {
             // Factur-X / ZUGFeRD files are PDF/A-3, the part that allows attachments; PDF/A-4f allows them too.
             if (conformance == PdfConformance.None) conformance = PdfConformance.PdfA3b;
-            else if (conformance is not (PdfConformance.PdfA3b or PdfConformance.PdfA3u or PdfConformance.PdfA4f))
+            else if (conformance is not (PdfConformance.PdfA3b or PdfConformance.PdfA3u or PdfConformance.PdfA3a or PdfConformance.PdfA4f))
                 throw new ArgumentException("An e-invoice needs a PDF/A level that allows attachments: set PdfOptions.Conformance to "
-                    + "PdfA3b, PdfA3u or PdfA4f, or leave it at None for PdfA3b.", nameof(options));
+                    + "PdfA3b, PdfA3u, PdfA3a or PdfA4f, or leave it at None for PdfA3b.", nameof(options));
         }
         var attachments = EmbeddedFiles.Prepare(options.Attachments, options.EInvoice);
         if (conformance == PdfConformance.PdfA4f && attachments.Count == 0)
             throw new ArgumentException("PDF/A-4f is for files with attachments: use it with PdfOptions.Attachments or EInvoice, or use PdfA4.", nameof(options));
-        if (conformance is PdfConformance.PdfA2b or PdfConformance.PdfA2u or PdfConformance.PdfA4 && attachments.Count > 0)
+        if (conformance is PdfConformance.PdfA2b or PdfConformance.PdfA2u or PdfConformance.PdfA2a or PdfConformance.PdfA4 && attachments.Count > 0)
             throw new ArgumentException($"PDF/A-{conformance.ToString()[4..].ToLowerInvariant()} allows attaching only PDF/A files, which PdfPecker does not check: "
-                + "set PdfOptions.Conformance to PdfA3b, PdfA3u or PdfA4f, which allow any attachment, or to None for a plain PDF.", nameof(options));
+                + "set PdfOptions.Conformance to PdfA3b, PdfA3u, PdfA3a or PdfA4f, which allow any attachment, or to None for a plain PDF.", nameof(options));
         // PDF/UA-1 and PDF/A-2 and -3 are based on PDF 1.7, PDF/UA-2 and PDF/A-4 on PDF 2.0: a file is one or the other.
         if (options.Accessibility == PdfAccessibility.PdfUA2 && conformance != PdfConformance.None && !PdfA.IsPdf20(conformance))
             throw new ArgumentException($"PDF/UA-2 is based on PDF 2.0 and {conformance} on PDF 1.7: combine PdfUA2 with PdfA4 or PdfA4f, "
