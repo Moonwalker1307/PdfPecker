@@ -386,6 +386,7 @@ internal sealed partial class StyleResolver
             case "text-justify": s.TextJustify = from.TextJustify; break;
             case "text-spacing-trim": s.TextSpacingTrim = from.TextSpacingTrim; break;
             case "font-variant-alternates": s.FontVariantAlternates = from.FontVariantAlternates; break;
+            case "text-autospace": s.TextAutospace = from.TextAutospace; break;
             case "font-palette": s.FontPalette = from.FontPalette; break;
             case "text-orientation": s.TextOrientation = from.TextOrientation; break;
             case "text-combine-upright": s.TextCombineUpright = from.TextCombineUpright; break;
