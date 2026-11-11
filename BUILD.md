@@ -2,9 +2,10 @@
 
 ## Requirements
 
-- The .NET 10 SDK. `global.json` pins `10.0.100` with `rollForward: latestFeature`, so any 10.0 feature band works.
-- The .NET 8 and 9 runtimes to run the tests on every target framework, as CI does. With only .NET 10 installed, pass
-  `-f net10.0`.
+- The .NET 11 SDK, which the `net11.0` target needs. `global.json` pins `11.0.100` with `rollForward: latestFeature`,
+  so any 11.0 feature band works.
+- The .NET 8, 9 and 10 runtimes to run the tests on every target framework, as CI does. With only .NET 11 installed,
+  pass `-f net11.0`.
 - Nothing else: the library, tests, fuzzer, sample and generators need no packages beyond the test framework, and
   no native libraries.
 
@@ -12,7 +13,7 @@
 
 ```
 dotnet build -c Release                                         # library, tests, fuzzer, sample, benchmarks, tools
-dotnet test -c Release --no-build                               # all tests on net8.0, net9.0 and net10.0
+dotnet test -c Release --no-build                               # all tests on net8.0 to net11.0
 dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class, one runtime
 dotnet pack src/PdfPecker -c Release -o ./nupkg                 # the package, with API validation
 dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg          # PdfPecker.Fluent, with the same version
@@ -41,12 +42,16 @@ dotnet run --project samples/PdfPecker.Razor.Sample -c Release -- output    # wr
 
 ## Target frameworks
 
-The library and tests target `net8.0`, `net9.0` and `net10.0`. APIs that .NET 8 lacks, such as `Dictionary`
+The libraries and tests target `net8.0`, `net9.0`, `net10.0` and `net11.0`. APIs that .NET 8 lacks, such as `Dictionary`
 alternate lookups and span `Split`, go behind `#if NET9_0_OR_GREATER` with a .NET 8 path next to them.
 
-The next .NET is tried before it ships: `-p:PreviewTargetFramework=net11.0` adds it as an extra target to the library
-and tests, and `.github/workflows/dotnet-preview.yml` builds and tests that on the latest .NET 11 preview SDK.
-The released package gets the new target only once that .NET is generally available.
+The next .NET is tried before it ships: `-p:PreviewTargetFramework=net12.0` adds it as an extra target to the library
+and tests, and `.github/workflows/dotnet-preview.yml` builds and tests that on the latest .NET 12 preview SDK once one
+is out. The released package gets the new target only once that .NET is generally available.
+
+The command-line tool stays on `net8.0`, `net9.0` and `net10.0`: its Native AOT packages are named in the package's
+`net10.0` folder, which a .NET 11 SDK also reads, and a `net11.0` folder would make a .NET 11 SDK install a
+framework-dependent build instead.
 
 ## Line endings
 

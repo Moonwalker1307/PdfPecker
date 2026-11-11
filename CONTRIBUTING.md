@@ -26,7 +26,7 @@ compatible, so no reflection-based code.
 
 ## Building and testing
 
-You need the .NET 10 SDK. The library and tests target `net8.0`, `net9.0` and `net10.0`, and CI runs all three.
+You need the .NET 11 SDK. The libraries and tests target `net8.0`, `net9.0`, `net10.0` and `net11.0`, and CI runs all four.
 
 ```
 dotnet build -c Release
@@ -34,7 +34,7 @@ dotnet test -c Release --no-build
 dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class, one runtime
 ```
 
-If you only have one runtime installed, pass `-f net10.0` (or the one you have). [BUILD.md](BUILD.md) and
+If you only have one runtime installed, pass `-f net11.0` (or the one you have). [BUILD.md](BUILD.md) and
 [TESTING.md](TESTING.md) have the details, and [AGENTS.md](AGENTS.md) the full set of rules the project works by.
 
 Things that will fail the build or CI:

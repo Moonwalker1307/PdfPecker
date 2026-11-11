@@ -138,8 +138,8 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 ```
 
 Before pushing, the build must be warning-free (warnings are errors), the tests must pass, and the golden baselines
-must be unchanged unless the output change is intended. If only one runtime is installed, pass `-f net10.0`; CI runs
-`net8.0`, `net9.0` and `net10.0` on Linux and `net10.0` on Windows. A change to the public API also needs
+must be unchanged unless the output change is intended. If only one runtime is installed, pass `-f net11.0`; CI runs
+`net8.0`, `net9.0`, `net10.0` and `net11.0` on Linux and `net10.0` on Windows. A change to the public API also needs
 `dotnet pack src/PdfPecker -c Release -o ./nupkg` (or `src/PdfPecker.Fluent`, `src/PdfPecker.Testing`,
 `src/PdfPecker.Razor`), which runs package validation. The tool has no assembly API to validate; pack it with
 `src/PdfPecker.Cli` when its csproj changes. Details

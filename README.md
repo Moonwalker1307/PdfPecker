@@ -26,7 +26,7 @@ File.WriteAllBytes("hello.pdf", pdf);
 dotnet add package PdfPecker
 ```
 
-The package targets `net8.0`, `net9.0` and `net10.0`, so it works on .NET 8 and later, on Windows, Linux and macOS.
+The package targets `net8.0`, `net9.0`, `net10.0` and `net11.0`, so it works on .NET 8 and later, on Windows, Linux and macOS.
 
 ## Quick start
 
@@ -158,7 +158,7 @@ pdfpecker sign all.pdf signed.pdf --cert me.pfx      # also verify, encrypt, dec
 pdfpecker to-image all.pdf pages --format webp       # also to-html, text, info
 ```
 
-On a .NET 10 SDK the tool installs as a Native AOT executable for Windows, macOS and Linux (x64 and Arm64, glibc and
+On a .NET 10 or 11 SDK the tool installs as a Native AOT executable for Windows, macOS and Linux (x64 and Arm64, glibc and
 musl), so a command starts in milliseconds instead of the third of a second the JIT needs: converting the sample invoice took
 17 ms in all instead of 355 ms on a 4-core Linux VM. Other platforms and .NET 8 and 9 SDKs get the framework-dependent tool, as before.
 
