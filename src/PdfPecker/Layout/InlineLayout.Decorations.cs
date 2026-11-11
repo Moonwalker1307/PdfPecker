@@ -7,10 +7,12 @@ namespace PdfPecker.Layout;
 /// <summary>Text decorations (underline, overline, line-through in each style) and text shadows of a run of text.</summary>
 internal sealed partial class InlineLayout
 {
-    // A decoration line is 5.5% of the font size thick, at least half a point, unless text-decoration-thickness says
-    // otherwise (then at least a tenth); the underline sits a tenth of the size below the baseline and the
-    // line-through three tenths above it.
-    private const float DecorationThicknessRatio = 0.055f, MinDecorationThickness = 0.5f, MinSetThickness = 0.1f;
+    // A solid decoration line is a tenth of the font size thick in whole CSS pixels, rounded down and at least one, as
+    // in Chrome, or as thick as text-decoration-thickness says, rounded to whole pixels. The underline hangs half its
+    // unrounded thickness below the baseline, rounded up to a whole pixel, the overline stands on the ascent and the
+    // line-through is centred a third of the ascent above the baseline. Dashed, dotted, double and wavy lines are
+    // centred three tenths of the size above it, and their underlines a tenth below it.
+    private const float MinSetThickness = 0.1f;
     private const float UnderlineOffsetRatio = 0.1f, LineThroughRaiseRatio = 0.3f;
 
     // Dashed, dotted, double and wavy lines follow Chrome, which is thicker than the solid line: a tenth of the font
@@ -36,25 +38,24 @@ internal sealed partial class InlineLayout
     private void Decorate(ComputedStyle s, float x, float w, float baseline, uint? shadow = null, TextOp? text = null)
     {
         float size = s.TextSize;
-        float thickness = s.DecorationThickness is { } dt ? Math.Max(dt.Resolve(size), MinSetThickness) : Math.Max(size * DecorationThicknessRatio, MinDecorationThickness);
+        float thickness = s.DecorationThickness is { } dt ? Math.Max(dt.Resolve(size), MinSetThickness) : Math.Max(size * StyledThicknessRatio, Pixel);
         uint color = shadow ?? CssColor.Fade(s.DecorationColor ?? s.Color, s.InlineFade);
         var style = s.DecorationStyle;
-        // The thickness the lines of this style are drawn with; solid lines keep their own.
-        float styled = style == DecorationStyle.Solid || s.DecorationThickness != null ? thickness : Math.Max(size * StyledThicknessRatio, Pixel);
+        // The thickness the lines of this style are drawn with: whole pixels for solid lines, as Chrome draws them.
+        float styled = style != DecorationStyle.Solid ? thickness
+            : (s.DecorationThickness != null ? WholePixels(thickness) : WholePixels(thickness, floor: true)) * Pixel;
         if ((s.TextDecoration & TextDecoration.Underline) != 0)
         {
-            float y = UnderlineTop(s, style, baseline, size, styled);
+            float y = UnderlineTop(s, style, baseline, size, styled, thickness);
             var (top, bottom) = DecorationBand(style, y, styled, below: true);
             DecorationLine(style, x, y, w, styled, color, below: true, InkGaps(s, text, top, bottom, styled));
         }
         if ((s.TextDecoration & TextDecoration.LineThrough) != 0)
         {
-            // The middle of a dashed, dotted, double or wavy line is three tenths of the size above the baseline, as in
-            // Chrome; a solid one hangs from there.
             float middle = baseline - size * LineThroughRaiseRatio;
             float y = style switch
             {
-                DecorationStyle.Solid => middle,
+                DecorationStyle.Solid => baseline - s.Font.Ascent * size / 3 - styled / 2,
                 DecorationStyle.Wavy => middle - DecorationBand(style, 0, styled, below: true).Bottom / 2,
                 DecorationStyle.Double => middle - DoubleLine(styled).Thickness / 2,
                 _ => middle - styled / 2,
@@ -63,9 +64,8 @@ internal sealed partial class InlineLayout
         }
         if ((s.TextDecoration & TextDecoration.Overline) != 0)
         {
-            // A dashed, dotted, double or wavy line ends at the ascent, as in Chrome, and a solid one hangs from there.
-            float y = baseline - s.Font.Ascent * size;
-            if (style != DecorationStyle.Solid) y -= style == DecorationStyle.Double ? DoubleLine(styled).Thickness : styled;
+            // The line ends at the ascent, as in Chrome.
+            float y = baseline - s.Font.Ascent * size - (style == DecorationStyle.Double ? DoubleLine(styled).Thickness : styled);
             var (top, bottom) = DecorationBand(style, y, styled, below: false);
             DecorationLine(style, x, y, w, styled, color, below: false, InkGaps(s, text, top, bottom, styled));
         }
@@ -76,7 +76,7 @@ internal sealed partial class InlineLayout
     /// font's own underline, rounded, and under one pixel below the bottom of the em box, rounded down, so that it
     /// clears the descenders. text-underline-offset moves either; a font without an underline position draws auto.
     /// </summary>
-    private static float UnderlineTop(ComputedStyle s, DecorationStyle style, float baseline, float size, float styled)
+    private static float UnderlineTop(ComputedStyle s, DecorationStyle style, float baseline, float size, float styled, float thickness)
     {
         float offset = s.UnderlineOffset is { } uo ? uo.Resolve(size) : 0;
         switch (s.UnderlinePosition)
@@ -86,19 +86,20 @@ internal sealed partial class InlineLayout
             case UnderlinePosition.FromFont when s.Font.Metric(FontMetric.UnderlinePosition) is not 0 and var position:
                 return baseline + MathF.Round((position * size + offset) / Pixel, MidpointRounding.AwayFromZero) * Pixel;
             default:
-                return s.UnderlineOffset != null ? baseline + offset : AutoUnderlineTop(style, baseline, size, styled);
+                return s.UnderlineOffset != null ? baseline + offset : AutoUnderlineTop(style, baseline, size, styled, thickness);
         }
     }
 
     /// <summary>
-    /// The top of an underline when text-underline-position and text-underline-offset are auto. A solid one hangs a tenth of the size below the
-    /// baseline; the middle of a dashed, dotted or double one is there, as in Chrome, and a wave starts a fixed way below.
+    /// The top of an underline when text-underline-position and text-underline-offset are auto. A solid one hangs half
+    /// its unrounded thickness below the baseline, rounded up to whole pixels; the middle of a dashed, dotted or double
+    /// one is a tenth of the size below the baseline, as in Chrome, and a wave starts a fixed way below.
     /// </summary>
-    private static float AutoUnderlineTop(DecorationStyle style, float baseline, float size, float styled) => style switch
+    private static float AutoUnderlineTop(DecorationStyle style, float baseline, float size, float styled, float thickness) => style switch
     {
         DecorationStyle.Wavy => baseline + WavyTopBelowBaseline * Pixel,
         DecorationStyle.Double => baseline + size * UnderlineOffsetRatio - DoubleLine(styled).Thickness / 2,
-        DecorationStyle.Solid => baseline + size * UnderlineOffsetRatio,
+        DecorationStyle.Solid => baseline + Math.Max(1, MathF.Ceiling(thickness / 2 / Pixel - 0.001f)) * Pixel,
         _ => baseline + size * UnderlineOffsetRatio - styled / 2,
     };
 

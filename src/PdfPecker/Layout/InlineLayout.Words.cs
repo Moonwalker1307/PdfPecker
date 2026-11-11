@@ -398,13 +398,16 @@ internal sealed partial class InlineLayout
         small = style.Clone();
         small.FontSize = style.FontSize * SmallCapsScale;
         // Decorations keep the full size's thickness and position, so a line under mixed capitals stays straight.
-        small.DecorationThickness ??= Length.Pt(Math.Max(style.TextSize * DecorationThicknessRatio, MinDecorationThickness));
-        if (style.UnderlinePosition == UnderlinePosition.Auto) small.UnderlineOffset ??= Length.Pt(style.TextSize * UnderlineOffsetRatio);
+        float thickness = Math.Max(style.TextSize * StyledThicknessRatio, Pixel);
+        bool solid = style.DecorationStyle == DecorationStyle.Solid;
+        small.DecorationThickness ??= Length.Pt(solid ? WholePixels(thickness, floor: true) * Pixel : thickness);
+        if (style.UnderlinePosition == UnderlinePosition.Auto)
+            small.UnderlineOffset ??= Length.Pt(solid ? Math.Max(1, MathF.Ceiling(thickness / 2 / Pixel - 0.001f)) * Pixel : style.TextSize * UnderlineOffsetRatio);
         else
         {
             // from-font and under depend on the font size, so the full size's position becomes a fixed offset.
             small.UnderlinePosition = UnderlinePosition.Auto;
-            small.UnderlineOffset = Length.Pt(UnderlineTop(style, DecorationStyle.Solid, 0, style.TextSize, 0));
+            small.UnderlineOffset = Length.Pt(UnderlineTop(style, DecorationStyle.Solid, 0, style.TextSize, 0, thickness));
         }
         small.InvalidateFont();
         _smallCapsStyles[style] = small;

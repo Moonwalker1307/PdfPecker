@@ -68,10 +68,12 @@ public class TextDecorationSkipInkTests
     [Fact]
     public void An_overline_leaves_gaps_around_accents()
     {
-        // The overline sits at the top of the font, above plain ascenders, so only the ring and the accents reach it.
+        // The overline stands on the ascent of the font, as in Chrome, above plain ascenders and the accents of capitals;
+        // only taller glyphs, here of larger text inside, reach it.
         Assert.Single(Lines("<p style='font-size: 20pt; margin: 0'><span style='text-decoration: overline'>kill the bill</span></p>"));
-        var pieces = Lines("<p style='font-size: 20pt; margin: 0'><span style='text-decoration: overline'>ÅNGSTRÖM ÉCLAIR</span></p>");
-        Assert.True(pieces.Count > 1);
+        Assert.Single(Lines("<p style='font-size: 20pt; margin: 0'><span style='text-decoration: overline'>ÅNGSTRÖM ÉCLAIR</span></p>"));
+        var pieces = Lines("<p style='font-size: 20pt; margin: 0'><span style='text-decoration: overline'>ab <span style='font-size: 30pt'>ÅÉ</span> cd</span></p>");
+        Assert.True(pieces.Count > 2, $"{pieces.Count} pieces");
     }
 
     [Fact]
