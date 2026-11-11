@@ -127,8 +127,10 @@ internal sealed partial class PdfDocumentWriter
     private readonly List<FontRun> _runs = new();
     private readonly Dictionary<FontProgram, GlyphSubset> _subsets = new();
     private readonly List<GlyphSubset> _subsetList = new();
-    // The subsets of colour fonts that draw with the text colour, one for each colour (RGB) they are drawn in.
-    private readonly Dictionary<(FontProgram, uint), GlyphSubset> _colorSubsets = new();
+    // The subsets of colour fonts that draw with the text colour, one for each colour (RGB) they are drawn in, and those
+    // of the palettes font-palette picks, by their colour glyphs in that palette.
+    private readonly Dictionary<(ColorGlyphs, uint), GlyphSubset> _colorSubsets = new();
+    private const uint NoTextColor = 0xFF000000;
     // The object number of each subset's first object.
     private int[] _subsetIds = Array.Empty<int>();
     private float _yOrigin; // distance from the page top to flow y = 0 on the page being written
