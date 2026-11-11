@@ -683,6 +683,22 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Positioned_boxes_carried_up_through_nested_flex_rows_count_against_the_relayout_budget()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0 (a third one). Flex rows nested in each other's unclosed
+        // items reach the parser's depth limit, where the positioned boxes lose the positioned parent that would have
+        // been their containing block. Every level laid out on its own then carried all of them up and queued them
+        // again at each of its many placements, which the relayout budget did not count: 2.3 GB.
+        var html = "<style>@page { size: A5 } html, body { height: 100% } .row { display: flex; height: 35% }"
+                   + " .side { width: 30mm; height: 100%; position: relative } .main { flex: 1 }"
+                   + " .badge { position: absolute; top: 3mm; bottom: 3mm; width: 8mm; background: #e9c46a }</style>"
+                   + Repeat("<div class=row><div class=side><div class=badge></div></div><div class=main>", 800);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 600L << 20);
+    }
+
+    [Fact]
     public void Deeply_nested_cells_spanning_rows_with_percentage_heights_are_laid_out_a_bounded_number_of_times()
     {
         // A definite cell spanning rows is laid out again once its rows end, which lays out everything inside it again,

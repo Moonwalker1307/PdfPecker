@@ -2972,7 +2972,13 @@ internal sealed partial class LayoutEngine
             foreach (var id in c.AnchorIds)
                 if (Anchors.TryGetValue(id, out float ay)) SetAnchor(id, ay + moveY);
         if (c.Absolutes != null)
+        {
+            // Each level of content laid out on its own carries the positioned boxes whose containing block is outside
+            // it, and queues them again wherever it is placed: they count against the relayout budget as boxes laid out
+            // do, or deeply nested boxes placed again and again queued each of them once per placement and level.
+            _boxLayouts += c.Absolutes.Count;
             foreach (var (e, ax, ay) in c.Absolutes) QueueAbsolute(e, ax + dx, ay + dy);
+        }
     }
 }
 
