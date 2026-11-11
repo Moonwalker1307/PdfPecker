@@ -12,11 +12,20 @@ internal sealed partial class StyleResolver
 {
     internal const string RubyPairName = "::ruby-pair", RubyBaseName = "::ruby-base";
 
+    /// <summary>
+    /// How deep rubies nest and still stack their annotations. Each pair adds two boxes to the layout's depth, so rubies
+    /// nested as deep as the parser allows would take twice the stack of other boxes; real documents nest two at most.
+    /// </summary>
+    private const int MaxRubyNesting = 16;
+
     /// <summary>Wraps each base of a ruby element and the rt after it in a pair box, with the rt first so that it is drawn above.</summary>
     private static void WrapRubyPairs(Element ruby)
     {
         var s = ruby.Style;
         if (s == null || s.Display is Display.None || s.Contents) return;
+        int nesting = 0;
+        for (var p = ruby.Parent; p != null; p = p.Parent)
+            if (p.Name == "ruby" && ++nesting >= MaxRubyNesting) return;
         var children = ruby.Children;
         int start = 0; // the first child of the base that the next rt annotates
         for (int i = 0; i < children.Count; i++)

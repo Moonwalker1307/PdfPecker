@@ -121,8 +121,19 @@ public class HostileInputTests
     public void Deeply_nested_ruby_stays_bounded()
     {
         // Each ruby pair is an inline-block whose annotation and base are measured; a base holding the next ruby nests
-        // that work.
-        AssertStructurallyValid(Bounded(Repeat("<ruby>a", 3000) + Repeat("<rt>b</rt></ruby>", 3000)));
+        // that work. It runs on a thread with the 1.5 MB stack of Windows' thread pool, which rubies nested as deep as the
+        // parser allows overflowed while every level stacked its annotation.
+        byte[]? pdf = null;
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try { pdf = Bounded(Repeat("<ruby>a", 3000) + Repeat("<rt>b</rt></ruby>", 3000)); }
+            catch (Exception e) { error = e; }
+        }, 1536 * 1024);
+        thread.Start();
+        thread.Join();
+        if (error != null) throw new AggregateException(error);
+        AssertStructurallyValid(pdf!);
     }
 
     [Fact]
