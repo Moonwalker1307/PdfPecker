@@ -1902,6 +1902,52 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Damaged_palettes_draw_the_first_palette_or_nothing()
+    {
+        // The palette types and palette records of a version 1 CPAL table, damaged, under every kind of font-palette.
+        var clean = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "COLRv1-TestGlyphs.ttf"));
+        (int Offset, int Length) cpal = default;
+        for (int i = 0, n = BinaryPrimitives.ReadUInt16BigEndian(clean.AsSpan(4)); i < n; i++)
+        {
+            var record = clean.AsSpan(12 + i * 16);
+            if (record[..4].SequenceEqual("CPAL"u8))
+                cpal = ((int)BinaryPrimitives.ReadUInt32BigEndian(record[8..]), (int)BinaryPrimitives.ReadUInt32BigEndian(record[12..]));
+        }
+        Assert.NotEqual(0, cpal.Length);
+        string glyphs = char.ConvertFromUtf32(0xF0100) + char.ConvertFromUtf32(0xF0200);
+        string html = "<style>@font-palette-values --p { font-family: C; base-palette: 2; override-colors: 0 red, 9 blue }</style>"
+            + $"<p style='font:8px C'>{glyphs}<span style='font-palette:light'>{glyphs}</span><span style='font-palette:dark'>{glyphs}</span>"
+            + $"<span style='font-palette:--p'>{glyphs}</span></p>";
+
+        var random = new Random(8765);
+        for (int round = 0; round < 60; round++)
+        {
+            var data = (byte[])clean.Clone();
+            for (int k = 0, n = random.Next(1, 6); k < n; k++)
+                data[cpal.Offset + random.Next(Math.Min(cpal.Length, 64))] = (byte)random.Next(256);
+            AssertStructurallyValid(Bounded(html, ColorFont(data)));
+        }
+    }
+
+    [Fact]
+    public void Many_font_palettes_stay_bounded()
+    {
+        // Every rule makes a palette of its own; past the limit, text draws in the font's own palette.
+        var sb = new StringBuilder("<style>");
+        for (int i = 0; i < 2000; i++)
+            sb.Append(CultureInfo.InvariantCulture, $"@font-palette-values --p{i} {{ font-family: C; override-colors: 0 #{i:x6}; }}");
+        sb.Append("</style><p style='font:8px C'>");
+        for (int i = 0; i < 2000; i++) sb.Append(CultureInfo.InvariantCulture, $"<span style='font-palette:--p{i}'>{char.ConvertFromUtf32(0xF0100)}</span>");
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var font = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "COLRv1-TestGlyphs.ttf"));
+        var pdf = Bounded(sb.Append("</p>").ToString(), new PdfOptions { Compress = false, Fonts = new FontCollection().Add(font, "C") });
+        AssertStructurallyValid(pdf);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"{watch.Elapsed}");
+        // 64 palettes of its own and the font's own, each a Type 3 font of its own.
+        Assert.Equal(65, Regex.Count(Encoding.Latin1.GetString(pdf), "/Subtype /Type3"));
+    }
+
+    [Fact]
     public void Pdf_with_unterminated_streams_opens_in_linear_time()
     {
         var sb = new StringBuilder("%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj 2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n");

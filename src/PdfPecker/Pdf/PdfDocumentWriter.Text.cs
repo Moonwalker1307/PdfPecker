@@ -44,7 +44,7 @@ internal sealed partial class PdfDocumentWriter
         t.Font.Split(t.Text, _runs);
         foreach (var run in _runs)
         {
-            if (Leaf(run.Font) is EmbeddedFont ef) AddGlyphs(ef, t.Text, run.Start, run.Length, t.Rtl, t.Color);
+            if (Leaf(run.Font) is EmbeddedFont ef) AddGlyphs(ef, t.Text, run.Start, run.Length, t.Rtl, t.Color, t.Palette);
             else usedFonts[((StandardFont)run.Font).Index] = true;
             CheckCharacters(run.Font, t.Text, run.Start, run.Length);
         }
@@ -139,9 +139,9 @@ internal sealed partial class PdfDocumentWriter
 
     private readonly List<ShapedGlyph> _glyphs = new();
 
-    private void AddGlyphs(EmbeddedFont font, string text, int start, int length, bool rtl, uint color)
+    private void AddGlyphs(EmbeddedFont font, string text, int start, int length, bool rtl, uint color, FontPalette? palette = null)
     {
-        var subset = Subset(font.Program, color);
+        var subset = Subset(font, color, palette);
         font.Shape(text, start, length, _glyphs, rtl);
         for (int k = 0; k < _glyphs.Count; k++) subset.Cid(_glyphs, k, text);
     }
@@ -184,12 +184,25 @@ internal sealed partial class PdfDocumentWriter
     /// The subset of a font's glyphs the document uses, made on first use. A font whose colour glyphs use the text
     /// colour has a subset for each colour, since its Type 3 glyphs draw that colour.
     /// </summary>
-    private GlyphSubset Subset(FontProgram program, uint color)
+    private GlyphSubset Subset(FontProgram program, uint color) => Subset(program, color, program.ColorGlyphs);
+
+    /// <summary>
+    /// The subset of a font in the palette of <paramref name="palette"/> (font-palette), when the font has colour glyphs
+    /// and the palette changes their colours: those glyphs are drawn by Type 3 fonts of their own.
+    /// </summary>
+    private GlyphSubset Subset(EmbeddedFont font, uint color, FontPalette? palette)
     {
-        var colors = program.ColorGlyphs;
-        if (colors is { UsesForeground: true })
+        var own = font.Program.ColorGlyphs;
+        return palette == null || own == null ? Subset(font.Program, color, own) : Subset(font.Program, color, palette.Apply(own, font.Family, font.Program));
+    }
+
+    private GlyphSubset Subset(FontProgram program, uint color, ColorGlyphs? colors)
+    {
+        bool other = colors != null && !ReferenceEquals(colors, program.ColorGlyphs);
+        if (colors is { UsesForeground: true } || other)
         {
-            var key = (program, color & 0xFFFFFF);
+            // A subset that does not draw the text colour is the same in every colour, which no RGB value stands for.
+            var key = (colors!, colors!.UsesForeground ? color & 0xFFFFFF : NoTextColor);
             if (!_colorSubsets.TryGetValue(key, out var colored))
             {
                 _colorSubsets[key] = colored = new GlyphSubset(program, colors, color);
@@ -325,7 +338,7 @@ internal sealed partial class PdfDocumentWriter
 
     private void WriteEmbeddedRun(ByteBuffer b, EmbeddedFont font, TextOp t, int start, int length, float x, float y, int pass)
     {
-        var subset = Subset(font.Program, t.Color);
+        var subset = Subset(font, t.Color, t.Palette);
         bool color = subset.Color != null;
         // A face's size-adjust draws its glyphs at a font size of their own, so the text stays text and its widths in
         // the font dictionary stay the program's.

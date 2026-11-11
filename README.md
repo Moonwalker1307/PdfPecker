@@ -285,7 +285,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   front matter. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, contextual alternates
   (as Chrome applies them, such as Fira Code's ligatures), variable fonts and OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
-  versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, with the default palette.
+  versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, in the default palette or the one `font-palette` picks: `light`, `dark` or an
+  `@font-palette-values` rule with `base-palette` and `override-colors`.
   Variation sequences pick the glyph the font gives them (cmap format 14), such as the forms of a CJK ideograph that
   ideographic variation selectors choose, and copy as written.
   `@font-face` takes `size-adjust`, `ascent-override`, `descent-override` and `line-gap-override`, so a fallback face

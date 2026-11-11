@@ -19,6 +19,9 @@ internal sealed class EmbeddedFont : TextFont
     /// is scaled with them, while em-based lengths are not. 1 for a font without it.
     /// </summary>
     public readonly float SizeAdjust;
+
+    /// <summary>The CSS family the font was found for, which @font-palette-values rules name; null for a fallback font.</summary>
+    public string? Family { get; init; }
     private readonly Ligatures? _ligatures; // null when the font has none or they are turned off
     private EmbeddedFont? _withoutLigatures, _withoutKerning, _withoutContextual;
     private bool _noKerning;
@@ -105,6 +108,7 @@ internal sealed class EmbeddedFont : TextFont
         _shapesInContext = SubstitutesInContext(Program, off);
         _noKerning = !kerning;
         _shared = font._shared;
+        Family = font.Family;
     }
 
     // A font with nothing to turn off is its own variant without ligatures: it has neither ligatures drawn without the
@@ -169,6 +173,7 @@ internal sealed class EmbeddedFont : TextFont
         _shapesInContext = SubstitutesInContext(program, _off);
         _noKerning = font._noKerning;
         _shared = font._shared;
+        Family = font.Family;
     }
 
     /// <summary>
