@@ -118,6 +118,31 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Deeply_nested_ruby_stays_bounded()
+    {
+        // Each ruby pair is an inline-block whose annotation and base are measured; a base holding the next ruby nests
+        // that work. It runs on a thread with the 1.5 MB stack of Windows' thread pool, which rubies nested as deep as the
+        // parser allows overflowed while every level stacked its annotation.
+        byte[]? pdf = null;
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try { pdf = Bounded(Repeat("<ruby>a", 3000) + Repeat("<rt>b</rt></ruby>", 3000)); }
+            catch (Exception e) { error = e; }
+        }, 1536 * 1024);
+        thread.Start();
+        thread.Join();
+        if (error != null) throw new AggregateException(error);
+        AssertStructurallyValid(pdf!);
+    }
+
+    [Fact]
+    public void Many_ruby_pairs_stay_linear()
+    {
+        AssertStructurallyValid(Bounded("<p>" + Repeat("<ruby>漢<rp>(</rp><rt>かん</rt><rp>)</rp>字<rt>じ</rt></ruby>の", 20_000) + "</p>"));
+    }
+
+    [Fact]
     public void Font_relative_units_stay_linear()
     {
         // A value with thousands of ex, ch and lh lengths is rewritten only up to a limit, and every element with such a

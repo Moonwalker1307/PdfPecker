@@ -92,12 +92,14 @@ internal static class Targets
         "<img src=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>\" style=\"object-view-box:inset(-1e9% 100% 1e9px 0)\">",
         "object-view-box:xywh(0 0 1e-9px 1e-9px)", "object-view-box:rect(1e9px auto 0 auto)",
         "<span style=\"box-shadow:inset 0 0 1e9px 1e9px red,inset 1px 1px blue;border-radius:50%\">x<br>y</span>",
+        "<ruby>漢<rt>かん</rt>字<rp>(</rp><rt>じ</rt><rp>)</rp></ruby>", "<ruby><rt>a</rt><rt>b</rt><rb>c</rb></ruby>", "<rt>x</rt>",
+        "<ruby style=\"display:block;line-height:0\"><ruby>a<rt>b</rt></ruby><rt style=\"font-size:1e9px\">c</rt></ruby>",
     };
 
     private static readonly (string, string)[] HtmlNesters =
     {
         ("<div>", "</div>"), ("<span>", "</span>"), ("<b>", "</b>"), ("<table><tr><td>", "</td></tr></table>"), ("<ul><li>", "</li></ul>"), ("<p>", "</p>"),
-        ("<div style=\"display:flex\">", "</div>"), ("<div style=\"float:left\">", "</div>"), ("<a href=\"#\">", "</a>"), ("<svg><g>", "</g></svg>"),
+        ("<ruby>", "<rt>x</rt></ruby>"), ("<div style=\"display:flex\">", "</div>"), ("<div style=\"float:left\">", "</div>"), ("<a href=\"#\">", "</a>"), ("<svg><g>", "</g></svg>"),
         ("<div style=\"position:relative;overflow:hidden\">", "</div>"), ("<blockquote>", "</blockquote>"), ("<details>", "</details>"), ("<i>", "</i>"),
         ("<div style=\"backdrop-filter:invert(1);mask:radial-gradient(#000,#0000)\">", "</div>"), ("<picture>", "</picture>"),
         ("<div style=\"float:right;width:50%;height:9em;shape-outside:ellipse(at 0 50%);shape-margin:1em\">", "</div>"),

@@ -402,6 +402,19 @@ internal sealed partial class InlineLayout
         if (e.Control is { Kind: ControlKind.CheckBox or ControlKind.Radio } && float.IsNaN(c.Baseline))
             baseline -= AutoAsZero(e.Style.MarginBottom);
         var item = new Item { Kind = ItemKind.Box, Style = e.Style, Width = c.Width, Height = c.Height, BoxBaseline = baseline, Capture = c, Href = href };
+        // A ruby pair stands in the line as its base text: the annotation above the base's em box is placed as Chrome
+        // places ruby, in the line's leading where it fits (see MakeRoomForEmphasis).
+        if (e is { Anonymous: true, Name: StyleResolver.RubyPairName })
+        {
+            item.RubyOver = Math.Max(0, baseline - e.Style.TextSize * (1 - EmDescentOf(e.Style.Font)));
+            if (e.Children is [Element rt, Element rubyBase])
+            {
+                float excess = _engine.MeasureIntrinsic(rt).Max - _engine.MeasureIntrinsic(rubyBase).Max;
+                // The base's free space is spread around its characters, so only the share at its ends is blank for
+                // the annotation to reach over (ruby-align: space-around).
+                if (excess > 0) item.RubyOverhang = Math.Min(excess / (2 * (EastAsianLetters(rubyBase.InnerText()) is > 1 and var n ? n : 1)), rt.Style.TextSize / 2);
+            }
+        }
         if (_engine._measuring)
         {
             // An inline-block can wrap its own content, so its min-content contribution is its min-content width,
@@ -414,6 +427,15 @@ internal sealed partial class InlineLayout
             item.MinWidth = Math.Min(item.Width, min + margins);
         }
         return item;
+    }
+
+    /// <summary>How many characters of <paramref name="text"/> are Chinese, Japanese or Korean, each a place justification may space.</summary>
+    private static int EastAsianLetters(string text)
+    {
+        int n = 0;
+        for (int i = 0; i < text.Length; i++)
+            if (!char.IsLowSurrogate(text[i]) && Text.LineBreaker.HasEastAsian(text.AsSpan(i, char.IsHighSurrogate(text[i]) && i + 1 < text.Length ? 2 : 1))) n++;
+        return n;
     }
 
     /// <summary>

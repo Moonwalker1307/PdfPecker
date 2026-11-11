@@ -445,6 +445,7 @@ internal sealed partial class StyleResolver
         if (_contentsUsed && !parent.Style.Contents) SpliceContents(parent);
         if (parent.Name == "details" && !parent.HasAttribute("open")) HideClosedDetails(parent);
         WrapTableParts(parent);
+        if (parent.Name == "ruby") WrapRubyPairs(parent);
         if (scope != null)
             foreach (var name in scope)
             {

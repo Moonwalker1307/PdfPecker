@@ -172,7 +172,7 @@ internal sealed partial class InlineLayout
             }
             default:
                 float shift = it.Style.AtomicBaselineShift;
-                a = baseline - shift;
+                a = baseline - shift - it.RubyOver;
                 d = it.Height - baseline + shift;
                 break;
         }
@@ -200,7 +200,8 @@ internal sealed partial class InlineLayout
     private static float AtomicAscentOnBaseline(Item it, ComputedStyle block)
     {
         AtomicMetrics(it, block, out float a, out _);
-        return a;
+        // A ruby pair's annotation is drawn above the base, in the room made for it.
+        return a + it.RubyOver;
     }
 
     /// <summary>
@@ -327,7 +328,35 @@ internal sealed partial class InlineLayout
     private float LineKerning(List<Item> items)
     {
         if (_kern.Length < items.Count) _kern = new float[items.Count * 2];
-        return KernBetweenItems(items, _kern);
+        return KernBetweenItems(items, _kern) - RubyOverhangs(items, _kern);
+    }
+
+    /// <summary>
+    /// How far ruby annotations wider than their base reach over the text beside them, taken off the gaps in
+    /// <paramref name="kern"/>; returns the total. As in Chrome, an annotation overhangs text that is no larger than its
+    /// base, by up to half its own font size on each side, but not another ruby pair or the line's ends.
+    /// </summary>
+    private static float RubyOverhangs(List<Item> items, float[] kern)
+    {
+        float total = 0;
+        for (int k = 0; k < items.Count; k++)
+        {
+            var it = items[k];
+            if (it.RubyOverhang <= 0) continue;
+            if (k > 0 && OverhangsOnto(items[k - 1], it))
+            {
+                kern[k - 1] -= it.RubyOverhang;
+                total += it.RubyOverhang;
+            }
+            if (k + 1 < items.Count && OverhangsOnto(items[k + 1], it))
+            {
+                kern[k] -= it.RubyOverhang;
+                total += it.RubyOverhang;
+            }
+        }
+        return total;
+
+        static bool OverhangsOnto(Item text, Item pair) => text.Kind == ItemKind.Text && text.Length > 0 && text.Style.TextSize <= pair.Style.TextSize + Eps;
     }
 
     private static int CountOf(List<Item> items, ItemKind kind)
@@ -500,6 +529,24 @@ internal sealed partial class InlineLayout
         }
         float lx = x + lineLeft + (rtl ? 0 : lineIndent);
         float extra = 0, charExtra = 0, leaderW = 0;
+        // A ruby base or annotation narrower than the other spreads its free space around its characters, with half a
+        // share at each end (ruby-align: space-around), and is centred when it has nowhere to put it, as in Chrome.
+        if (block.RubySpaceAround && leaders == 0 && free > Eps && align == TextAlign.Center)
+        {
+            _justifySplit = false;
+            opportunities = JustificationOpportunities(line, TextJustify.Auto, rtl);
+            if (_justifySplit) LineKerning(items);
+            if (opportunities > 0)
+            {
+                charExtra = free / (opportunities + 1);
+                return new LineFit(lx + charExtra / 2, charExtra, 0, charExtra);
+            }
+            if (opportunities < 0 && spaces > 0)
+            {
+                extra = free / (spaces + 1);
+                return new LineFit(lx + extra / 2, extra, 0);
+            }
+        }
         // Leaders take the line's free space, so the text after them ends at the line's end.
         if (leaders > 0) { leaderW = Math.Max(0, free) / leaders; align = TextAlign.Left; }
         switch (align)

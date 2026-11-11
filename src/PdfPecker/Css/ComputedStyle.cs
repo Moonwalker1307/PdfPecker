@@ -340,6 +340,7 @@ internal sealed partial class ComputedStyle
     public bool Visible = true;
     public bool Collapsed; // visibility: collapse, which removes table rows and columns (Visible is false too)
     public bool CanvasBackground; // the background is painted on every page's canvas instead of on this box (html/body propagation)
+    public bool RubySpaceAround;  // a ruby base or annotation: free space goes around its characters (ruby-align: space-around); not inherited
     public bool BorderCollapse;
     public float BorderSpacingH, BorderSpacingV; // initially 0; the user agent style gives <table> 2px
     public string? FontFamilyName;
@@ -665,6 +666,7 @@ internal sealed partial class ComputedStyle
         c.Contents = false;
         c.BackgroundColor = 0;
         c.CanvasBackground = false;
+        c.RubySpaceAround = false;
         c.MarginTop = c.MarginRight = c.MarginBottom = c.MarginLeft = Length.Zero;
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;
         c.BorderTopWidth = c.BorderRightWidth = c.BorderBottomWidth = c.BorderLeftWidth = 1.5f;
