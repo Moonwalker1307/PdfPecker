@@ -1877,6 +1877,20 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Many_font_feature_values_stay_linear()
+    {
+        // 100,000 names in unterminated and nested blocks, and an alternates value that names thousands of them.
+        var sb = new StringBuilder("<style>@font-feature-values A, B, C { ");
+        for (int i = 0; i < 100_000; i++) sb.Append(CultureInfo.InvariantCulture, $"@styleset {{ n{i}: 1 2 3 }} @character-variant {{ c{i}: 99 7 }} @x {{ ");
+        sb.Append("} ");
+        var names = string.Join(", ", Enumerable.Range(0, 5_000).Select(i => "n" + i.ToString(CultureInfo.InvariantCulture)));
+        sb.Append($"</style><p style='font-family: A, B, C; font-variant-alternates: styleset({names}) historical-forms'>x</p>");
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded(sb.ToString()));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"{watch.Elapsed}");
+    }
+
+    [Fact]
     public void Pdf_with_unterminated_streams_opens_in_linear_time()
     {
         var sb = new StringBuilder("%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj 2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n");

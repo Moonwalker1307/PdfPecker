@@ -73,4 +73,15 @@ internal sealed partial class StyleResolver
         else if (d.Lower is "normal" or "initial") s.FontVariantPosition = null;
         else if (d.Lower is "sub" or "super") s.FontVariantPosition = d.Lower;
     }
+
+    /// <summary>
+    /// font-variant-alternates: historical-forms, and functions whose names @font-feature-values rules give numbers. The
+    /// names stay case-sensitive, so the value as written is parsed, not its lowercase form.
+    /// </summary>
+    private void ApplyFontVariantAlternates(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit || d.Lower == "unset") s.FontVariantAlternates = parent.FontVariantAlternates;
+        else if (d.Lower == "initial") s.FontVariantAlternates = null;
+        else if (FontAlternates.Parse(d.Value, _fontFeatureValues, out bool valid) is var alternates && valid) s.FontVariantAlternates = alternates;
+    }
 }

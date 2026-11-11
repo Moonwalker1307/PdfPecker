@@ -81,6 +81,9 @@ internal sealed partial class StyleResolver
     /// <summary>The counter styles of list-style-type and counter(): the predefined ones and the sheet's @counter-style rules.</summary>
     public CounterStyles CounterStyles { get; init; }
 
+    // The names of the document's @font-feature-values rules; null when it has none.
+    private readonly FontFeatureValues? _fontFeatureValues;
+
     /// <summary>The footnotes (float: footnote) of the last resolution, in document order.</summary>
     public List<Element> Footnotes { get; } = new();
 
@@ -191,6 +194,7 @@ internal sealed partial class StyleResolver
         _attrUsed = authorSheet.HasAttrSubstitution;
         _media = authorSheet.Media;
         CounterStyles = CounterStyles.From(authorSheet.CounterStyles);
+        if (!authorSheet.FontFeatureValues.IsEmpty) _fontFeatureValues = authorSheet.FontFeatureValues;
         if (authorSheet.RegisteredProperties.Count > 0)
         {
             // Registered custom properties start at their initial value: on every element when they do not inherit,
