@@ -360,6 +360,16 @@ public sealed class PdfOptions
     public PdfConformance Conformance { get; set; }
 
     /// <summary>
+    /// Produce a PDF/X-4 file for a print shop (ISO 15930-7), for the press whose profile the options carry. Default:
+    /// null, a plain PDF. Every page gets a trim box and a bleed box (the paper, or the bleed of an @page rule),
+    /// <c>device-cmyk()</c> colours are written as the press's inks and sRGB ones are tagged as sRGB, fonts are
+    /// embedded, and links and fillable form fields are left out, since PDF/X allows no annotations on the printed
+    /// page. Cannot be combined with <see cref="Conformance"/>, <see cref="Accessibility"/> PDF/UA levels,
+    /// <see cref="Security"/>, <see cref="Signature"/>, <see cref="Attachments"/> or <see cref="EInvoice"/>.
+    /// </summary>
+    public PdfXOptions? PdfX { get; set; }
+
+    /// <summary>
     /// Tag the PDF for screen readers and other assistive technology, or make it PDF/UA. Default:
     /// <see cref="PdfAccessibility.None"/>.
     /// </summary>
@@ -388,7 +398,7 @@ public sealed class PdfOptions
     /// <summary>
     /// Make a Factur-X / ZUGFeRD e-invoice: the invoice's CII XML is attached to the PDF with the metadata that tells
     /// software it is there. The file is PDF/A-3b, so <see cref="Conformance"/> must be None (it is then raised to
-    /// PDF/A-3b), <see cref="PdfConformance.PdfA3b"/>, <see cref="PdfConformance.PdfA3u"/> or
+    /// PDF/A-3b), <see cref="PdfConformance.PdfA3b"/>, <see cref="PdfConformance.PdfA3u"/>, <see cref="PdfConformance.PdfA3a"/> or
     /// <see cref="PdfConformance.PdfA4f"/>, and <see cref="Security"/> must be null. Default: null.
     /// </summary>
     public PdfEInvoice? EInvoice { get; set; }

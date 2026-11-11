@@ -19,9 +19,6 @@ internal sealed partial class PdfAConverter
 
     private static readonly string[] PageBoxes = { "MediaBox", "CropBox", "BleedBox", "TrimBox", "ArtBox" };
 
-    // The colours viewers draw markup in when the annotation gives none.
-    private static readonly double[] Yellow = { 1, 1, 0 }, Black = { 0, 0, 0 }, NoteYellow = { 1, 0.85, 0.2 };
-
     /// <summary>The largest and smallest page and box sizes PDF/A allows, in default user space units (6.1.13).</summary>
     private const double MinBoxSize = 3, MaxBoxSize = 14400;
 
@@ -244,157 +241,19 @@ internal sealed partial class PdfAConverter
     /// </summary>
     private PdfRef? GeneratedAppearance(PdfDict annot, string subtype)
     {
-        var rect = _file.GetNumbers(annot, "Rect");
-        if (rect == null || rect.Length < 4) return null;
-        double x0 = Math.Min(rect[0], rect[2]), y0 = Math.Min(rect[1], rect[3]), x1 = Math.Max(rect[0], rect[2]), y1 = Math.Max(rect[1], rect[3]);
-        var colour = _file.GetNumbers(annot, "C");
-        var interior = _file.GetNumbers(annot, "IC");
-        double width = _file.GetNumber(_file.GetDict(annot, "BS"), "W", _file.GetNumbers(annot, "Border") is { Length: >= 3 } border ? border[2] : 1);
-        var b = new StringBuilder();
-        var space = DeviceSpace.None;
-        bool multiply = false;
-        string? Colour(double[]? c, bool forStroke)
-        {
-            if (c == null) return null;
-            string Num(double v) => Math.Round(Math.Clamp(v, 0, 1), 4).ToString(CultureInfo.InvariantCulture);
-            switch (c.Length)
-            {
-                case 1:
-                    space |= DeviceSpace.Gray;
-                    return Num(c[0]) + (forStroke ? " G\n" : " g\n");
-                case 3:
-                    space |= DeviceSpace.Rgb;
-                    return Num(c[0]) + " " + Num(c[1]) + " " + Num(c[2]) + (forStroke ? " RG\n" : " rg\n");
-                case 4:
-                    space |= DeviceSpace.Cmyk;
-                    return Num(c[0]) + " " + Num(c[1]) + " " + Num(c[2]) + " " + Num(c[3]) + (forStroke ? " K\n" : " k\n");
-                default:
-                    return null;
-            }
-        }
-        string P(double v) => Math.Round(v, 3).ToString(CultureInfo.InvariantCulture);
-        var quads = _file.GetNumbers(annot, "QuadPoints");
-        switch (subtype)
-        {
-            case "Highlight" when quads != null && quads.Length >= 8:
-                if (Colour(colour ?? Yellow, false) is not { } highlight) return null;
-                multiply = true;
-                b.Append("/M gs\n").Append(highlight);
-                for (int i = 0; i + 8 <= quads.Length; i += 8)
-                    b.Append(P(quads[i])).Append(' ').Append(P(quads[i + 1])).Append(" m ").Append(P(quads[i + 2])).Append(' ').Append(P(quads[i + 3]))
-                     .Append(" l ").Append(P(quads[i + 6])).Append(' ').Append(P(quads[i + 7])).Append(" l ").Append(P(quads[i + 4])).Append(' ')
-                     .Append(P(quads[i + 5])).Append(" l h\n");
-                b.Append("f\n");
-                break;
-            case "Underline" or "StrikeOut" or "Squiggly" when quads != null && quads.Length >= 8:
-                if (Colour(colour ?? Black, true) is not { } markup) return null;
-                b.Append(markup);
-                for (int i = 0; i + 8 <= quads.Length; i += 8)
-                {
-                    // The quadrilateral's bottom edge runs from its third point to its fourth, its top from the first to the second.
-                    double bx0 = quads[i + 4], by0 = quads[i + 5], bx1 = quads[i + 6], by1 = quads[i + 7];
-                    double tx0 = quads[i], ty0 = quads[i + 1];
-                    double height = Math.Sqrt((tx0 - bx0) * (tx0 - bx0) + (ty0 - by0) * (ty0 - by0));
-                    double lw = Math.Max(0.5, height / 14);
-                    b.Append(P(lw)).Append(" w\n");
-                    double t = subtype == "StrikeOut" ? 0.4 : 0.08;
-                    double sx0 = bx0 + (tx0 - bx0) * t, sy0 = by0 + (ty0 - by0) * t;
-                    double sx1 = bx1 + (quads[i + 2] - bx1) * t, sy1 = by1 + (quads[i + 3] - by1) * t;
-                    if (subtype == "Squiggly")
-                    {
-                        double length = Math.Sqrt((sx1 - sx0) * (sx1 - sx0) + (sy1 - sy0) * (sy1 - sy0));
-                        int steps = Math.Clamp((int)(length / Math.Max(1, height / 6)), 1, 2000);
-                        double nx = -(sy1 - sy0) / Math.Max(length, 1e-9) * height / 12, ny = (sx1 - sx0) / Math.Max(length, 1e-9) * height / 12;
-                        b.Append(P(sx0)).Append(' ').Append(P(sy0)).Append(" m\n");
-                        for (int k = 1; k <= steps; k++)
-                        {
-                            double f = (double)k / steps, s = (k & 1) == 1 ? 1 : -1;
-                            b.Append(P(sx0 + (sx1 - sx0) * f + nx * s)).Append(' ').Append(P(sy0 + (sy1 - sy0) * f + ny * s)).Append(" l\n");
-                        }
-                        b.Append("S\n");
-                    }
-                    else b.Append(P(sx0)).Append(' ').Append(P(sy0)).Append(" m ").Append(P(sx1)).Append(' ').Append(P(sy1)).Append(" l S\n");
-                }
-                break;
-            case "Square" or "Circle":
-            {
-                var stroke = Colour(colour, true);
-                var fill = Colour(interior, false);
-                if (stroke == null && fill == null) return null;
-                if (stroke != null) b.Append(stroke).Append(P(width)).Append(" w\n");
-                if (fill != null) b.Append(fill);
-                double inset = stroke != null ? width / 2 : 0;
-                double ax0 = x0 + inset, ay0 = y0 + inset, ax1 = x1 - inset, ay1 = y1 - inset;
-                if (subtype == "Square")
-                    b.Append(P(ax0)).Append(' ').Append(P(ay0)).Append(' ').Append(P(ax1 - ax0)).Append(' ').Append(P(ay1 - ay0)).Append(" re\n");
-                else
-                {
-                    // Four Bézier arcs, each a quarter of the ellipse.
-                    const double k = 0.5523;
-                    double cx = (ax0 + ax1) / 2, cy = (ay0 + ay1) / 2, rx = (ax1 - ax0) / 2, ry = (ay1 - ay0) / 2;
-                    b.Append(P(cx + rx)).Append(' ').Append(P(cy)).Append(" m\n")
-                     .Append(P(cx + rx)).Append(' ').Append(P(cy + ry * k)).Append(' ').Append(P(cx + rx * k)).Append(' ').Append(P(cy + ry)).Append(' ').Append(P(cx)).Append(' ').Append(P(cy + ry)).Append(" c\n")
-                     .Append(P(cx - rx * k)).Append(' ').Append(P(cy + ry)).Append(' ').Append(P(cx - rx)).Append(' ').Append(P(cy + ry * k)).Append(' ').Append(P(cx - rx)).Append(' ').Append(P(cy)).Append(" c\n")
-                     .Append(P(cx - rx)).Append(' ').Append(P(cy - ry * k)).Append(' ').Append(P(cx - rx * k)).Append(' ').Append(P(cy - ry)).Append(' ').Append(P(cx)).Append(' ').Append(P(cy - ry)).Append(" c\n")
-                     .Append(P(cx + rx * k)).Append(' ').Append(P(cy - ry)).Append(' ').Append(P(cx + rx)).Append(' ').Append(P(cy - ry * k)).Append(' ').Append(P(cx + rx)).Append(' ').Append(P(cy)).Append(" c h\n");
-                }
-                b.Append(stroke != null && fill != null ? "B\n" : stroke != null ? "S\n" : "f\n");
-                break;
-            }
-            case "Line" or "Ink" or "Polygon" or "PolyLine":
-            {
-                if (Colour(colour, true) is not { } pen || width <= 0) return null;
-                b.Append(pen).Append(P(width)).Append(" w 1 J 1 j\n");
-                var paths = new List<double[]>();
-                if (subtype == "Line" && _file.GetNumbers(annot, "L") is { Length: 4 } line) paths.Add(line);
-                else if (subtype == "Ink" && _file.GetArray(annot, "InkList") is { } ink)
-                    foreach (var item in ink.Items.Take(1000))
-                        if (_file.ToNumbers(_file.Resolve(item) as PdfArray) is { Length: >= 2 } points) paths.Add(points);
-                if (subtype is "Polygon" or "PolyLine" && _file.GetNumbers(annot, "Vertices") is { Length: >= 4 } vertices) paths.Add(vertices);
-                if (paths.Count == 0) return null;
-                foreach (var points in paths)
-                {
-                    for (int i = 0; i + 1 < points.Length && i < 20000; i += 2)
-                        b.Append(P(points[i])).Append(' ').Append(P(points[i + 1])).Append(i == 0 ? " m\n" : " l\n");
-                    if (subtype == "Polygon") b.Append("h\n");
-                }
-                b.Append("S\n");
-                break;
-            }
-            case "Text":
-            {
-                // A note icon: a page with a folded corner and three lines, in the annotation's colour.
-                var paper = Colour(colour ?? NoteYellow, false) ?? "1 0.85 0.2 rg\n";
-                space |= DeviceSpace.Gray;
-                double w = Math.Min(x1 - x0, 20), h = Math.Min(y1 - y0, 20);
-                double top = y1;
-                b.Append(paper).Append("0 G 0.6 w\n")
-                 .Append(P(x0 + 1)).Append(' ').Append(P(top - h + 1)).Append(" m ").Append(P(x0 + w - 1)).Append(' ').Append(P(top - h + 1)).Append(" l ")
-                 .Append(P(x0 + w - 1)).Append(' ').Append(P(top - 6)).Append(" l ").Append(P(x0 + w - 6)).Append(' ').Append(P(top - 1)).Append(" l ")
-                 .Append(P(x0 + 1)).Append(' ').Append(P(top - 1)).Append(" l h B\n");
-                for (int i = 1; i <= 3; i++)
-                {
-                    double ly = top - h * i / 4.5;
-                    b.Append(P(x0 + 4)).Append(' ').Append(P(ly)).Append(" m ").Append(P(x0 + w - 5)).Append(' ').Append(P(ly)).Append(" l S\n");
-                }
-                break;
-            }
-            default:
-                return null;
-        }
-        var resources = new PdfDict();
-        if (multiply)
-            resources.Entries["ExtGState"] = NewDict(("M", NewDict(("Type", PdfName.Get("ExtGState")), ("BM", PdfName.Get("Multiply")))));
+        if (AnnotationAppearance.Draw(_file, annot, subtype, viewer: false) is not { } drawing) return null;
+        var resources = AnnotationAppearance.Resources(drawing);
         _resources.Add(resources);
-        UseDevice(space, resources);
+        UseDevice((DeviceSpace)(byte)drawing.Spaces, resources);
+        var bbox = drawing.BBox;
         var form = new PdfStream(new Dictionary<string, PdfObject>(StringComparer.Ordinal)
         {
             ["Type"] = PdfName.Get("XObject"),
             ["Subtype"] = PdfName.Get("Form"),
-            ["BBox"] = NewArray(Number(x0), Number(y0), Number(x1), Number(y1)),
+            ["BBox"] = NewArray(Number(bbox[0]), Number(bbox[1]), Number(bbox[2]), Number(bbox[3])),
             ["Resources"] = resources,
             ["Filter"] = PdfName.Get("FlateDecode"),
-        }, Deflate(Encoding.ASCII.GetBytes(b.ToString())));
+        }, Deflate(drawing.Content));
         return _file.AddObject(form);
     }
 

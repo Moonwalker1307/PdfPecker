@@ -146,7 +146,7 @@ internal sealed partial class InlineLayout
         {
             if (c < m && !GapBefore(c)) continue;
             int offset = _clusterStart[from], length = _clusterStart[c] - offset;
-            float width = c == m ? 0 : TextWidth(style.Font, s, start + offset, length, style.TextSize, style.LetterSpacing);
+            float width = c == m ? 0 : ItemWidth(it, start + offset, length);
             var piece = it.Slice(offset, length, width);
             if (c < m) width = piece.Width; // without the trim of its first character
             byte before = from == 0 ? lead : (byte)(_clusterJustify[from] & JustifyBefore);

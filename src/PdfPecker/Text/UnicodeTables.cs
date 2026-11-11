@@ -22,6 +22,13 @@ internal enum LineBreakClass : byte
     EX, IN, OP, CL, CP, NS, CJ, ID, H2, H3, JL, JV, JT,
 }
 
+/// <summary>
+/// The Vertical_Orientation values of UAX #50, in the order tools/UnicodeTables writes them: R is turned sideways in
+/// vertical text, U stands upright, Tu and Tr take the font's vertical form and otherwise stand upright (Tu) or are
+/// turned (Tr).
+/// </summary>
+internal enum VerticalOrientation : byte { R, U, Tu, Tr }
+
 /// <summary>Lookups in the generated Unicode tables.</summary>
 internal static partial class UnicodeTables
 {
@@ -70,6 +77,10 @@ internal static partial class UnicodeTables
         wide = (v & 0x80) != 0;
         return (LineBreakClass)(v & 0x7F);
     }
+
+    /// <summary>The Vertical_Orientation of a character (UAX #50).</summary>
+    public static VerticalOrientation Vertical(int cp)
+        => cp < 0xA7 ? VerticalOrientation.R : (VerticalOrientation)VerticalOrientationValues[FindRange(VerticalOrientationStarts, cp)];
 
     /// <summary>True for characters that are strong right-to-left, Arabic numbers, or explicit bidi controls.</summary>
     public static bool NeedsBidi(int cp)
@@ -164,10 +175,13 @@ internal static partial class UnicodeTables
     /// <summary>
     /// The combining class that marks are ordered by before shaping. Besides the Hebrew and Arabic classes, HarfBuzz
     /// moves the Telugu length marks before the other marks, and Thai Sara U and Sara Uu before Phinthu, as Uniscribe
-    /// orders them.
+    /// orders them. In Tibetan it puts the vowel sign U before I, which Dzongkha's stacked vowels need, Tsa-phru before
+    /// U and Padma after the vowel signs, and Tai Tham's Sakot after the tone marks.
     /// </summary>
     public static int ModifiedCombiningClass(int cp)
     {
+        if (cp == 0x0F39) return 127;
+        if (cp is 0x0FC6 or 0x1A60) return 254;
         int c = CombiningClass(cp);
         return c switch
         {
@@ -175,6 +189,8 @@ internal static partial class UnicodeTables
             84 => 4,   // Telugu length mark
             91 => 5,   // Telugu ai length mark
             103 => 3,  // Thai Sara U and Sara Uu
+            130 => 132, // Tibetan vowel sign I
+            132 => 131, // Tibetan vowel sign U
             _ => c,
         };
     }
@@ -238,7 +254,14 @@ internal static partial class UnicodeTables
     public static bool Decompose(int cp, out int first, out int second)
     {
         first = second = 0;
-        int k = cp is (>= 0x0590 and <= 0x08FF) or (>= 0xFB1D and <= 0xFB4F) ? FindDecomposition(cp, compatibility: false) : -1;
+        return cp is (>= 0x0590 and <= 0x08FF) or (>= 0xFB1D and <= 0xFB4F) && DecomposeCanonical(cp, out first, out second);
+    }
+
+    /// <summary>The canonical decomposition of a character, one level deep (second is 0 for one character), or false.</summary>
+    public static bool DecomposeCanonical(int cp, out int first, out int second)
+    {
+        first = second = 0;
+        int k = FindDecomposition(cp, compatibility: false);
         if (k < 0) return false;
         var (i, end) = DecompositionMapping(k);
         first = MappingCodePoint(ref i);

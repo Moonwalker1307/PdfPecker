@@ -71,7 +71,7 @@ the spec text, which is CC-BY-SA.
 
 ## Shaping
 
-`HarfBuzzShapingTests` compare PdfPecker's Arabic, Hebrew, Indic, Thai and Lao shaping with HarfBuzz's output in
+`HarfBuzzShapingTests` compare PdfPecker's Arabic, Hebrew, Indic, Khmer, Myanmar, Sinhala, Tibetan, Thai and Lao shaping with HarfBuzz's output in
 `Fixtures/shaping/harfbuzz.txt`, which `tools/ShapingReference/generate.py` regenerates from `corpus.txt`.
 
 ## Unicode normalization

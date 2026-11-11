@@ -56,10 +56,17 @@ internal sealed partial class InlineLayout
     /// <summary>Adds a text's words and spaces as items, following the style's white-space.</summary>
     private void AddText(CollectState st, string text, ComputedStyle style, string? href, InlineDeco? deco)
     {
+        if (style.TextCombineUpright && InVerticalLine(style))
+        {
+            AddCombinedText(st, text, style, href, deco);
+            return;
+        }
         var rules = WhiteSpaceRules.For(style.WhiteSpace);
         var font = style.Font;
         float size = style.TextSize;
-        float spaceW = font.CharWidth(' ', size) + style.LetterSpacing + style.WordSpacing;
+        // With text-orientation: upright a space stands upright too, one em long.
+        float spaceW = (style.TextOrientation == TextOrientation.Upright && HasUprightText(style) ? size : font.CharWidth(' ', size))
+                       + style.LetterSpacing + style.WordSpacing;
 
         int i = 0, n = text.Length;
         while (i < n)
@@ -325,7 +332,8 @@ internal sealed partial class InlineLayout
         word.Source = src;
         word.Start = start;
         word.Length = length;
-        word.Width = TextWidth(style.Font, src, start, length, style.TextSize, style.LetterSpacing);
+        word.Upright = HasUprightText(style);
+        word.Width = word.Upright ? ItemWidth(word, start, length) : TextWidth(style.Font, src, start, length, style.TextSize, style.LetterSpacing);
         word.Href = href;
         word.Deco = deco;
         word.BreakAfter = breakAfter;

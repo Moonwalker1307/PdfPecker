@@ -78,6 +78,7 @@ public static partial class HtmlToPdf
             Linearize = _options.Linearize,
             StripImageMetadata = _options.StripImageMetadata,
             Conformance = _settings.Conformance,
+            PdfX = _options.PdfX,
             EInvoice = _options.EInvoice,
             Attachments = _settings.Attachments,
             WatermarkFont = watermarkFont,

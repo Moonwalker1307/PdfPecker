@@ -959,6 +959,38 @@ public class LayoutFeatureTests
     }
 
     [Fact]
+    public void Item_flexed_from_a_length_basis_in_a_min_height_column_is_definite()
+    {
+        // As in Chrome: a flex basis of a length, or auto with a height of its own, makes the flexed height definite
+        // also when the container has only a min-height; flex: 1 (a basis of 0%) does not.
+        var html = """
+            <style>.col { display: flex; flex-direction: column; min-height: 200pt; width: 200pt } .top { height: 50pt; background: #ff0000 }
+            .grow { flex: 1 1 0; background: #0000ff } .grow .in { height: 50%; width: 50pt; background: #ffff00 }</style>
+            <div class="col"><div class="top"></div><div class="grow"><div class="in"></div></div></div>
+            """;
+        NearBox(Rect(html, "#ffff00"), 0, 50, 50, 75);
+        NearBox(Rect(html.Replace("flex: 1 1 0", "flex: 1 1 auto; height: 20pt", StringComparison.Ordinal), "#ffff00"), 0, 50, 50, 75);
+        // Its own min-height gives the item its height without flexing, which is just as definite.
+        NearBox(Rect(html.Replace("flex: 1 1 0", "flex: 0 0 0; min-height: 80pt", StringComparison.Ordinal), "#ffff00"), 0, 50, 50, 40);
+        var percent = Layout("<style>body { margin: 0 }</style>" + html.Replace("flex: 1 1 0", "flex: 1 1 20%", StringComparison.Ordinal));
+        Assert.True(CssColor.TryParse("#ffff00", 0, out var yellow));
+        Assert.DoesNotContain(Flatten(percent).OfType<RectOp>(), r => r.Color == yellow && r.H > 0.01f);
+    }
+
+    [Fact]
+    public void Stretched_flex_item_whose_min_height_sizes_the_row_is_definite()
+    {
+        // The item is measured at the line's height already, but its percentage children took that height as auto.
+        var html = """
+            <style>.row { display: flex } .card { width: 100pt; min-height: 80pt; background: #00ff00 }
+            .card .in { height: 100%; background: #ffff00 } .card .half { height: 50%; background: #0000ff }</style>
+            <div class="row"><div class="card"><div class="in">a</div></div><div class="card"><div class="half">b</div></div></div>
+            """;
+        NearBox(Rect(html, "#ffff00"), 0, 0, 100, 80);
+        NearBox(Rect(html, "#0000ff"), 100, 0, 100, 40);
+    }
+
+    [Fact]
     public void Image_with_a_percentage_height_in_a_fixed_height_flex_row_takes_its_width_from_that_height()
     {
         var ops = Layout("""

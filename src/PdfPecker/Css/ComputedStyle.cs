@@ -126,6 +126,12 @@ internal enum TextJustify : byte { Auto, None, InterWord, InterCharacter }
 // at the end of a line when that makes it fit; space-first also at the start of every line but a paragraph's first,
 // trim-start at the start of every line, and space-all never.
 internal enum TextSpacingTrim : byte { Normal, SpaceAll, SpaceFirst, TrimStart }
+
+/// <summary>
+/// Values of text-orientation in vertical-rl and vertical-lr: mixed stands the characters that UAX #50 makes upright
+/// (Chinese, Japanese, Korean, ...) and turns the others, upright stands every character, and sideways turns them all.
+/// </summary>
+internal enum TextOrientation : byte { Mixed, Upright, Sideways }
 internal enum UnicodeBidi : byte { Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext }
 
 /// <summary>Values of writing-mode. The vertical modes are laid out as horizontal text turned a quarter turn.</summary>

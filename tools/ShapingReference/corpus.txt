@@ -133,3 +133,70 @@ NotoSansArabic-Subset	<U+0627 U+0658 U+0653>
 NotoSansArabic-Subset	<U+0628 U+0627 U+064E U+0653 U+0020 U+064A U+0650 U+0654>
 # Thaana (Dhivehi), right to left, with its vowel marks.
 NotoSansThaana-Subset	ދިވެހި ބަސް އަކީ ދިވެހިރާއްޖޭގެ ބަހެވެ
+
+# Khmer, with the Khmer shaper: coeng (subscript) consonants, Coeng Ro before the base, split vowels and robat.
+NotoSansKhmer-Subset	ភាសាខ្មែរ
+NotoSansKhmer-Subset	ព្រះរាជាណាចក្រកម្ពុជា
+NotoSansKhmer-Subset	សួស្តី
+NotoSansKhmer-Subset	ស្ត្រី
+NotoSansKhmer-Subset	ខ្ញុំស្រលាញ់អ្នក
+NotoSansKhmer-Subset	អក្សរខ្មែរ
+NotoSansKhmer-Subset	កើ កឿ កៀ កៅ កោ កៃ
+NotoSansKhmer-Subset	ឆ្នាំ២០២៦
+NotoSansKhmer-Subset	កម៌ ធម៌
+NotoSansKhmer-Subset	ក្ស្ម ង្គ្រ
+NotoSansKhmer-Subset	<U+1784 U+17D2 U+179A U+17D2 U+1782>
+NotoSansKhmer-Subset	<U+1784 U+17D2 U+1782 U+17D2 U+179A>
+NotoSansKhmer-Subset	<U+1789 U+17BC>
+NotoSansKhmer-Subset	<U+1789 U+17D2 U+1789 U+17BC>
+NotoSansKhmer-Subset	<U+17B6>
+NotoSansKhmer-Subset	<U+1780 U+200C U+17C9 U+17BB>
+NotoSansKhmer-Subset	<U+1794 U+17CA U+17B8>
+# Myanmar (Burmese), with the Myanmar shaper: kinzi, medials, the vowel E before its consonant and stacked consonants.
+NotoSansMyanmar-Subset	မြန်မာ
+NotoSansMyanmar-Subset	မင်္ဂလာပါ
+NotoSansMyanmar-Subset	ကျွန်တော်
+NotoSansMyanmar-Subset	ပြည်ထောင်စု
+NotoSansMyanmar-Subset	ကြိုးစား
+NotoSansMyanmar-Subset	နေကောင်းလား
+NotoSansMyanmar-Subset	သင်္ချိုင်း
+NotoSansMyanmar-Subset	ဗုဒ္ဓ မန္တလေး
+NotoSansMyanmar-Subset	၁၂၃ ၊ ။
+NotoSansMyanmar-Subset	ကြွေ ချွေး ငှက်
+NotoSansMyanmar-Subset	<U+1031>
+NotoSansMyanmar-Subset	<U+1000 U+103C U+103D U+103E U+1031 U+102C>
+NotoSansMyanmar-Subset	<U+1004 U+103A U+1039 U+1000 U+1031 U+102C>
+NotoSansMyanmar-Subset	<U+1000 U+1039 U+1000 U+1031>
+NotoSansMyanmar-Subset	<U+1000 U+102F U+1036 U+1037>
+# Sinhala, with the Universal Shaping Engine: al-lakuna, the ZWJ forms (yansaya, rakaransaya, repaya, touching letters) and split vowels.
+NotoSansSinhala-Subset	සිංහල
+NotoSansSinhala-Subset	ශ්‍රී ලංකාව
+NotoSansSinhala-Subset	ආයුබෝවන්
+NotoSansSinhala-Subset	කෙ කේ කො කෝ කෞ කෛ
+NotoSansSinhala-Subset	ප්‍රශ්නය
+NotoSansSinhala-Subset	විද්‍යාලය
+NotoSansSinhala-Subset	ස්ථානය රේඛාව
+NotoSansSinhala-Subset	ධර්‍මය
+NotoSansSinhala-Subset	<U+0D9A U+0DCA U+200D U+0DC2>
+NotoSansSinhala-Subset	<U+0D9A U+0DCA U+200D U+0DBA>
+NotoSansSinhala-Subset	<U+0DBB U+0DCA U+200D U+0D9A>
+NotoSansSinhala-Subset	<U+0D9A U+0DD9 U+0DCF>
+NotoSansSinhala-Subset	<U+0D9A U+0DD9 U+0DCA>
+NotoSansSinhala-Subset	<U+0DCF>
+NotoSansSinhala-Subset	<U+0D85 U+0DCF>
+NotoSansSinhala-Subset	<U+0D91 U+0DCA>
+NotoSansSinhala-Subset	<U+0DA7 U+0DD4>
+# Tibetan, with the Universal Shaping Engine: stacked consonants, vowel signs above and below, and precomposed letters.
+NotoSerifTibetan-Subset	བོད་ཡིག
+NotoSerifTibetan-Subset	བཀྲ་ཤིས་བདེ་ལེགས།
+NotoSerifTibetan-Subset	སྐད་ རྒྱ་གར་ སྒྲུབ
+NotoSerifTibetan-Subset	ཨོཾ་མ་ཎི་པདྨེ་ཧཱུྃ༔
+NotoSerifTibetan-Subset	༡༢༣ ༄༅
+NotoSerifTibetan-Subset	བསྒྲུབས་ བརྒྱད་
+NotoSerifTibetan-Subset	<U+0F43 U+0F72>
+NotoSerifTibetan-Subset	<U+0F40 U+0FB5>
+NotoSerifTibetan-Subset	<U+0F40 U+0F73>
+NotoSerifTibetan-Subset	<U+0F40 U+0F71 U+0F72>
+NotoSerifTibetan-Subset	<U+0F72>
+NotoSerifTibetan-Subset	<U+0F66 U+0F90 U+0FB1 U+0FB2 U+0F74 U+0F7E>
+NotoSerifTibetan-Subset	<U+0F40 U+0F39 U+0F7A>

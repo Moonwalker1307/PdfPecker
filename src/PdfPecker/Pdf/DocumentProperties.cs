@@ -66,7 +66,7 @@ internal sealed class DocumentProperties
     }
 
     /// <summary>Writes the information dictionary, <c>&lt;&lt; ... &gt;&gt;</c>.</summary>
-    public void WriteInfo(ByteBuffer b, DateTime now, bool modDate, Action<ByteBuffer, string> writeText)
+    public void WriteInfo(ByteBuffer b, DateTime now, bool modDate, Action<ByteBuffer, string> writeText, PdfXOptions? pdfx = null)
     {
         string date = "D:" + now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
         b.Ascii("<< /Producer ");
@@ -92,6 +92,9 @@ internal sealed class DocumentProperties
             b.Ascii(" /ModDate ");
             writeText(b, date);
         }
+        // PDF/X-4 states its version and whether the file was trapped in the XMP metadata; the information dictionary
+        // says the same for older readers and preflight tools.
+        if (pdfx != null) b.Ascii(" /GTS_PDFXVersion (PDF/X-4) /Trapped /").Ascii(pdfx.Trapped ? "True" : "False");
         b.Ascii(" >>");
     }
 }

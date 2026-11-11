@@ -4,7 +4,7 @@ namespace PdfPecker.Css;
 
 /// <summary>
 /// The colour functions of CSS Color 4 and 5: <c>rgb()</c> and <c>hsl()</c> in both syntaxes, <c>hwb()</c>, <c>lab()</c>,
-/// <c>lch()</c>, <c>oklab()</c>, <c>oklch()</c>, <c>color()</c> with the predefined colour spaces, <c>color-mix()</c>,
+/// <c>lch()</c>, <c>oklab()</c>, <c>oklch()</c>, <c>color()</c> with the predefined colour spaces, <c>device-cmyk()</c>, <c>color-mix()</c>,
 /// <c>light-dark()</c> and <c>contrast-color()</c>, and the relative colour syntax of CSS Color 5 (<c>rgb(from &lt;color&gt; r g b / alpha)</c> and the
 /// same for every function but <c>color-mix()</c>), whose channel keywords can be used in math functions. Colours are worked on as unclamped sRGB (so wide-gamut colours survive a mix) and clipped to
 /// sRGB at the end, as Chrome does when it prints.
@@ -72,6 +72,8 @@ internal static class ColorFunctions
                 return ColorFn(args, out color);
             case "color-mix":
                 return Mix(args, current, depth, out color);
+            case "device-cmyk":
+                return DeviceCmyk(args, out color);
             case "light-dark":
             {
                 // Printed output uses the light scheme.
@@ -366,6 +368,53 @@ internal static class ColorFunctions
         color = default;
         if (!Components(args, legacy: true, out var c, out var a)) return false;
         color = new Rgba(Num(c[0], 255) / 255, Num(c[1], 255) / 255, Num(c[2], 255) / 255, Math.Clamp(Alpha(a), 0, 1));
+        return true;
+    }
+
+    /// <summary>
+    /// device-cmyk() of CSS Color 5, in the legacy comma syntax of four numbers and the modern syntax of four numbers or
+    /// percentages with an optional "/ alpha". The colour is its sRGB stand-in here, which the PDF writer writes as
+    /// DeviceCMYK (see <see cref="CmykColors"/>).
+    /// </summary>
+    private static bool DeviceCmyk(string args, out Rgba color)
+    {
+        color = default;
+        var s = args.Trim();
+        Span<double> inks = stackalloc double[4];
+        double alpha = 1;
+        if (s.IndexOf(',') >= 0)
+        {
+            var parts = CssParser.SplitTopLevel(s, ',');
+            if (parts.Count != 4) return false;
+            for (int i = 0; i < 4; i++)
+            {
+                if (!TryComponent(parts[i], out var c) || c.Kind != Kind.Number) return false;
+                inks[i] = c.Value;
+            }
+        }
+        else
+        {
+            SplitAlpha(s, out var main, out var alphaText);
+            var tokens = CssParser.Tokens(main);
+            if (tokens.Count != 4) return false;
+            for (int i = 0; i < 4; i++)
+            {
+                if (!TryComponent(tokens[i], out var c) || c.Kind == Kind.Angle) return false;
+                inks[i] = Num(c, 1);
+            }
+            if (alphaText != null)
+            {
+                if (!TryComponent(alphaText, out var a) || a.Kind == Kind.Angle) return false;
+                alpha = Alpha(a);
+            }
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            if (double.IsNaN(inks[i])) return false;
+            inks[i] = Math.Clamp(inks[i], 0, 1);
+        }
+        uint standIn = CmykColors.StandIn(new Cmyk((float)inks[0], (float)inks[1], (float)inks[2], (float)inks[3]));
+        color = Rgba.FromArgb(0xFF000000 | standIn) with { A = Math.Clamp(double.IsNaN(alpha) ? 1 : alpha, 0, 1) };
         return true;
     }
 

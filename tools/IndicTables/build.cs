@@ -17,10 +17,12 @@ const string HarfBuzzVersion = "14.6.0";
 
 // The characters the Indic shaper gives a category: the placeholders and superscripts of Latin-1, the nine Indic
 // blocks, Vedic Extensions, the joiners, dashes and subscripts, the dotted circle and squares, Devanagari Extended and
-// the Grantha marks Tamil borrows. HarfBuzz's table also covers Khmer and Myanmar, which other shapers handle.
+// the Grantha marks Tamil borrows. The Khmer and Myanmar shapers read the same table, with categories of their own, for
+// Myanmar, Khmer, Khmer Symbols, Myanmar Extended-B and -A, and the variation selectors that Myanmar letters take.
 (int First, int Last)[] ranges =
 [
-    (0x0020, 0x00DF), (0x0900, 0x0D7F), (0x1CD0, 0x1CFF), (0x200C, 0x2087), (0x25CC, 0x25FF), (0xA8E0, 0xA8FF),
+    (0x0020, 0x00DF), (0x0900, 0x0D7F), (0x1000, 0x109F), (0x1780, 0x17FF), (0x19E0, 0x19FF), (0x1CD0, 0x1CFF),
+    (0x200C, 0x2087), (0x25CC, 0x25FF), (0xA8E0, 0xA8FF), (0xA9E0, 0xA9FF), (0xAA60, 0xAA7F), (0xFE00, 0xFE0F),
     (0x11300, 0x1133F),
 ];
 
@@ -32,6 +34,10 @@ var categoryNames = new Dictionary<string, int>
     ["X"] = 0, ["C"] = 1, ["V"] = 2, ["N"] = 3, ["H"] = 4, ["ZWNJ"] = 5, ["ZWJ"] = 6, ["M"] = 7, ["SM"] = 8, ["A"] = 9,
     ["GB"] = 10, ["DC"] = 11, ["RS"] = 12, ["MP"] = 13, ["Rf"] = 14, ["R"] = 15, ["CM"] = 16, ["S"] = 17, ["CS"] = 18,
     ["SP"] = 57,
+    // Khmer
+    ["VA"] = 20, ["VB"] = 21, ["VL"] = 22, ["VR"] = 23, ["Rt"] = 25, ["Xg"] = 26, ["Yg"] = 27,
+    // Myanmar
+    ["As"] = 32, ["MH"] = 35, ["MR"] = 36, ["MW"] = 37, ["MY"] = 38, ["PT"] = 39, ["VS"] = 40, ["ML"] = 41,
 };
 var positionNames = new Dictionary<string, int>
 {
@@ -40,9 +46,7 @@ var positionNames = new Dictionary<string, int>
 };
 
 var values = Regex.Matches(Block("_hb_indic_values"), @"_\((\w+),(\w+)\)")
-    .Select(m => categoryNames.TryGetValue(m.Groups[1].Value, out int cat)
-        ? (ushort)(cat | positionNames[m.Groups[2].Value] << 8)
-        : (ushort)(14 << 8)) // a Khmer or Myanmar category: not one of the Indic shaper's
+    .Select(m => (ushort)(categoryNames[m.Groups[1].Value] | positionNames[m.Groups[2].Value] << 8))
     .ToArray();
 var u8 = Regex.Matches(Block("_hb_indic_u8"), @"\d+").Select(m => int.Parse(m.Value)).ToArray();
 var lookup = Regex.Match(source, @"return u<(\d+)u \? \(uint8_t\)\((.*?)\) : (\d+);").Groups;

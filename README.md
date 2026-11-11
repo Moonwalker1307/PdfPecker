@@ -75,6 +75,9 @@ byte[] cut = PdfRedactor.Redact(pdf, new[] { new PdfRedactionArea(pageNumber: 1,
 var archived = PdfToPdfA.Convert(File.ReadAllBytes("received.pdf"));
 if (!archived.IsConformant) Console.WriteLine(string.Join("\n", archived.Problems));
 
+// PDF/X-4 for a print shop, for the press of the ICC profile it gives you, with a 3 mm bleed and crop marks from @page
+byte[] print = HtmlToPdf.Convert(flyerHtml, new PdfOptions { PdfX = new PdfXOptions(File.ReadAllBytes("PSOcoated_v3.icc"), "FOGRA51") });
+
 // Fast Web View: the first page shows while the rest of a large PDF is still downloading
 byte[] web = HtmlToPdf.Convert(html, new PdfOptions { Linearize = true });
 byte[] mergedForWeb = PdfLinearizer.Linearize(PdfMerger.Merge(invoicePdf, termsPdf));
@@ -218,7 +221,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables (collapsed borders also from `col` and `colgroup`; rows and
   columns with `visibility: collapse` leave), floats with `shape-outside`, `clip-path` shapes (also `rect()` and
   `xywh()`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for heights and
-  their limits), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders, backgrounds,
+  their limits), percentage heights inside flex items resolved as in Chrome (stretched items, and items flexed from a
+  length basis in a column whose container has only a `min-height`, as card and label layouts use), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders, backgrounds,
   shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
   computes it, for templates that shrink a page to fit), multi-column layout, gap decorations (`column-rule` and
   `row-rule` in grid and flex containers too, with lists and `repeat()`, `rule-break`, `rule-inset`,
@@ -227,7 +231,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers), `contrast-color()` (black or white text, whichever reads better on a brand colour, as in Chrome), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
   media and container queries, `@scope` (scope roots, limits and proximity, as in Chrome), logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
-  order), `text-wrap` and `white-space-collapse`, hanging indents (`text-indent` with `hanging` and `each-line`), emphasis
+  order; Chinese and Japanese characters stand upright with the font's vertical forms, as `text-orientation` says,
+  `text-combine-upright` sets dates and numbers across the line, and images stay upright, as in Chrome), `text-wrap` and `white-space-collapse`, hanging indents (`text-indent` with `hanging` and `each-line`), emphasis
   marks (`text-emphasis`), trimming lines to the cap height and baseline (`text-box`, for optically centred
   buttons and badges), `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
   (`text-underline-position`), drop caps, `::first-line` styles with a background, `::marker` styles (a larger marker font or a tall marker image makes its
@@ -256,7 +261,7 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   small `<font>` text, or an image alone in a table cell, is only as tall as its content. The old body attributes
   `topmargin`, `leftmargin`, `marginheight` and `marginwidth` set the page margins as they do in Chrome.
   [More](https://pdfpecker.net/docs/html-and-css/)
-- **Paged media**: `@page` sizes (also a page as tall as its content, `size: 80mm auto`, for receipts on a roll), borders, padding and background images (which cover the whole sheet) and margin boxes (also with running elements, `position: running()` and `element()`, as in Prince and WeasyPrint), a bleed with crop marks and registration crosses for a print shop (`bleed: 3mm; marks: crop cross`, written as the PDF's trim and bleed boxes, as in WeasyPrint), `@page :nth(2n+1)` and page groups, `:nth(1 of chapter)` (as in WeasyPrint; they style margin boxes and the page background, not the page size or margins), running headers and footers (also a first page of its own, even pages of their own for printing on both sides, and bands
+- **Paged media**: `@page` sizes (also a page as tall as its content, `size: 80mm auto`, for receipts on a roll), borders, padding and background images (which cover the whole sheet) and margin boxes (also with running elements, `position: running()` and `element()`, as in Prince and WeasyPrint), a bleed with crop marks and registration crosses for a print shop (`bleed: 3mm; marks: crop cross`, written as the PDF's trim and bleed boxes, as in WeasyPrint), CMYK colours for print with `device-cmyk()` of CSS Color 5 (`color: device-cmyk(0 0 0 1)` for text in black ink only, written as DeviceCMYK for text, backgrounds, borders, rules and SVG fills and strokes; gradients, shadows, filters and colour mixes use its plain sRGB conversion, as does PDF/A, whose output intent is sRGB), `@page :nth(2n+1)` and page groups, `:nth(1 of chapter)` (as in WeasyPrint; they style margin boxes and the page background, not the page size or margins), running headers and footers (also a first page of its own, even pages of their own for printing on both sides, and bands
   of their own for named pages), `position: fixed` boxes repeated on every page of their named page, also in the page margins with negative offsets, and over the running headers and footers unless their z-index is negative (for watermarks and page frames), footnotes, tables of contents with page numbers, the page count anywhere in the content (`counter(pages)`, as in Prince), the first and last page of a section and page numbers counted within it (`-pdfpecker-target-pages()`, and `{section-page:id}` in running headers and footers), page numbers in running headers and footers in any counter style (`{page:upper-roman}`, `{total-pages:lower-alpha}`, `{section-page:id:lower-roman}`, or a zero-padded `@counter-style` of your own), break control (also table row groups
   and group header rows kept together, as reports keep a group on one page, and forced breaks between table rows and between flex lines), table rows that break inside at a page's end as in Chrome, unless a cell would have nothing before the break, flex rows whose items break at a page's end as in Chrome (the row moves whole when an item is kept whole), table
   headers and footers repeated on every page (also around a row split across pages), boxes split across pages or
@@ -286,14 +291,22 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   can be sized to match a web font. `FontCollection.AddDeferred` registers a font that is read only when a document
   uses it, with a `unicode-range` so that fallback skips it for other characters, which suits large CJK fonts.
   [More](https://pdfpecker.net/docs/fonts/)
-- **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts, Thai and Lao (copied and extracted as written,
-  with `/ActualText` where shaping reorders or shares glyphs), CJK line breaking and justification, and hyphenation in
-  eleven languages (with `hyphenate-limit-lines`), plus TeX patterns of your own, which
-  `HyphenationPatterns.Deferred` reads only when a document uses their language. [More](https://pdfpecker.net/docs/languages/)
+- **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts, Khmer, Myanmar, Sinhala, Tibetan, Thai and
+  Lao (copied and extracted as written, with `/ActualText` where shaping reorders or shares glyphs), CJK line breaking
+  and justification, and hyphenation in eleven languages (with `hyphenate-limit-lines`), plus TeX patterns of your
+  own, which `HyphenationPatterns.Deferred` reads only when a document uses their language. [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2 and 3 (levels B, U and A, the accessible level, tagged from the HTML)
   and PDF/A-4, AES-256 encryption (passwords prepared with SASLprep, as PDF
   2.0 requires), and text, image and SVG watermarks.
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
+- **PDF/X-4 for print shops**: `new PdfOptions { PdfX = new PdfXOptions(File.ReadAllBytes("PSOcoated_v3.icc"), "FOGRA51") }`
+  writes a PDF/X-4 file (ISO 15930-7) for the press whose ICC output profile you pass: PDF 1.6 with the output intent,
+  a trim box on every page (the paper, inside the bleed box of `@page { bleed: 3mm }`), sRGB colours and images tagged
+  with an sRGB profile for the print shop's colour conversion, CMYK JPEGs as DeviceCMYK, embedded fonts and the PDF/X
+  metadata. PdfPecker bundles no press profile (the print shop, the ICC or the ECI provides one), does no trapping, and
+  leaves links and fillable fields out, since PDF/X allows no annotations on the printed page. veraPDF has no PDF/X
+  profile, so the files are checked by tests of each requirement and by rendering in Ghostscript and Poppler, not by a
+  PDF/X validator.
 - **Existing PDFs to PDF/A**: `PdfToPdfA` converts PDFs from any tool to PDF/A-2b, 2u, 3b or 3u without rasterizing
   them. It embeds fonts that are not embedded (with the bundled glyphs, at the document's own widths), repairs embedded
   TrueType fonts whose glyphs, widths or character maps disagree with the PDF, adds the output intent and XMP metadata,
@@ -349,7 +362,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **PDF to image**: renders any PDF page to PNG, JPEG or WebP, or a whole PDF to a multi-page TIFF, and
   `HtmlToImage` goes from HTML to images in one call. `PdfRenderer.RenderPage(page, buffer, ImagePixelFormat.Gray)`
   renders a page straight into a buffer of yours as grey, RGB or RGBA pixels, sized by `GetPixelSize`, for OCR and image
-  processing. [More](https://pdfpecker.net/docs/pdf-to-image/)
+  processing. Comments that carry no appearance of their own (notes, highlights, underlines, strike-outs, squiggly
+  lines, shapes, lines with their arrowheads, ink and free text) are drawn from their properties, as viewers draw them.
+  [More](https://pdfpecker.net/docs/pdf-to-image/)
 - **Image decoding**: `ImageToPixels.Convert(image)` reads a PNG, JPEG, GIF, WebP, BMP or TIFF file (any page of a
   multi-page TIFF) straight to grey, RGB or RGBA pixels, with the same colour conversions, EXIF orientation and size
   limits as `ImageToPdf` and without making a PDF of it: for OCR, image analysis and thumbnails.

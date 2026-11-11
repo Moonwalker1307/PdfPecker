@@ -112,6 +112,7 @@ internal sealed partial class PdfDocumentWriter
     private int _fillAlpha = 255, _strokeAlpha = 255; // the constant alphas (0-255) in effect; -1 when unknown
     private bool _anyAlpha;                           // an alpha other than 1 was set: alphas after Q are unknown
     private int _resourcesId;                         // the shared resources object, for pattern cells that draw SVG images
+    private string _rgbSpace = "/DeviceRGB";          // sRGB in dictionaries: ICC-based in a PDF/X file
     private bool _noAlpha;                            // writing a stream without the shared ExtGState resources
     private readonly SortedSet<int> _fillAlphas = new(), _strokeAlphas = new(), _groupAlphas = new();
     private readonly List<byte[]> _forms = new(); // transparency groups of translucent layers, written as /Fx1, /Fx2, ...
@@ -160,6 +161,9 @@ internal sealed partial class PdfDocumentWriter
 
     /// <summary>Write a PDF/A file.</summary>
     public PdfConformance Conformance { get; init; }
+
+    /// <summary>Write a PDF/X-4 file for the press of these options; null for none.</summary>
+    public PdfXOptions? PdfX { get; init; }
 
     /// <summary>A Factur-X / ZUGFeRD invoice, for the XMP metadata. Its XML is one of the <see cref="Attachments"/>.</summary>
     public PdfEInvoice? EInvoice { get; init; }
@@ -213,10 +217,10 @@ internal sealed partial class PdfDocumentWriter
 
     private HashSet<int>? _missingReported;
 
-    private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None || PdfUA;
+    private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None || PdfUA || IsPdfX;
 
-    /// <summary>PDF/A and PDF/UA forbid showing the .notdef glyph.</summary>
-    private bool NoNotdef => Conformance != PdfConformance.None || PdfUA;
+    /// <summary>PDF/A, PDF/UA and PDF/X forbid showing the .notdef glyph.</summary>
+    private bool NoNotdef => Conformance != PdfConformance.None || PdfUA || IsPdfX;
 
     // Tagged PDF: the stream being written, the open marked-content sequence (a ContentSlot or Artifact) and whether
     // everything is an artifact for now (running headers and footers, fixed boxes, the page canvas).
@@ -475,6 +479,7 @@ internal sealed partial class PdfDocumentWriter
         doc.Now = FixedDate ?? ReproducibleDate.TruncateToSeconds(DateTime.UtcNow);
         WriteInfoAndMetadata(doc);
         if (IsPdfA) WriteOutputIntent(doc);
+        if (IsPdfX) WritePdfXOutputIntent(doc);
         for (int i = 0; i < doc.FileSpecIds.Length; i++) WriteAttachment(Attachments[i], doc.FileSpecIds[i], doc.Now);
         WriteFonts(doc);
         WriteImages(doc);
@@ -513,6 +518,9 @@ internal sealed partial class PdfDocumentWriter
 
     /// <summary>A PDF/A file of any part and level.</summary>
     private bool IsPdfA => Conformance != PdfConformance.None;
+
+    /// <summary>A PDF/X-4 file.</summary>
+    private bool IsPdfX => PdfX != null;
 
     /// <summary>A tagged PDF, with a logical structure.</summary>
     private bool Tagged => Structure != null;
@@ -569,7 +577,7 @@ internal sealed partial class PdfDocumentWriter
         // Object numbers: the next free one, then those handed out (0 for an object the file does not have).
         public int Next = 1;
         public int CatalogId, PagesId, ResourcesId, GlyphResourcesId, InfoId, OutlinesId, WatermarkId, WatermarkSvgId;
-        public int MetadataId, OutputIntentId, IccId, EncryptId, StructRootId;
+        public int MetadataId, OutputIntentId, IccId, SrgbId, EncryptId, StructRootId;
         public int[] FontIds = null!, PageIds = null!, ContentIds = null!, FileSpecIds = null!, FormIds = null!, MaskIds = null!;
         public List<OutlineItem> OutlineItems = null!;
         public List<FieldBlock>[] PageFields = null!;
@@ -632,6 +640,12 @@ internal sealed partial class PdfDocumentWriter
         if (doc.Watermark != null) doc.WatermarkId = doc.Next++;
         if (doc.WatermarkSvg != null) doc.WatermarkSvgId = doc.Next++;
         if (IsPdfA) { doc.MetadataId = doc.Next++; doc.OutputIntentId = doc.Next++; doc.IccId = doc.Next++; }
+        if (IsPdfX)
+        {
+            // The press's profile for the output intent, and the sRGB profile that sRGB colours and images are tagged with.
+            doc.MetadataId = doc.Next++; doc.OutputIntentId = doc.Next++; doc.IccId = doc.Next++; doc.SrgbId = doc.Next++;
+            _rgbSpace = "[/ICCBased " + doc.SrgbId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R]";
+        }
         doc.FileSpecIds = new int[Attachments.Count];
         for (int i = 0; i < doc.FileSpecIds.Length; i++) { doc.FileSpecIds[i] = doc.Next; doc.Next += 2; } // file specification, embedded file
         if (_crypt != null) doc.EncryptId = doc.Next++;

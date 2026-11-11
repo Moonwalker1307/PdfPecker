@@ -51,8 +51,11 @@ internal sealed partial class OpenTypeLayout
         public int LookupFlag;
         public bool PerSyllable;
 
-        /// <summary>Whether the lookup's features leave the joiners to the font's rules instead of skipping them.</summary>
-        public bool ManualJoiners;
+        /// <summary>Whether the lookup's features leave the non-joiner to the font's rules instead of skipping it.</summary>
+        public bool ManualZwnj;
+
+        /// <summary>Whether the lookup's features leave the zero-width joiner to the font's rules instead of skipping it.</summary>
+        public bool ManualZwj;
 
         /// <summary>The syllable of the glyph the lookup is applied at when it may not match across syllables, or 0.</summary>
         public byte Syllable;
@@ -103,10 +106,11 @@ internal sealed partial class OpenTypeLayout
     /// <paramref name="operations"/>, which <see cref="OperationBudget"/> starts for the shaping call, and making the
     /// run no longer than <paramref name="maxLength"/> (see <see cref="MaxRunLength"/>). A lookup applied per syllable
     /// matches only glyphs of the syllable of the glyph it starts at (see <see cref="GlyphInfo.Syllable"/>). With
-    /// <paramref name="manualJoiners"/>, GSUB rules match zero-width joiners in their input only where they name them.
+    /// <paramref name="manualJoiners"/>, GSUB rules match zero-width joiners and non-joiners in their input only where they
+    /// name them; with <paramref name="manualZwj"/>, only zero-width joiners (HarfBuzz's F_MANUAL_ZWJ).
     /// </summary>
     public void ApplyLookup(GlyphRun buf, bool gpos, int lookupIndex, uint mask, bool rtl, ref int nextLigId, ref int operations, int maxLength,
-        bool perSyllable = false, bool manualJoiners = false)
+        bool perSyllable = false, bool manualJoiners = false, bool manualZwj = false)
     {
         int table = gpos ? _gpos : _gsub;
         if (table < 0 || operations <= 0) return;
@@ -118,7 +122,8 @@ internal sealed partial class OpenTypeLayout
         c.Rtl = rtl;
         c.LookupMask = mask;
         c.PerSyllable = perSyllable;
-        c.ManualJoiners = manualJoiners;
+        c.ManualZwnj = manualJoiners;
+        c.ManualZwj = manualJoiners || manualZwj;
         c.Syllable = 0;
         c.Depth = 0;
         c.NextLigId = nextLigId;
@@ -264,7 +269,7 @@ internal sealed partial class OpenTypeLayout
     /// Whether an invisible control may be skipped, as HarfBuzz's skipping iterator decides it. A zero-width joiner is
     /// skipped unless the lookup's features handle joiners themselves, except in the context around the input. A
     /// non-joiner is skipped in GPOS, and in GSUB only in the context and when the features do not handle it. The
-    /// grapheme joiner, Mongolian variation selectors and tags are skipped only in GPOS.
+    /// grapheme joiner (unless it kept no marks apart), Mongolian variation selectors and tags are skipped only in GPOS.
     /// </summary>
     private static bool MaySkip(LookupState c, in GlyphInfo g, bool context)
     {
@@ -272,9 +277,10 @@ internal sealed partial class OpenTypeLayout
         if (cp < 0xAD || !UnicodeTables.IsDefaultIgnorable(cp) || (g.Substitutions & Substituted) != 0) return false;
         return cp switch
         {
-            0x200C => c.Gpos || (context && !c.ManualJoiners),
-            0x200D => context || !c.ManualJoiners,
-            0x034F or (>= 0x180B and <= 0x180D) or 0x180F or (>= 0xE0020 and <= 0xE007F) => c.Gpos,
+            0x200C => c.Gpos || (context && !c.ManualZwnj),
+            0x200D => context || !c.ManualZwj,
+            0x034F => c.Gpos || (g.Substitutions & Unhidden) != 0,
+            (>= 0x180B and <= 0x180D) or 0x180F or (>= 0xE0020 and <= 0xE007F) => c.Gpos,
             _ => true,
         };
     }

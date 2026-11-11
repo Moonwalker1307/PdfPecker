@@ -1,3 +1,4 @@
+using PdfPecker.Pdf;
 using PdfPecker.Rendering.Content;
 using PdfPecker.Rendering.Graphics;
 using PdfPecker.Rendering.Parsing;
@@ -965,6 +966,9 @@ internal sealed partial class PageRenderer
                 var state = _file.GetName(annot, "AS");
                 if (state != null) form = _file.Resolve(states[state]) as PdfStream;
             }
+            // An annotation with no normal appearance at all is drawn from its own properties, as viewers draw it; one
+            // whose appearance states have none for its current state shows nothing.
+            if (form == null && normal == null && subtype != null) form = DrawnAppearance(annot, subtype);
             if (form == null) continue;
             var rect = _file.GetNumbers(annot, "Rect");
             if (rect == null || rect.Length < 4) continue;
@@ -995,6 +999,22 @@ internal sealed partial class PageRenderer
                 SwallowedErrors.Record(ex);
             }
         }
+    }
+
+    /// <summary>
+    /// The appearance of an annotation that has none: notes, text markup, shapes, lines, ink and free text drawn as
+    /// viewers draw them. It is in page coordinates with the annotation's rectangle as its bounding box, so it maps onto
+    /// that rectangle unchanged.
+    /// </summary>
+    private PdfStream? DrawnAppearance(PdfDict annot, string subtype)
+    {
+        if (AnnotationAppearance.Draw(_file, annot, subtype, viewer: true) is not { } drawing) return null;
+        var bbox = drawing.BBox;
+        return new PdfStream(new Dictionary<string, PdfObject>(StringComparer.Ordinal)
+        {
+            ["BBox"] = new PdfArray(new List<PdfObject> { PdfNumber.Real(bbox[0]), PdfNumber.Real(bbox[1]), PdfNumber.Real(bbox[2]), PdfNumber.Real(bbox[3]) }),
+            ["Resources"] = AnnotationAppearance.Resources(drawing),
+        }, drawing.Content);
     }
 
     private Fonts.PdfFont? LoadFont(string name, PdfDict? res)
