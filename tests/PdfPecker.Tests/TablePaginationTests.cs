@@ -385,7 +385,8 @@ public class TablePaginationTests
     public void A_spanning_cell_that_runs_past_the_page_end_goes_on_below_the_repeated_header()
     {
         // As in Chrome, the span stays where it starts and its cell breaks: its first four lines end the page exactly,
-        // and the rest goes on under the header repeated on the next page rather than over it.
+        // and the rest goes on under the header repeated on the next page rather than over it. Its height is shared
+        // over its two rows, so the second row starts on the next page too, as in Chrome.
         var html = "<table style='border-spacing: 0'><thead><tr><th>Head</th></tr></thead><tbody>"
                    + string.Concat(Enumerable.Range(1, 8).Select(i => $"<tr><td style='height: 30pt'>Row {i}</td><td></td></tr>"))
                    + "<tr><td rowspan='2'>" + string.Join("<br>", Enumerable.Range(1, 10).Select(i => "Span " + i)) + "</td><td>First</td></tr>"
@@ -393,7 +394,7 @@ public class TablePaginationTests
         var pages = Pages(html);
         Assert.Equal(2, pages.Count);
         Assert.Contains(pages[0].Lines, l => l.Text.StartsWith("Span 1", StringComparison.Ordinal));
-        Assert.Contains(pages[0].Lines, l => l.Text.Contains("Second", StringComparison.Ordinal));
+        Assert.Contains(pages[1].Lines, l => l.Text.Contains("Second", StringComparison.Ordinal));
         var second = pages[1].Lines;
         Assert.Equal("Head", second[0].Text);
         Assert.Equal("Span 5", second[1].Text);
@@ -439,9 +440,23 @@ public class TablePaginationTests
         {
             Assert.Equal("Head", page.Lines[0].Text);
             Assert.True(page.Lines[1].Y - page.Lines[0].Y > 10);
-            spans.AddRange(page.Lines.Select(l => l.Text.Split(' ', 3)).Where(w => w[0] == "Span").Select(w => w[0] + " " + w[1]));
+            spans.AddRange(page.Lines.Select(l => System.Text.RegularExpressions.Regex.Match(l.Text, @"^Span \d+")).Where(x => x.Success).Select(x => x.Value));
         }
         Assert.Equal(Enumerable.Range(1, 60).Select(i => "Span " + i), spans);
+    }
+
+    [Fact]
+    public void A_spanning_cell_taller_than_its_rows_shares_its_height_out_over_them()
+    {
+        // As in Chrome, the three rows beside a nine-line cell are three lines tall each, rather than the last one
+        // taking the rest.
+        var pages = Pages("<table style='border-spacing: 0'><tr><td rowspan='3'>" + string.Join("<br>", Enumerable.Range(1, 9).Select(i => "L" + i))
+                          + "</td><td>A</td></tr><tr><td>B</td></tr><tr><td>C</td></tr></table>");
+        var lines = pages[0].Lines;
+        double Y(string text) => lines.Single(l => l.Text.EndsWith(text, StringComparison.Ordinal)).Y;
+        double line = lines[1].Y - lines[0].Y;
+        Assert.Equal(3 * line, Y("B") - Y("A"), 1);
+        Assert.Equal(3 * line, Y("C") - Y("B"), 1);
     }
 
     [Fact]

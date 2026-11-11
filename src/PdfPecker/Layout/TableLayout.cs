@@ -89,6 +89,10 @@ internal sealed partial class LayoutEngine
         public ComputedStyle?[]? ColStyle;
         public Element?[]? ColGroup;
         public float[]? RowExtra; // per layout pass: height each row gets on top of its content, to fill the table's height
+        // Per layout pass: the height each row gets on top of its content from the cells spanning it, and whether that is
+        // known yet for the row (see ShareSpanHeights).
+        public float[]? SpanExtra;
+        public bool[]? SpanShared;
         public bool DefiniteHeight; // per layout pass: the table's height is a length or a percentage that resolves
         public CellGrid Grid = new(0, 0); // the cell covering each row and column
         // With collapsed columns, the table as it is with them, which shares out the widths, and the columns that stay.
@@ -811,6 +815,8 @@ internal sealed partial class LayoutEngine
             cy = y + frameT + (m.Rows.Count > 0 ? vs : 0);
 
             m.RowExtra = null;
+            m.SpanExtra = null;
+            m.SpanShared = null;
             tableH = TableHeight(s, boxW, frameH, frameT + frameB, cbH);
             m.DefiniteHeight = HeightOf(s.Height, cbH) != null;
             // Inside rows that are only measured, a table is as tall without sharing out its height over its rows (it
@@ -858,6 +864,8 @@ internal sealed partial class LayoutEngine
         m.MayMoveTable = false;
         _rowProbe = outerProbe;
         m.RowExtra = null;
+        m.SpanExtra = null;
+        m.SpanShared = null;
         m.FootReserve = 0;
         m.DefiniteHeight = false;
         _cbHeight = outerCb;
@@ -1214,6 +1222,7 @@ internal sealed partial class LayoutEngine
             rowTop = FlowStart(PageOf(rowTop));
         }
         bool afterSpacingBreak = !float.IsNaN(spacingFrom);
+        if (_measuringRows == 0 && m.SpanShared?[r] != true) ShareSpanHeights(m, r, colX, widths, hs, vs, collapse);
     layOut:
         for (int attempt = 0; attempt < 2; attempt++)
         {
@@ -1418,6 +1427,67 @@ internal sealed partial class LayoutEngine
                 PaintRowBackground(m, rs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
         }
         return rowBottom;
+    }
+
+    /// <summary>
+    /// Shares the height that cells spanning rows down from row <paramref name="r"/> need beyond their rows out over
+    /// those rows, in proportion to the rows' own heights (equally when they have none), as Chrome does before it breaks
+    /// the table into pages. The rows the spans reach, and the spans starting among them, are measured once, without
+    /// pages, when the first of them is laid out. A row that a span ends in still grows to the span's end where breaking
+    /// the span across pages made it taller.
+    /// </summary>
+    private void ShareSpanHeights(TableModel m, int r, float[] colX, float[] widths, float hs, float vs, bool collapse)
+    {
+        int end = r;
+        for (int k = r; k <= end && k < m.Rows.Count; k++)
+            foreach (var cell in m.Rows[k].Cells)
+                end = Math.Max(end, k + cell.RowSpan - 1);
+        end = Math.Min(end, m.Rows.Count - 1);
+        int rows = m.Rows.Count;
+        m.SpanShared ??= new bool[rows];
+        for (int k = r; k <= end; k++) m.SpanShared[k] = true;
+        if (end == r) return;
+
+        var heights = new float[end - r + 1];
+        var spans = new List<(CellModel Cell, float Needed)>();
+        var outerExtra = m.SpanExtra;
+        m.SpanExtra = null;
+        Capture(() =>
+        {
+            _measuringRows++;
+            float top = 0;
+            for (int k = r; k <= end; k++)
+            {
+                float bottom = LayoutRow(m, k, top, colX, widths, hs, vs, collapse, allowMove: false);
+                heights[k - r] = RowHeight(m, k, shareOfTable: false);
+                foreach (var cell in m.Rows[k].Cells)
+                    if (cell.RowSpan > 1) spans.Add((cell, cell.NeededH));
+                top = bottom + vs;
+            }
+            _measuringRows--;
+            return top;
+        });
+        m.SpanExtra = outerExtra;
+
+        // Shorter spans first, so that a longer span over them sees the rows as the shorter ones left them.
+        spans.Sort(static (a, b) => a.Cell.RowSpan != b.Cell.RowSpan ? a.Cell.RowSpan.CompareTo(b.Cell.RowSpan) : a.Cell.Row.CompareTo(b.Cell.Row));
+        var shared = (float[])heights.Clone();
+        foreach (var (cell, needed) in spans)
+        {
+            int first = cell.Row - r, last = Math.Min(end, cell.Row + cell.RowSpan - 1) - r;
+            float total = 0;
+            for (int k = first; k <= last; k++) total += shared[k];
+            float extra = needed - total - vs * (last - first);
+            if (extra <= Eps) continue;
+            int count = last - first + 1;
+            for (int k = first; k <= last; k++) shared[k] += total > Eps ? extra * shared[k] / total : extra / count;
+        }
+        for (int k = r; k <= end; k++)
+        {
+            float add = shared[k - r] - heights[k - r];
+            if (add <= Eps) continue;
+            (m.SpanExtra ??= new float[rows])[k] = add;
+        }
     }
 
     /// <summary>
@@ -1724,6 +1794,7 @@ internal sealed partial class LayoutEngine
             if (cell.RowSpan == 1) rowH = Math.Max(rowH, cell.NeededH);
         var trs = row.Tr.Style;
         if (!trs.Height.IsAuto && !trs.Height.IsPercent) rowH = Math.Max(rowH, trs.Height.Value);
+        if (shareOfTable && m.SpanExtra != null) rowH += m.SpanExtra[r];
         if (shareOfTable && m.RowExtra != null) rowH = Math.Max(rowH, rowH + m.RowExtra[r]);
         return rowH;
     }
