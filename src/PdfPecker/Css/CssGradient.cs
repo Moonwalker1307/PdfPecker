@@ -289,7 +289,7 @@ internal sealed partial class CssGradient
         if (Radial && _points == null) { g.X0 = g.X1; g.Y0 = g.Y1; }
         var stops = ResolvedStops(g, pos);
         (g.Offsets, g.Colors) = Gradient.NormalizeStops(stops, backdrop);
-        g.KeepAlpha(stops);
+        g.KeepAlpha(stops, premultiplied: true);
         return g;
     }
 
