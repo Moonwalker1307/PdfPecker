@@ -45,6 +45,7 @@ internal sealed partial class ComputedStyle
     public TextAlign? TextAlignLast { get => _typography.TextAlignLast; set => Typography.TextAlignLast = value; }
     public TextJustify TextJustify { get => _typography.TextJustify; set => Typography.TextJustify = value; }
     public TextSpacingTrim TextSpacingTrim { get => _typography.TextSpacingTrim; set => Typography.TextSpacingTrim = value; }
+    public TextAutospace TextAutospace { get => _typography.TextAutospace; set => Typography.TextAutospace = value; }
     public TextOrientation TextOrientation { get => _typography.TextOrientation; set => Typography.TextOrientation = value; }
     public bool TextCombineUpright { get => _typography.TextCombineUpright; set => Typography.TextCombineUpright = value; }
     public TextAlign? BlockAlign { get => _typography.BlockAlign; set => Typography.BlockAlign = value; }
@@ -94,6 +95,7 @@ internal sealed partial class ComputedStyle
         public TextAlign? TextAlignLast;         // null = auto
         public TextJustify TextJustify;
         public TextSpacingTrim TextSpacingTrim;
+        public TextAutospace TextAutospace;
         public TextOrientation TextOrientation;  // text-orientation: how characters stand in vertical lines
         public bool TextCombineUpright;          // text-combine-upright: all, the text set across one vertical em
         public TextAlign? BlockAlign;            // -webkit-left, -webkit-center or -webkit-right: also aligns child blocks

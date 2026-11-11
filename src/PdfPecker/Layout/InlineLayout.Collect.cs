@@ -22,6 +22,7 @@ internal sealed partial class InlineLayout
         foreach (var node in run) CollectNode(st, node, null, lineBox);
         st.FirstLine = null;
         TrimAdjacentPunctuation(st.Items);
+        Autospace(st.Items);
         return st;
     }
 
