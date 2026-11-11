@@ -135,4 +135,27 @@ public class ImageSizingTests
         // 100 x 100 CSS px is 75 x 75 points, which are pixels at 72 dpi.
         Assert.InRange(ink, 75 * 75 - 300, 75 * 75 + 300);
     }
+
+    /// <summary>
+    /// A given width or height is limited on its own and the other one follows it through the ratio, so min-width and
+    /// max-width stretch the image instead of shrinking its height; with both auto, the limits keep the ratio where they
+    /// can (CSS 2.1 §10.4). The natural size is 400 x 200; the sizes are Chrome's.
+    /// </summary>
+    [Theory]
+    [InlineData("height:150px;max-width:200px", 200, 150)]
+    [InlineData("height:150px;max-width:120px", 120, 150)]
+    [InlineData("width:300px;max-width:200px", 200, 100)]
+    [InlineData("width:300px;max-height:100px", 300, 100)]
+    [InlineData("height:300px;max-height:100px", 200, 100)]
+    [InlineData("height:100px;min-width:300px", 300, 100)]
+    [InlineData("width:100px;min-height:100px", 100, 100)]
+    [InlineData("height:150px;max-width:120px;min-height:200px", 120, 200)]
+    [InlineData("width:100px;max-width:50px;min-height:80px", 50, 80)]
+    [InlineData("max-width:100px;min-height:100px", 100, 100)]
+    [InlineData("max-width:300px;max-height:60px", 120, 60)]
+    [InlineData("min-width:500px;max-height:100px", 500, 100)]
+    [InlineData("min-width:600px", 600, 300)]
+    [InlineData("box-sizing:border-box;padding:10px;height:170px;max-width:220px", 200, 150)]
+    public void An_image_keeps_a_given_size_within_its_limits(string style, float w, float h)
+        => AssertSize(w, h, Image($"<img src='{Src(400, 200)}' style='{style}'>"));
 }
