@@ -18,6 +18,7 @@ internal sealed partial class StyleResolver
         for (int i = 0; i < children.Count; i++)
         {
             if (children[i] is not Element { Anonymous: true } box) continue;
+            if (box.Name == RubyPairName) UnwrapRubyPair(box);
             children.RemoveAt(i);
             foreach (var c in box.Children) c.Parent = parent;
             children.InsertRange(i, box.Children);

@@ -175,6 +175,9 @@ internal sealed partial class LayoutEngine
             case GroupOp g:
                 if (along != null && along.Contains(g)) return -1;
                 int result = -1;
+                // Content clipped to a box that starts on a later page shows only there, wherever its own top is: an
+                // image with object-fit: cover reaches above its box, and that cut-off part is never drawn.
+                if (g is ClipOp clip && PageOf(clip.Y) > page) page = -1;
                 for (int i = op is LayerOp { Order: LayerOp.FloatOrder } ? 1 : 0; i < g.Ops.Count; i++)
                 {
                     int r = DrawnPage(g.Ops[i], page, along);

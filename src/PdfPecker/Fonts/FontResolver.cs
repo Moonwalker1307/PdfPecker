@@ -87,7 +87,7 @@ internal sealed class FontResolver
     private readonly FontCollection.Snapshot? _collection;
     private readonly Dictionary<(string, int, bool, FontFamily, FontVariation), TextFont> _resolved = new();
     private readonly Dictionary<(string, int, bool, FontVariation), List<EmbeddedFont>> _matched = new();
-    private readonly Dictionary<(FontProgram, bool, bool, UnicodeRange?, FaceMetrics), EmbeddedFont> _fonts = new();
+    private readonly Dictionary<(FontProgram, bool, bool, UnicodeRange?, FaceMetrics, string), EmbeddedFont> _fonts = new();
     private readonly DocumentFontVariants _variants = new();
 
     private readonly bool _embedStandard;
@@ -410,8 +410,9 @@ internal sealed class FontResolver
             bool synthBold = weight >= 600 && face.WeightMax < 600 && variation.Synthesis.HasFlag(FontSynthesis.Weight);
             bool synthItalic = italic && !face.Italic && variation.Synthesis.HasFlag(FontSynthesis.Style);
             if (program.Axes.Length > 0) program = Instance(program, face, weight, italic, variation, _variants, ref synthItalic);
-            var fk = (program, synthBold, synthItalic, face.Range, face.Metrics);
-            if (!_fonts.TryGetValue(fk, out var font)) _fonts[fk] = font = new EmbeddedFont(program, synthBold, synthItalic, face.Range, faceMetrics: face.Metrics);
+            var fk = (program, synthBold, synthItalic, face.Range, face.Metrics, key.Item1);
+            if (!_fonts.TryGetValue(fk, out var font))
+                _fonts[fk] = font = new EmbeddedFont(program, synthBold, synthItalic, face.Range, faceMetrics: face.Metrics) { Family = face.Family };
             result.Add(font);
         }
         _matched[key] = result;
