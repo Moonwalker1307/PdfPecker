@@ -591,7 +591,7 @@ internal sealed class FontChain : TextFont
         bool stays = current != null && StaysInRun(previous, cp);
         if (!stays && next < end && StaysInRun(cp, CodePointAt(s, next, end)))
         {
-            int clusterEnd = i + StringInfo.GetNextTextElementLength(s.AsSpan(i, end - i));
+            int clusterEnd = i + StringInfo.GetNextTextElementLength(s.AsSpan(i, Math.Min(end - i, MaxClusterLength)));
             var first = Pick(cp);
             if (clusterEnd > next && PickCluster(first, cp, s, i, clusterEnd) is { } font)
             {
@@ -606,6 +606,11 @@ internal sealed class FontChain : TextFont
         if (IsHidden(cp)) return current ?? _primary;
         return stays && Covers(current!, cp) ? current! : Pick(cp);
     }
+
+    // The most characters looked at for a cluster that one font should draw. Real clusters are a few characters long; a
+    // run of thousands of combining marks is one cluster, and when no font has all of it, every character of it would
+    // otherwise look again to its end: minutes of work for a run of 200,000 marks.
+    private const int MaxClusterLength = 64;
 
     // The first font that has every code point of a cluster. Its test captures the text, so it lives in a method of its
     // own: in Next, the closure's object was made on every character, which made text layout allocate three times as much.

@@ -2453,6 +2453,19 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_long_run_of_marks_no_font_has_lays_out_in_bounded_time()
+    {
+        // One Khmer letter followed by 200,000 signs is a single cluster. No bundled font has Khmer, so finding a font for
+        // the whole cluster fails, and every character of it then looked for its cluster to the end of the run again.
+        var marks = new StringBuilder("<p>\u1780");
+        var signs = new[] { '\u17D2', '\u17B6', '\u17C1', '\u17CB', '\u17C9' };
+        for (int i = 0; i < 200_000; i++) marks.Append(signs[i * 7 % signs.Length]);
+        marks.Append("</p>");
+        var pdf = Bounded(marks.ToString());
+        Assert.StartsWith("%PDF", Encoding.ASCII.GetString(pdf, 0, 4));
+    }
+
+    [Fact]
     public void Redacting_a_word_a_page_repeats_many_times_stays_bounded()
     {
         // 200,000 copies of one word at scattered places: every match is an area, and each glyph was compared with
