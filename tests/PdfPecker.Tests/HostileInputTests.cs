@@ -1941,6 +1941,36 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Long_lines_repeated_through_a_form_are_charged_by_the_rows_they_cross()
+    {
+        // A form strokes 20,000 lines from the bottom of the page to the top, and the page draws it a thousand times:
+        // 40 million operators' worth of segments is within reach of the budget, but each one crosses every pixel row,
+        // which took minutes from a file of a few kilobytes.
+        var lines = new StringBuilder("1 w");
+        for (int i = 0; i < 20_000; i++) lines.Append(CultureInfo.InvariantCulture, $" {i % 600} 0 m {i % 600} 792 l");
+        lines.Append(" S");
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /XObject << /F 5 0 R >> >> >>",
+            Stream("<<", Repeat("/F Do ", 1000)),
+            Stream("<< /Type /XObject /Subtype /Form /BBox [0 0 612 792]", lines.ToString()),
+        };
+        var renderer = PdfRenderer.Open(SimplePdf(objects));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var ex = Bounded(() => Record.Exception(() => renderer.RenderPage(0, new ImageOptions { Dpi = 36 }, cts.Token)));
+        Assert.IsType<InvalidDataException>(ex);
+        Assert.Contains("too complex", ex.Message);
+
+        // Drawn a few times, the same form renders.
+        objects[3] = Stream("<<", Repeat("/F Do ", 3));
+        Assert.True(PdfRenderer.Open(SimplePdf(objects)).RenderPage(0, new ImageOptions { Dpi = 36 }).Width > 0);
+
+        static string Stream(string dict, string data) => $"{dict} /Length {data.Length} >>\nstream\n{data}\nendstream";
+    }
+
+    [Fact]
     public void Soft_mask_whose_group_sets_the_same_mask_cannot_double_the_work_per_level()
     {
         // The mask's group sets that same mask twice, so each level of nesting builds two full-page masks: millions of
