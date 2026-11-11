@@ -60,6 +60,11 @@ internal sealed partial class InlineLayout
         // Text in a vertical-rl or vertical-lr line whose text-orientation stands some characters upright: each of those
         // takes one em of the line (see InlineLayout.Upright.cs).
         public bool Upright;
+        // A ruby pair: how far its annotation reaches above the base's em box. The line holds only the base; the
+        // annotation takes the leading around it, as emphasis marks do.
+        public float RubyOver;
+        // How far its annotation may reach over the text on each side, when it is wider than the base.
+        public float RubyOverhang;
 
         public void Reset()
         {
@@ -75,7 +80,7 @@ internal sealed partial class InlineLayout
             Capture = null;
             AnchorId = null;
             Element = null;
-            FloatMin = RelX = RelY = TrimStart = TrimEnd = 0;
+            FloatMin = RelX = RelY = TrimStart = TrimEnd = RubyOver = RubyOverhang = 0;
             MinWidth = -1;
             Level = Para = Justify = 0;
         }

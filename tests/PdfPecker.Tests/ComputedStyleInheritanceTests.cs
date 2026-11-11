@@ -35,7 +35,7 @@ public class ComputedStyleInheritanceTests
     // The fields CreateChild resets to their initial values. The three groups hold the rarely set ones.
     private static readonly string[] Reset =
     [
-        "Display", "InlineTable", "Contents", "UnicodeBidi", "BackgroundColor", "CanvasBackground",
+        "Display", "InlineTable", "Contents", "UnicodeBidi", "BackgroundColor", "CanvasBackground", "RubySpaceAround",
         "MarginTop", "MarginRight", "MarginBottom", "MarginLeft", "PaddingTop", "PaddingRight", "PaddingBottom", "PaddingLeft",
         "BorderTopWidth", "BorderRightWidth", "BorderBottomWidth", "BorderLeftWidth",
         "BorderTopStyle", "BorderRightStyle", "BorderBottomStyle", "BorderLeftStyle", "BorderHiddenSides",

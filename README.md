@@ -233,7 +233,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   media and container queries, `@scope` (scope roots, limits and proximity, as in Chrome), logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
   order; Chinese and Japanese characters stand upright with the font's vertical forms, as `text-orientation` says,
   `text-combine-upright` sets dates and numbers across the line, and images stay upright, as in Chrome), `text-wrap` and `white-space-collapse`, hanging indents (`text-indent` with `hanging` and `each-line`), emphasis
-  marks (`text-emphasis`), trimming lines to the cap height and baseline (`text-box`, for optically centred
+  marks (`text-emphasis`), ruby annotations such as Japanese furigana (`<ruby>`, `<rt>` and `<rp>`: the annotation at half
+  size over its base, spread around it and over the kana beside it, in the line's leading where it fits, as in Chrome), trimming lines to the cap height and baseline (`text-box`, for optically centred
   buttons and badges), `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
   (`text-underline-position`), drop caps, `::first-line` styles with a background, `::marker` styles (a larger marker font or a tall marker image makes its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
