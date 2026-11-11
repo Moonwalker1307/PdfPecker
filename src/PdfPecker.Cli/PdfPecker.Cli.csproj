@@ -24,7 +24,7 @@
     <ToolCommandName>pdfpecker</ToolCommandName>
     <PackageId>PdfPecker.Cli</PackageId>
     <Authors>Moonwalker1307</Authors>
-    <Description>The pdfpecker command-line tool: HTML and Markdown to PDF (with wkhtmltopdf-compatible options and a watch mode), merge, split, rotate, compact, sign, verify and encrypt PDFs, and PDF to image, HTML and text. Needs no browser; on a .NET 10 SDK it installs as a Native AOT executable that starts in milliseconds.</Description>
+    <Description>The pdfpecker command-line tool: HTML and Markdown to PDF (with wkhtmltopdf-compatible options and a watch mode), merge, split, rotate, compact, sign, verify and encrypt PDFs, and PDF to image, HTML and text. Needs no browser; on a .NET 10 or 11 SDK it installs as a Native AOT executable that starts in milliseconds.</Description>
     <PackageTags>pdf;cli;dotnet-tool;html-to-pdf;wkhtmltopdf-alternative;markdown;pdfpecker</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>logo.png</PackageIcon>

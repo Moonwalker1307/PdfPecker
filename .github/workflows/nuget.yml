@@ -51,13 +51,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 0 # the release tags give preview builds their version
 
-      # The package targets net8.0, net9.0 and net10.0, and the tests run on each runtime.
+      # The packages target net8.0, net9.0, net10.0 and net11.0, and the tests run on each runtime.
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: |
             8.0.x
             9.0.x
             10.0.x
+            11.0.x
           # Keeps ~/.nuget/packages between runs. Every restore of src/PdfPecker fetches the API baseline release for
           # package validation, so without the cache each job downloaded it from nuget.org again. A release builds
           # without it: the packages it publishes come from a fresh restore from nuget.org, not from a cache that an
@@ -190,7 +191,9 @@ jobs:
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            10.0.x
+            11.0.x
           cache: true
           cache-dependency-path: |
             **/*.csproj
@@ -232,7 +235,9 @@ jobs:
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            10.0.x
+            11.0.x
           cache: true
           cache-dependency-path: |
             **/*.csproj
@@ -261,7 +266,9 @@ jobs:
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            10.0.x
+            11.0.x
           cache: true
           cache-dependency-path: |
             **/*.csproj
@@ -318,7 +325,9 @@ jobs:
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         if: ${{ !matrix.alpine }}
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            10.0.x
+            11.0.x
           # These packages are published too, so a release packs them from a fresh restore, as the build job does.
           cache: ${{ github.event_name != 'release' }}
           cache-dependency-path: |
@@ -330,11 +339,12 @@ jobs:
         run: dotnet pack src/PdfPecker.Cli -c Release -r ${{ matrix.rid }} -p:Version="$VERSION" -o tool-packages
 
       # JavaScript actions do not run in Alpine job containers, so the pack and the check run in the SDK's Alpine images
-      # directly. A pull from mcr.microsoft.com sometimes times out, so it is tried three times before the job fails.
+      # directly, of the SDK version global.json asks for. The install checks run on that .NET 11 SDK too, which shows
+      # that it takes the native package named in the net10.0 folder. A pull from mcr.microsoft.com sometimes times out, so it is tried three times before the job fails.
       - name: Pull the Alpine SDK images
         if: ${{ matrix.alpine }}
         run: |
-          for image in sdk:10.0-alpine-aot sdk:10.0-alpine; do
+          for image in sdk:11.0-alpine-aot sdk:11.0-alpine; do
             for attempt in 1 2 3; do
               docker pull -q "mcr.microsoft.com/dotnet/$image" && break
               if [ "$attempt" = 3 ]; then exit 1; fi
@@ -345,7 +355,7 @@ jobs:
       - name: Pack the native tool for Alpine
         if: ${{ matrix.alpine }}
         run: >
-          docker run --rm -v "$PWD:/src" -w /src -e GITHUB_ACTIONS mcr.microsoft.com/dotnet/sdk:10.0-alpine-aot
+          docker run --rm -v "$PWD:/src" -w /src -e GITHUB_ACTIONS mcr.microsoft.com/dotnet/sdk:11.0-alpine-aot
           dotnet pack src/PdfPecker.Cli -c Release -r ${{ matrix.rid }} -p:Version="$VERSION" -o tool-packages
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -372,7 +382,7 @@ jobs:
         if: ${{ matrix.alpine }}
         run: |
           cp tool-packages/*.nupkg tool-feed/
-          docker run --rm -v "$PWD:/src" -w /src -e VERSION mcr.microsoft.com/dotnet/sdk:10.0-alpine sh -ec '
+          docker run --rm -v "$PWD:/src" -w /src -e VERSION mcr.microsoft.com/dotnet/sdk:11.0-alpine sh -ec '
             dotnet tool install PdfPecker.Cli --tool-path /tmp/tool --add-source tool-feed --version "$VERSION"
             echo "<h1>Tool check</h1>" | /tmp/tool/pdfpecker convert - /tmp/check.pdf
             /tmp/tool/pdfpecker text /tmp/check.pdf | grep -q "Tool check"
@@ -433,7 +443,9 @@ jobs:
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Check nuget.org user is set
         env:
