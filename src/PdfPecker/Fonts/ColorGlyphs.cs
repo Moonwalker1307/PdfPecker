@@ -1,3 +1,4 @@
+using System.Globalization;
 using PdfPecker.Svg;
 
 namespace PdfPecker.Fonts;
@@ -6,8 +7,8 @@ namespace PdfPecker.Fonts;
 /// The colour glyphs of a font's COLR and CPAL tables: version 0 layers of glyphs in palette colours, and version 1
 /// paint graphs of solid colours, linear, radial and sweep gradients, transforms, glyph clips and composites. A glyph's
 /// paint graph is read into a tree of <see cref="ColorPaint"/> nodes for the PDF writer, which draws it as a Type 3
-/// glyph, as Chrome's print output does. Colours come from the first palette; variable paints take the deltas of the
-/// font's instance. A damaged table, a cycle of glyphs painting each other or a graph past the size limits makes the
+/// glyph, as Chrome's print output does. Colours come from the first palette, or from the one font-palette picks (see
+/// <see cref="WithPalette"/>); variable paints take the deltas of the font's instance. A damaged table, a cycle of glyphs painting each other or a graph past the size limits makes the
 /// glyph draw nothing rather than an error.
 /// </summary>
 internal sealed class ColorGlyphs
@@ -43,9 +44,14 @@ internal sealed class ColorGlyphs
     private readonly int _baseRecords, _numBaseRecords, _layerRecords, _numLayerRecords;
     private readonly int _baseGlyphList, _layerList, _clipList, _varIndexMap;
     private readonly VariationStore? _store;
-    private readonly uint[] _palette; // the first palette, 0xAARRGGBB
+    private readonly uint[] _palette; // the palette the glyphs are drawn in, 0xAARRGGBB: the first unless WithPalette chose
+    private readonly (int Offset, int Length) _cpal;
     private bool? _usesForeground;
     private readonly object _lock = new();
+    // The copies of these glyphs in other palettes, by their colours, made by WithPalette; a copy keeps none of its own.
+    private readonly Dictionary<string, ColorGlyphs>? _palettes;
+    // A document's @font-palette-values rules make a copy each at most, so this bounds only hostile ones.
+    private const int MaxPalettes = 64;
 
     private ColorGlyphs(FontProgram p, (int Offset, int Length) colr, (int Offset, int Length) cpal)
     {
@@ -73,7 +79,29 @@ internal sealed class ColorGlyphs
             if (_clipList != 0) Need(_clipList, 5 + (long)_r.U32(_clipList + 1) * ClipRecordLength);
             if (store != 0 && p.InstanceCoordinates is { } coords) _store = new VariationStore(_d, store, _end, coords);
         }
-        _palette = ReadPalette(cpal);
+        _cpal = cpal;
+        _palette = ReadPalette(0);
+        _palettes = new Dictionary<string, ColorGlyphs>(StringComparer.Ordinal);
+    }
+
+    /// <summary>A copy of <paramref name="source"/> that draws in <paramref name="palette"/>.</summary>
+    private ColorGlyphs(ColorGlyphs source, uint[] palette)
+    {
+        _d = source._d;
+        _r = source._r;
+        _colr = source._colr;
+        _end = source._end;
+        _baseRecords = source._baseRecords;
+        _numBaseRecords = source._numBaseRecords;
+        _layerRecords = source._layerRecords;
+        _numLayerRecords = source._numLayerRecords;
+        _baseGlyphList = source._baseGlyphList;
+        _layerList = source._layerList;
+        _clipList = source._clipList;
+        _varIndexMap = source._varIndexMap;
+        _store = source._store;
+        _cpal = source._cpal;
+        _palette = palette;
     }
 
     /// <summary>The colour glyphs of a font, or null when it has none (or its COLR or CPAL table is damaged).</summary>
@@ -424,16 +452,75 @@ internal sealed class ColorGlyphs
         return null;
     }
 
-    /// <summary>The first palette's colours, as 0xAARRGGBB.</summary>
-    private uint[] ReadPalette((int Offset, int Length) cpal)
+    /// <summary>The number of palettes in the font's CPAL table.</summary>
+    public int PaletteCount => _r.U16(_cpal.Offset + NumPalettesField);
+
+    /// <summary>
+    /// The colours of palette <paramref name="index"/>, as 0xAARRGGBB, which a caller may change; the first palette's
+    /// when the font has no such palette.
+    /// </summary>
+    public uint[] PaletteColors(int index)
     {
-        int start = cpal.Offset, end = cpal.Offset + cpal.Length;
-        if (cpal.Length < CpalHeaderLength) throw new FormatException("Bad CPAL table.");
+        if (index < 0 || index >= PaletteCount) index = 0;
+        try
+        {
+            return ReadPalette(index);
+        }
+        catch (FormatException)
+        {
+            return (uint[])_palette.Clone();
+        }
+    }
+
+    /// <summary>
+    /// The first palette marked for a light background (<paramref name="dark"/> false) or a dark one in a version 1 CPAL
+    /// table's palette types, or -1 when none is.
+    /// </summary>
+    public int PaletteOfType(bool dark)
+    {
+        int start = _cpal.Offset, palettes = PaletteCount;
+        long typesField = start + FirstPaletteIndexField + 2L * palettes;
+        if (_r.U16(start) < 1 || typesField + 4 > start + _cpal.Length) return -1;
+        long types = start + (long)_r.U32((int)typesField);
+        if (types == start || types + 4L * palettes > start + _cpal.Length) return -1;
+        uint flag = dark ? 2u : 1u;
+        for (int i = 0; i < palettes; i++)
+            if ((_r.U32((int)types + i * 4) & flag) != 0) return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// These glyphs drawn in <paramref name="palette"/>, or these glyphs themselves when it is the palette they are
+    /// drawn in. Copies are kept by their colours, so that the writer keeps one subset for each palette.
+    /// </summary>
+    public ColorGlyphs WithPalette(uint[] palette)
+    {
+        if (palette.AsSpan().SequenceEqual(_palette)) return this;
+        if (_palettes == null) throw new InvalidOperationException("Only the font's own glyphs make copies.");
+        var key = string.Create(palette.Length * 8, palette, static (chars, colors) =>
+        {
+            for (int i = 0; i < colors.Length; i++) colors[i].TryFormat(chars.Slice(i * 8), out _, "X8", CultureInfo.InvariantCulture);
+        });
+        lock (_lock)
+        {
+            if (_palettes.TryGetValue(key, out var copy)) return copy;
+            if (_palettes.Count >= MaxPalettes) return this;
+            _palettes[key] = copy = new ColorGlyphs(this, palette);
+            return copy;
+        }
+    }
+
+    /// <summary>The colours of palette <paramref name="index"/>, as 0xAARRGGBB.</summary>
+    private uint[] ReadPalette(int index)
+    {
+        int start = _cpal.Offset, end = _cpal.Offset + _cpal.Length;
+        if (_cpal.Length < CpalHeaderLength) throw new FormatException("Bad CPAL table.");
         int entries = _r.U16(start + PaletteEntriesField), palettes = _r.U16(start + NumPalettesField);
         int records = _r.U16(start + NumColorRecordsField);
         long array = start + (long)_r.U32(start + ColorRecordsField);
         if (palettes == 0 || entries == 0) return [];
-        int first = _r.U16(start + FirstPaletteIndexField);
+        if (start + FirstPaletteIndexField + 2L * (index + 1) > end) throw new FormatException("Bad CPAL table.");
+        int first = _r.U16(start + FirstPaletteIndexField + 2 * index);
         if (first + entries > records || array + (long)records * 4 > end) throw new FormatException("Bad CPAL table.");
         var colors = new uint[entries];
         for (int i = 0; i < entries; i++)

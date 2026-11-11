@@ -92,12 +92,14 @@ internal static class Targets
         "<img src=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>\" style=\"object-view-box:inset(-1e9% 100% 1e9px 0)\">",
         "object-view-box:xywh(0 0 1e-9px 1e-9px)", "object-view-box:rect(1e9px auto 0 auto)",
         "<span style=\"box-shadow:inset 0 0 1e9px 1e9px red,inset 1px 1px blue;border-radius:50%\">x<br>y</span>",
+        "<ruby>漢<rt>かん</rt>字<rp>(</rp><rt>じ</rt><rp>)</rp></ruby>", "<ruby><rt>a</rt><rt>b</rt><rb>c</rb></ruby>", "<rt>x</rt>",
+        "<ruby style=\"display:block;line-height:0\"><ruby>a<rt>b</rt></ruby><rt style=\"font-size:1e9px\">c</rt></ruby>",
     };
 
     private static readonly (string, string)[] HtmlNesters =
     {
         ("<div>", "</div>"), ("<span>", "</span>"), ("<b>", "</b>"), ("<table><tr><td>", "</td></tr></table>"), ("<ul><li>", "</li></ul>"), ("<p>", "</p>"),
-        ("<div style=\"display:flex\">", "</div>"), ("<div style=\"float:left\">", "</div>"), ("<a href=\"#\">", "</a>"), ("<svg><g>", "</g></svg>"),
+        ("<ruby>", "<rt>x</rt></ruby>"), ("<div style=\"display:flex\">", "</div>"), ("<div style=\"float:left\">", "</div>"), ("<a href=\"#\">", "</a>"), ("<svg><g>", "</g></svg>"),
         ("<div style=\"position:relative;overflow:hidden\">", "</div>"), ("<blockquote>", "</blockquote>"), ("<details>", "</details>"), ("<i>", "</i>"),
         ("<div style=\"backdrop-filter:invert(1);mask:radial-gradient(#000,#0000)\">", "</div>"), ("<picture>", "</picture>"),
         ("<div style=\"float:right;width:50%;height:9em;shape-outside:ellipse(at 0 50%);shape-margin:1em\">", "</div>"),
@@ -106,7 +108,7 @@ internal static class Targets
     private static readonly string[] CssWords =
     {
         "var(--a)", "calc(", "min(", "max(", "clamp(", "!important", "@media print {", "@media (min-width: 1px) {", "@supports (display:grid) {", "@page {", "@font-face {", "@keyframes a {",
-        "@import url(x);", "@container (min-width:1px) {", "@counter-style a {", "@font-feature-values a { @styleset { b: 1 2 20; } @character-variant { c: 99 9; } }", "font-variant-alternates:styleset(b) character-variant(c) historical-forms", ":is(", ":not(", ":where(", ":has(", ":nth-child(2n+1 of p)", "::before", "::after", "::marker",
+        "@import url(x);", "@container (min-width:1px) {", "@counter-style a {", "@font-feature-values a { @styleset { b: 1 2 20; } @character-variant { c: 99 9; } }", "font-variant-alternates:styleset(b) character-variant(c) historical-forms", "@font-palette-values --a { font-family: Fz; base-palette: 99; override-colors: 0 red, 65535 blue }", "font-palette:--a", "font-palette:dark", ":is(", ":not(", ":where(", ":has(", ":nth-child(2n+1 of p)", "::before", "::after", "::marker",
         "*", ">", "~", "+", "|", "[a=b i]", "url(data:,)", "linear-gradient(", "radial-gradient(", "conic-gradient(", "repeating-linear-gradient(", "-webkit-gradient(", "-webkit-", "rotate(", "matrix(",
         "attr(a)", "attr(data-x type(*), ", "attr(data-x px, ", "attr(class type(<length>+))", "attr(id raw-string)", "attr(title number)", "type(<color>)", "width:attr(data-x %)", "counter(a)", "counters(a, \".\")", "content:", "display:grid", "grid-template-columns: repeat(999999, 1fr)", "grid-column: 1 / span 99999", "flex: 1e9",
         "1e9px", "-1e9px", "100000%", "calc(1/0)", "calc(0/0)", "inherit", "initial", "unset", "revert", "all:unset", "--a:", "var(--a, var(--b, var(--a)))",
@@ -635,7 +637,8 @@ internal static class Targets
     private static class ColorFontPageText
     {
         public static readonly string Value =
-            "<!doctype html><body style=\"font-family:Fz;font-size:18px\"><p>ABC \uE000\uE001\uE002\uE096\uE12B \U0001F39B\U0001F39F\U0001F3AB</p>"
+            "<!doctype html><style>@font-palette-values --p { font-family: Fz; base-palette: 1; override-colors: 0 #0c0, 3 rgb(0 0 200 / 50%) }</style>"
+            + "<body style=\"font-family:Fz;font-size:18px\"><p style=\"font-palette:dark\">ABC \uE000 \U0001F39B</p><p style=\"font-palette:--p\">ABC \uE000 \U0001F39B</p><p>ABC \uE000\uE001\uE002\uE096\uE12B \U0001F39B\U0001F39F\U0001F3AB</p>"
             + "<p style=\"color:#c00;opacity:0.6;font-variation-settings:'wght' 700,'HLGT' 8\">ABC \uE000\uE096 \U0001F39B</p><p style=\"font-size:8px\">"
             + string.Concat(Enumerable.Range(0xF0000, 0x1200).Select(char.ConvertFromUtf32)) + "</p>"
             + "<svg width=\"200\" height=\"40\"><text x=\"0\" y=\"30\" font-family=\"Fz\" fill=\"blue\">ABC \uE096 \U0001F39B</text></svg></body>";

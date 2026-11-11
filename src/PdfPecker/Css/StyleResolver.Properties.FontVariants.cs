@@ -84,4 +84,18 @@ internal sealed partial class StyleResolver
         else if (d.Lower == "initial") s.FontVariantAlternates = null;
         else if (FontAlternates.Parse(d.Value, _fontFeatureValues, out bool valid) is var alternates && valid) s.FontVariantAlternates = alternates;
     }
+
+    /// <summary>
+    /// font-palette: normal, light, dark or the name of an @font-palette-values rule. A name without a rule draws the
+    /// font's own palette, as in Chrome; palette-mix() is not supported and leaves the value as it was.
+    /// </summary>
+    private void ApplyFontPalette(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit || d.Lower == "unset") s.FontPalette = parent.FontPalette;
+        else if (d.Lower is "normal" or "initial") s.FontPalette = null;
+        else if (d.Lower == "light") s.FontPalette = FontPalette.Light;
+        else if (d.Lower == "dark") s.FontPalette = FontPalette.Dark;
+        else if (d.Value.StartsWith("--", StringComparison.Ordinal))
+            s.FontPalette = _fontPalettes != null && _fontPalettes.TryGetValue(d.Value, out var palette) ? palette : null;
+    }
 }

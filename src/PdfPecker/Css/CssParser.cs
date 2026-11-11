@@ -152,6 +152,7 @@ internal static partial class CssParser
                 case "property": ParseProperty(prelude, _reader.Text(brace + 1, close), _scope.Sheet); break;
                 case "counter-style": ParseCounterStyle(prelude, _reader.Text(brace + 1, close), _scope.Sheet); break;
                 case "font-feature-values": _scope.Sheet.FontFeatureValues.Add(prelude, _reader.Text(brace + 1, close)); break;
+                case "font-palette-values": ParseFontPaletteValues(prelude, _reader.Text(brace + 1, close), _scope.Sheet); break;
             }
         }
 

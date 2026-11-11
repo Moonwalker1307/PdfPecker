@@ -83,6 +83,8 @@ internal sealed partial class StyleResolver
 
     // The names of the document's @font-feature-values rules; null when it has none.
     private readonly FontFeatureValues? _fontFeatureValues;
+    // The palettes of the document's @font-palette-values rules, by name; null when it has none.
+    private readonly Dictionary<string, FontPalette>? _fontPalettes;
 
     /// <summary>The footnotes (float: footnote) of the last resolution, in document order.</summary>
     public List<Element> Footnotes { get; } = new();
@@ -195,6 +197,12 @@ internal sealed partial class StyleResolver
         _media = authorSheet.Media;
         CounterStyles = CounterStyles.From(authorSheet.CounterStyles);
         if (!authorSheet.FontFeatureValues.IsEmpty) _fontFeatureValues = authorSheet.FontFeatureValues;
+        if (authorSheet.FontPaletteValues.Count > 0)
+        {
+            // The last rule of a name wins, as in Chrome.
+            _fontPalettes = new Dictionary<string, FontPalette>(StringComparer.Ordinal);
+            foreach (var rule in authorSheet.FontPaletteValues) _fontPalettes[rule.Name] = FontPalette.Of(rule);
+        }
         if (authorSheet.RegisteredProperties.Count > 0)
         {
             // Registered custom properties start at their initial value: on every element when they do not inherit,
@@ -449,6 +457,7 @@ internal sealed partial class StyleResolver
         if (_contentsUsed && !parent.Style.Contents) SpliceContents(parent);
         if (parent.Name == "details" && !parent.HasAttribute("open")) HideClosedDetails(parent);
         WrapTableParts(parent);
+        if (parent.Name == "ruby") WrapRubyPairs(parent);
         if (scope != null)
             foreach (var name in scope)
             {

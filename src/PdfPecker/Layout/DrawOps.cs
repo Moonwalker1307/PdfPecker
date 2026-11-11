@@ -137,6 +137,8 @@ internal sealed class TextOp : DrawOp
     /// flips back.
     /// </summary>
     public bool UpsideDown;
+    /// <summary>font-palette: the palette colour fonts draw the text in; null for each font's own.</summary>
+    public FontPalette? Palette;
 
     public TextOp(float x, float baseline, float lineTop, TextFont font, float size, uint color, string text, float wordSpacing, float charSpacing)
     {
@@ -145,9 +147,10 @@ internal sealed class TextOp : DrawOp
         WordSpacing = wordSpacing; CharSpacing = charSpacing;
     }
 
-    /// <summary>Takes the text outline from <paramref name="style"/>.</summary>
+    /// <summary>Takes the text outline and the font palette from <paramref name="style"/>.</summary>
     public TextOp WithStroke(ComputedStyle style)
     {
+        Palette = style.FontPalette;
         if (!(style.TextStrokeWidth > 0)) return this;
         StrokeWidth = style.TextStrokeWidth;
         StrokeColor = CssColor.Fade(style.TextStrokeColor ?? style.Color, style.InlineFade);

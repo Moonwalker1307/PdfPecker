@@ -51,7 +51,8 @@ internal sealed partial class InlineLayout
     {
         for (int li = 0; li < n; li++)
             foreach (var it in lines[li].Items)
-                if (it.Kind == ItemKind.Text && it.Style.EmphasisShape != EmphasisShape.None && it.Style.EmphasisMark != null) return true;
+                if (it.Kind == ItemKind.Text && it.Style.EmphasisShape != EmphasisShape.None && it.Style.EmphasisMark != null
+                    || it.RubyOver > 0) return true;
         return false;
     }
 
@@ -59,7 +60,8 @@ internal sealed partial class InlineLayout
     /// Makes room for the emphasis marks of the lines: each line's ascent grows by how far its marks reach above it,
     /// less the space left below the line before it, and its descent by how far its marks reach below it; the line
     /// after that moves back up into whatever space it has above its text. <paramref name="roomAbove"/> is the space
-    /// the first line may take above the block. This is Chrome's annotation overflow, which ruby shares.
+    /// the first line may take above the block. This is Chrome's annotation overflow, which ruby annotations take part
+    /// in too (see <see cref="Item.RubyOver"/>).
     /// </summary>
     private static void MakeRoomForEmphasis(List<Line> lines, int n, float[] lineA, float[] lineD, ComputedStyle block, float roomAbove)
     {
@@ -93,6 +95,15 @@ internal sealed partial class InlineLayout
         bool marksOver = false, marksUnder = false;
         foreach (var it in line.Items)
         {
+            if (it.RubyOver > 0 && !IsLineAligned(it))
+            {
+                // A ruby pair reaches from its annotation's top down to its base's bottom.
+                float shift = it.Style.AtomicBaselineShift;
+                contentOver = Math.Min(contentOver, shift - it.BoxBaseline);
+                contentUnder = Math.Max(contentUnder, shift + it.Height - it.BoxBaseline);
+                marksOver = true;
+                continue;
+            }
             if (it.Kind is not (ItemKind.Text or ItemKind.Space)) continue;
             var s = it.Style;
             // The text's box, its rounded ascent and descent, made smaller towards its em box by whole pixels, as Chrome

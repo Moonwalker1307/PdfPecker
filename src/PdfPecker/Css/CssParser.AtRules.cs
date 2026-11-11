@@ -8,8 +8,8 @@ internal static partial class CssParser
     /// </summary>
     private const int MaxImportNesting = 8, MaxImports = 64;
 
-    /// <summary>@property and @counter-style rules beyond these are ignored.</summary>
-    private const int MaxRegisteredProperties = 1024, MaxCounterStyles = 1024;
+    /// <summary>@property, @counter-style and @font-palette-values rules beyond these are ignored.</summary>
+    private const int MaxRegisteredProperties = 1024, MaxCounterStyles = 1024, MaxFontPaletteValues = 1024;
 
     /// <summary>
     /// For @media, @supports, @layer and @container blocks: whether their rules apply, and the scope they get (the
@@ -227,6 +227,12 @@ internal static partial class CssParser
     {
         if (sheet.CounterStyles.Count >= MaxCounterStyles) return;
         if (CounterStyleRule.Parse(prelude, body) is { } rule) sheet.CounterStyles.Add(rule);
+    }
+
+    private static void ParseFontPaletteValues(string prelude, string body, Stylesheet sheet)
+    {
+        if (sheet.FontPaletteValues.Count >= MaxFontPaletteValues) return;
+        if (FontPaletteValuesRule.Parse(prelude, body) is { } rule) sheet.FontPaletteValues.Add(rule);
     }
 
     /// <summary>
