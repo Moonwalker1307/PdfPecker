@@ -22,7 +22,18 @@ internal sealed class Element : Node
 
     /// <summary>The attributes in source order; add them with <see cref="AddAttribute"/>.</summary>
     public List<KeyValuePair<string, string>> Attributes => _attributes ?? NoAttributes;
-    public readonly List<Node> Children = new();
+    public List<Node> Children { get; private set; } = new();
+
+    /// <summary>
+    /// Puts another list in the place of the child list and returns the one it replaces. Only the parser calls it, to
+    /// collect the children of an open element in a list it reuses, and it moves the children between the lists itself.
+    /// </summary>
+    public List<Node> SwapChildren(List<Node> children)
+    {
+        var previous = Children;
+        Children = children;
+        return previous;
+    }
 
     // Filled in before styling.
     public string? Id;

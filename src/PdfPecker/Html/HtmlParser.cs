@@ -35,6 +35,55 @@ internal sealed class HtmlParser
     private int _pos;
     private readonly List<Element> _stack = new();
 
+    // An open element collects its children in a list the parser reuses, and gets a list of exactly their number when
+    // it is closed: most elements have one child or a few, for which a list of their own that grows as they are added
+    // allocates two to three times as much. An element's own, empty list waits here, at the element's index in the
+    // stack, and the lists that no open element uses wait in _spareLists.
+    private readonly List<List<Node>> _ownLists = new();
+    private readonly List<List<Node>> _spareLists = new();
+
+    // An element with more children than this keeps the list they were collected in, since a copy of that size costs
+    // more than the unused end of the list.
+    private const int MaxCopiedChildren = 1024;
+
+    private void Push(Element el)
+    {
+        List<Node> shared;
+        if (_spareLists.Count > 0)
+        {
+            shared = _spareLists[_spareLists.Count - 1];
+            _spareLists.RemoveAt(_spareLists.Count - 1);
+        }
+        else shared = new List<Node>();
+        var own = el.SwapChildren(shared);
+        // Only a head that is opened a second time has children already.
+        if (own.Count > 0)
+        {
+            shared.AddRange(own);
+            own.Clear();
+        }
+        _stack.Add(el);
+        _ownLists.Add(own);
+    }
+
+    /// <summary>Closes the open elements from the one at <paramref name="index"/> in the stack to the innermost.</summary>
+    private void PopTo(int index)
+    {
+        for (int i = _stack.Count - 1; i >= index; i--)
+        {
+            var shared = _stack[i].Children;
+            if (shared.Count > MaxCopiedChildren) continue;
+            var own = _ownLists[i];
+            _stack[i].SwapChildren(own);
+            if (own.Capacity < shared.Count) own.Capacity = shared.Count;
+            own.AddRange(shared);
+            shared.Clear();
+            _spareLists.Add(shared);
+        }
+        _stack.RemoveRange(index, _stack.Count - index);
+        _ownLists.RemoveRange(index, _ownLists.Count - index);
+    }
+
     // Whether the parser makes the html, head and body elements a document leaves out, as browsers do. The first one
     // of each is kept here; a second html or body tag only adds the attributes the first one lacks.
     private readonly bool _implied;
@@ -111,11 +160,12 @@ internal sealed class HtmlParser
     {
         var p = new HtmlParser(html, impliedStructure);
         var doc = new Element("#document");
-        p._stack.Add(doc);
+        p.Push(doc);
         p.Run();
         // A document with markup but no content still has a body.
         if (p._html != null && p._body == null) p.StartBody();
         p.FlushMerge();
+        p.PopTo(0);
         used = p._used;
         return doc;
     }
@@ -125,13 +175,13 @@ internal sealed class HtmlParser
         if (_html != null) return;
         _html = new Element("html");
         _stack[0].AppendChild(_html);
-        _stack.Add(_html);
+        Push(_html);
     }
 
     private void PopHead()
     {
         int i = _head == null ? -1 : _stack.LastIndexOf(_head);
-        if (i > 0) _stack.RemoveRange(i, _stack.Count - i);
+        if (i > 0) PopTo(i);
     }
 
     private void StartBody(Element? written = null)
@@ -145,7 +195,7 @@ internal sealed class HtmlParser
         }
         _body = written ?? new Element("body") { ImpliedBody = true };
         _html!.AppendChild(_body);
-        _stack.Add(_body);
+        Push(_body);
     }
 
     // Each merged attribute is looked up among the target's, so a document of thousands of body tags with attributes of
@@ -175,7 +225,7 @@ internal sealed class HtmlParser
                 {
                     _html = el;
                     _stack[0].AppendChild(el);
-                    _stack.Add(el);
+                    Push(el);
                 }
                 return true;
             case "head":
@@ -183,7 +233,7 @@ internal sealed class HtmlParser
                 EnsureHtml();
                 _head = el;
                 _html!.AppendChild(el);
-                _stack.Add(el);
+                Push(el);
                 return true;
             case "body":
                 if (_body != null)
@@ -208,7 +258,7 @@ internal sealed class HtmlParser
             _head = new Element("head");
             _html!.AppendChild(_head);
         }
-        if (!_stack.Contains(_head)) _stack.Add(_head);
+        if (!_stack.Contains(_head)) Push(_head);
         return false;
     }
 
@@ -345,7 +395,7 @@ internal sealed class HtmlParser
                 // As in browsers, rows directly inside a table get an implied <tbody>.
                 var tbody = new Element("tbody");
                 Current.AppendChild(tbody);
-                _stack.Add(tbody);
+                Push(tbody);
             }
             bool inTable = IsTableContext(Current.Name) && !IsTableStructure(name);
             if (inTable && name == "form")
@@ -375,7 +425,7 @@ internal sealed class HtmlParser
                 return;
             }
             // Deeply nested documents are flattened instead of risking a stack overflow in the recursive stages.
-            if (_stack.Count < MaxDepth) _stack.Add(el);
+            if (_stack.Count < MaxDepth) Push(el);
         }
     }
 
@@ -483,7 +533,7 @@ internal sealed class HtmlParser
             string n = _stack[i].Name;
             if (n == name)
             {
-                _stack.RemoveRange(i, _stack.Count - i);
+                PopTo(i);
                 return;
             }
             if (n == boundary1 || n == boundary2 || n == boundary3) return;
@@ -533,7 +583,7 @@ internal sealed class HtmlParser
             string n = _stack[i].Name;
             if (n is "td" or "th" or "caption") return;
             if (!IsTableContext(n)) continue;
-            if (i + 1 < _stack.Count && _stack[i + 1].Parent != _stack[i]) _stack.RemoveRange(i + 1, _stack.Count - i - 1);
+            if (i + 1 < _stack.Count && _stack[i + 1].Parent != _stack[i]) PopTo(i + 1);
             return;
         }
     }
@@ -551,7 +601,7 @@ internal sealed class HtmlParser
         for (int i = _stack.Count - 1; i > 0; i--)
         {
             string n = _stack[i].Name;
-            if (n == "select") { _stack.RemoveRange(i, _stack.Count - i); return; }
+            if (n == "select") { PopTo(i); return; }
             if (n is not ("option" or "optgroup")) return;
         }
     }
@@ -590,7 +640,7 @@ internal sealed class HtmlParser
         {
             if (_stack[i].Name == name)
             {
-                _stack.RemoveRange(i, _stack.Count - i);
+                PopTo(i);
                 return;
             }
             // Don't let a stray end tag escape a table cell or table.
