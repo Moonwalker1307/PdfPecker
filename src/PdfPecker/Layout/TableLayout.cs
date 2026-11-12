@@ -1466,11 +1466,18 @@ internal sealed partial class LayoutEngine
             foreach (var cell in m.Rows[k].Cells)
                 end = Math.Max(end, k + cell.RowSpan - 1);
         end = Math.Min(end, m.Rows.Count - 1);
-        int rows = m.Rows.Count;
-        m.SpanShared ??= new bool[rows];
+        m.SpanShared ??= new bool[m.Rows.Count];
         for (int k = r; k <= end; k++) m.SpanShared[k] = true;
-        if (end == r) return;
+        if (end > r) ShareSpanHeights(m, r, end, colX, widths, hs, vs, collapse);
+    }
 
+    /// <summary>
+    /// Shares the height out over rows <paramref name="r"/> to <paramref name="end"/>. It is a method of its own because
+    /// measuring the rows captures its arguments, which would otherwise cost every row of every table an allocation.
+    /// </summary>
+    private void ShareSpanHeights(TableModel m, int r, int end, float[] colX, float[] widths, float hs, float vs, bool collapse)
+    {
+        int rows = m.Rows.Count;
         var heights = new float[end - r + 1];
         var spans = new List<(CellModel Cell, float Needed)>();
         var outerExtra = m.SpanExtra;
