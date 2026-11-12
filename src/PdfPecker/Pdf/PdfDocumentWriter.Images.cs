@@ -10,8 +10,10 @@ namespace PdfPecker.Pdf;
 /// <summary>Streams, images and the watermark.</summary>
 internal sealed partial class PdfDocumentWriter
 {
-    // Reused for every compressed stream, so compressing a page does not allocate a new buffer each time.
-    private MemoryStream? _deflated;
+    // Reused for every compressed stream, so compressing a page does not allocate a new buffer each time, and rented
+    // from the array pool, so a conversion does not allocate one of its own either.
+    private ByteBuffer? _deflated;
+    private ByteBufferStream? _deflatedStream;
 
     private void WriteStream(int id, ReadOnlySpan<byte> data, bool compress, string? extraDict)
     {
@@ -19,10 +21,10 @@ internal sealed partial class PdfDocumentWriter
         bool filtered = false;
         if (compress && data.Length > 64)
         {
-            var ms = _deflated ??= new MemoryStream(Math.Max(4096, data.Length / 3 + 64));
-            ms.SetLength(0);
-            using (var z = new ZLibStream(ms, _level, leaveOpen: true)) z.Write(data);
-            body = ms.GetBuffer().AsSpan(0, (int)ms.Length);
+            var deflated = _deflated ??= ByteBuffer.Rent(Math.Max(4096, data.Length / 3 + 64));
+            deflated.Clear();
+            using (var z = new ZLibStream(_deflatedStream ??= new ByteBufferStream(deflated), _level, leaveOpen: true)) z.Write(data);
+            body = deflated.Span;
             filtered = true;
         }
         WriteStreamObject(id, body, filtered, extraDict);

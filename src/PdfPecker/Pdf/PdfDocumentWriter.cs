@@ -531,6 +531,7 @@ internal sealed partial class PdfDocumentWriter
 
         var pdf = _out.Span.ToArray();
         _out.Return();
+        _deflated?.Return();
         // The linearized file is written from the finished one, encrypted again with the same keys.
         if (Linearize) pdf = PdfLinearizer.LinearizeOwn(pdf, _crypt, Security?.OwnerPassword ?? Security?.UserPassword, Cancellation);
         _crypt?.Dispose();
