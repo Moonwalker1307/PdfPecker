@@ -242,6 +242,10 @@ internal sealed class Element : Node
     /// <summary>Concatenated text of all descendant text nodes.</summary>
     public string InnerText()
     {
+        // A style or title element, and most elements whose text is asked for, hold one piece of text: that string
+        // is the answer, without a copy of it.
+        if (Children.Count == 0) return "";
+        if (Children.Count == 1 && Children[0] is TextNode only) return only.Text;
         var sb = new System.Text.StringBuilder();
         AppendText(this, sb);
         return sb.ToString();
