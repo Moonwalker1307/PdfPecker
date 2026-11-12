@@ -115,6 +115,33 @@ public class Css3Tests
     }
 
     [Theory]
+    [InlineData("color-mix(in hsl, red, blue)", 0xFFFF00FF)]             // the shorter arc, through magenta
+    [InlineData("color-mix(in hsl longer hue, red, blue)", 0xFF00FF00)]  // the longer one, through green
+    [InlineData("color-mix(in hsl increasing hue, blue, red)", 0xFFFF00FF)]
+    [InlineData("color-mix(in hsl decreasing hue, blue, red)", 0xFF00FF00)]
+    [InlineData("color-mix(in srgb, red, blue 25%)", 0xFFBF0040)]        // only the second percentage given
+    [InlineData("color-mix(in srgb, red 20%, blue 20%)", 0x66800080)]    // a sum below 100% scales the alpha
+    [InlineData("color-mix(in srgb, red 60%, blue 60%)", 0xFF800080)]    // a sum above 100% is normalised
+    [InlineData("color-mix(in hwb, red, blue)", 0xFFFF00FF)]
+    public void Colour_mix_hue_methods_and_percentages(string css, uint expected) => Near(expected, Parse(css));
+
+    [Theory]
+    [InlineData("color-mix(in srgb, red -10%, blue)")]
+    [InlineData("color-mix(in srgb, red 0%, blue 0%)")]
+    [InlineData("color-mix(srgb, red, blue)")]
+    [InlineData("color-mix(in nowhere, red, blue)")]
+    [InlineData("color-mix(in srgb, red 150%, blue)")]   // a percentage above 100%
+    [InlineData("color-mix(in hsl sideways hue, red, blue)")]
+    [InlineData("color-mix(in srgb longer hue, red, blue)")]   // no hue to interpolate
+    public void Invalid_colour_mixes_are_rejected(string css) => Assert.False(CssColor.TryParse(css, Black, out _), css);
+
+    [Theory]
+    [InlineData("contrast-color(#050505)", 0xFFFFFFFF)]   // near black, on the linear part of the sRGB curve
+    [InlineData("contrast-color(#0a0a0a)", 0xFFFFFFFF)]
+    [InlineData("contrast-color(white)", 0xFF000000)]
+    public void Contrast_color_of_very_dark_and_light_colours(string css, uint expected) => Near(expected, Parse(css));
+
+    [Theory]
     [InlineData("rgb(from red r g)")]
     [InlineData("rgb(from red r g frobnicate)")]
     [InlineData("rgb(from notacolour r g b)")]

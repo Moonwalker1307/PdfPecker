@@ -554,7 +554,14 @@ internal static class ColorFunctions
         if (head.Count < 2 || head[0] != "in") return false;
         string space = head[1];
         string hueMethod = "shorter";
-        if (head.Count == 4 && head[3] == "hue") hueMethod = head[2];
+        if (head.Count == 4 && head[3] == "hue")
+        {
+            // Only the four methods exist, and only a polar space has a hue to interpolate, so anything else makes the
+            // whole value invalid, as in Chrome.
+            hueMethod = head[2];
+            if (hueMethod is not ("shorter" or "longer" or "increasing" or "decreasing")) return false;
+            if (space is not ("hsl" or "hwb" or "lch" or "oklch")) return false;
+        }
         else if (head.Count != 2) return false;
 
         if (!MixArg(parts[1], current, depth, out var c1, out double? p1) || !MixArg(parts[2], current, depth, out var c2, out double? p2))

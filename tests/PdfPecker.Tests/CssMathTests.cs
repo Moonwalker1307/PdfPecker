@@ -185,6 +185,10 @@ public class CssMathTests
     [Fact]
     public void Numbers_are_folded_for_number_properties()
     {
+        Assert.Equal("rgb(2 12 0)", CssMath.FoldNumbers("rgb(calc(1 * 2) calc(3 * 4) 0)"));
+        Assert.Equal("a 0.333333 b 0.5", CssMath.FoldNumbers("a calc(1 / 3) b calc(1 / 2)"));
+        Assert.Equal("rotate(90deg) scale(2)", CssMath.FoldNumbers("rotate(calc(45deg * 2)) scale(calc(4 / 2))"));
+
         Assert.Equal("0.5", CssMath.FoldNumbers("calc(1 / 2)"));
         Assert.Equal("rgb(128 0 0)", CssMath.FoldNumbers("rgb(calc(256 / 2) 0 0)"));
         Assert.Equal("calc(1pt + 2pt)", CssMath.FoldNumbers("calc(1pt + 2pt)"));
