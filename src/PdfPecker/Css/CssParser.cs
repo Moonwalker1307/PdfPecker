@@ -226,9 +226,10 @@ internal static partial class CssParser
         if (string.IsNullOrWhiteSpace(body)) return;
         var array = scope.Sheet.ShareDeclarations ? SharedDeclarations.Get(body) : Parse(body);
         if (array.Length == 0) return;
+        bool share = scope.Sheet.ShareDeclarations && scope.Scope == null;
         foreach (var text in selectors)
         {
-            if (Selector.Parse(text) is { } selector)
+            if ((share ? SharedSelectors.Get(text) : Selector.Parse(text)) is { } selector)
                 scope.Sheet.Rules.Add(new StyleRule(selector, array, scope.Sheet.NextOrder++, scope.Layer, scope.Containers, scope.Scope));
         }
     }
