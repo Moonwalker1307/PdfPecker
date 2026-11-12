@@ -33,8 +33,10 @@ internal sealed partial class LayoutEngine
     {
         public Element Tr = null!;
         public Element? Group; // the thead, tbody or tfoot the row is in
-        public readonly List<CellModel> Cells = new();     // cells starting in this row
-        public readonly List<CellModel> Ending = new();    // cells (any start row) ending in this row
+        public List<CellModel> Cells = null!;  // cells starting in this row
+        // Cells (any start row) ending in this row. In a table where no cell spans rows these are the row's own cells,
+        // and it is the same list.
+        public List<CellModel> Ending = null!;
     }
 
     /// <summary>
@@ -206,7 +208,7 @@ internal sealed partial class LayoutEngine
         var old = m.Rows.ToArray();
         m.Rows.Clear();
         foreach (var row in old)
-            if (!row.Tr.Style.Collapsed) m.Rows.Add(new RowModel { Tr = row.Tr, Group = row.Group });
+            if (!row.Tr.Style.Collapsed) m.Rows.Add(new RowModel { Tr = row.Tr, Group = row.Group, Cells = new(), Ending = new() });
         foreach (var row in old)
             foreach (var cell in row.Cells)
             {
@@ -280,12 +282,21 @@ internal sealed partial class LayoutEngine
             row[c] = true;
         }
 
+        m.Rows.Capacity = trs.Count;
         for (int r = 0; r < trs.Count; r++)
+        {
+            // A row's list is made as long as the row has cells, as it grew in steps that were thrown away.
+            int cells = 0;
+            foreach (var child in trs[r].Children)
+                if (child is Element { Style.Display: Display.TableCell }) cells++;
             m.Rows.Add(new RowModel
             {
                 Tr = trs[r],
                 Group = trs[r].Parent is { Style.Display: Display.TableRowGroup or Display.TableHeaderGroup or Display.TableFooterGroup } g ? g : null,
+                Cells = new List<CellModel>(cells),
             });
+        }
+        bool rowSpans = false;
         for (int r = 0; r < trs.Count; r++)
         {
             int col = 0;
@@ -305,11 +316,16 @@ internal sealed partial class LayoutEngine
                 for (int rr = r + 1; rr < r + cell.RowSpan; rr++)
                     for (int cc = col; cc < col + colspan; cc++) Occupy(rr, cc);
                 m.Rows[r].Cells.Add(cell);
-                m.Rows[r + cell.RowSpan - 1].Ending.Add(cell);
+                rowSpans |= cell.RowSpan > 1;
                 col += colspan;
                 if (col > m.ColCount) m.ColCount = col;
             }
         }
+        // The cells ending in each row, in the order of their first rows.
+        foreach (var row in m.Rows) row.Ending = rowSpans ? new List<CellModel>() : row.Cells;
+        if (rowSpans)
+            foreach (var row in m.Rows)
+                foreach (var cell in row.Cells) m.Rows[cell.Row + cell.RowSpan - 1].Ending.Add(cell);
 
         if (RemoveCollapsed(m, cols, columns: !keepColumns) is { } kept)
         {
