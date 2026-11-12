@@ -162,7 +162,8 @@ are in `BUILD.md` and `TESTING.md`.
   needs an XML doc comment (CS1591 is an error). Add overloads rather than changing signatures, add a README line for
   a new feature, and remember the manual in PdfPecker.Web gets a docs change that goes live with the next release.
 - **Newer .NET APIs**: the library also targets .NET 8, which lacks `Dictionary` alternate lookups, span `Split` and
-  some other APIs. Guard them with `#if NET9_0_OR_GREATER` and keep a .NET 8 path.
+  some other APIs. Guard them with `#if NET9_0_OR_GREATER` and keep a .NET 8 path. 1.25.0 is the last release for
+  .NET 8 and 9 (`README.md`); the release after it drops them.
 - **Parsers of untrusted input** (PDF, images, fonts, HTML, CSS, SVG, Markdown): add resource limits, a fuzz target in
   `fuzz/PdfPecker.Fuzz`, and for each bug fix a regression test in the `HostileInputCollection`.
 - **Generated data**: change the generator, never its output.

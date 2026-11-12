@@ -28,6 +28,10 @@ dotnet add package PdfPecker
 
 The package targets `net8.0`, `net9.0`, `net10.0` and `net11.0`, so it works on .NET 8 and later, on Windows, Linux and macOS.
 
+**1.25.0 is the last release for .NET 8 and 9.** Microsoft ended support for both on 10 November 2026. The next
+release targets .NET 10 and later only; 1.25.0 and earlier releases keep working on .NET 8 and 9. This applies to
+PdfPecker.Fluent, PdfPecker.Testing, PdfPecker.Razor and the `pdfpecker` tool too.
+
 ## Quick start
 
 ```csharp

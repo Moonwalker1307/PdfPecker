@@ -132,7 +132,8 @@ Document.Create(container =>
   and `GenerateHtml`, which shows the HTML PdfPecker renders and opens in a browser. `GeneratePdfAndShow` and
   `GenerateHtmlAndShow` write a temporary file and open it, and `Placeholders` makes up text, numbers, dates,
   colours and images (the same ones on every run) for trying out a layout.
-- **.NET 8, 9, 10 and 11**, trimmable and Native AOT compatible, culture-independent output.
+- **.NET 8, 9, 10 and 11**, trimmable and Native AOT compatible, culture-independent output. 1.25.0 is the
+  last release for .NET 8 and 9; the next release targets .NET 10 and later only.
 
 ## Safety
 
