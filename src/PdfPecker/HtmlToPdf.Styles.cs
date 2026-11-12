@@ -42,7 +42,8 @@ public static partial class HtmlToPdf
                 {
                     // An @scope block without a start in a style element applies below the style element's parent.
                     sheet.CurrentScopeRoot = e.Parent is { Name: not "#document" } styleParent ? styleParent : null;
-                    CssParser.ParseStylesheet(e.InnerText(), sheet);
+                    // A style element nearly always holds one text node, whose text is the sheet without a copy.
+                    CssParser.ParseStylesheet(e.Children is [TextNode only] ? only.Text : e.InnerText(), sheet);
                     sheet.CurrentScopeRoot = null;
                 }
                 continue;
