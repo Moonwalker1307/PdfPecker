@@ -333,7 +333,9 @@ internal static class TextReadingOrder
         List<FlowWord>? current = null;
         foreach (var block in Columns(blocks))
         {
-            if (block is GroupBlock g && SideBySide(g))
+            // A group that holds columns of its own beside a line or two, such as a page number or a running head set
+            // down the margin, is read part by part too: reading across it would read its columns across.
+            if (block is GroupBlock g && (SideBySide(g) || g.Parts.Exists(p => p.Exists(b => b is GroupBlock inner && SideBySide(inner)))))
             {
                 current = null;
                 foreach (var part in Parts(g)) Layout(part, parts);

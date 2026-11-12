@@ -374,48 +374,96 @@ internal static partial class PageStructure
     /// </summary>
     private static void SideBySide(List<FlowLine> lines, double body, List<FlowBlock> blocks, List<FlowLine> plain)
     {
-        double gapWidth = Math.Max(SideGap * body, 12);
+        double gapWidth = Math.Max(SideGap * body, 12), narrowWidth = Math.Max(NarrowGap * body, 5);
         double minX = lines.Min(l => l.X0), maxX = lines.Max(l => l.X1);
         var pending = new List<FlowLine>();
+        // Each line's gaps of either width, found once, as every run from a line before it looks at them again.
+        var wideGaps = new List<(double X0, double X1)>?[lines.Count];
+        var narrowGaps = new List<(double X0, double X1)>?[lines.Count];
+        int othersFrom = 0, narrowFrom = 0;
         for (int i = 0; i < lines.Count;)
         {
-            // The gaps every line from i on leaves, narrowed line by line while one stays wide enough.
-            var common = Gaps(lines[i], minX, maxX, gapWidth);
-            int j = i + 1;
-            (double X0, double X1) best = default;
-            int bestEnd = -1;
-            // The run's text must reach both sides of a gap: its leftmost word end and rightmost word start.
-            double leftEnd = LeftEnd(lines[i].Words), rightStart = RightStart(lines[i].Words);
-            while (common.Count > 0)
+            // A narrower gap, such as the gutter of a report set in two tight columns, sets apart only a long run of
+            // running text on both sides, as a gap in a few lines may be the spaces of justified text lining up.
+            // Runs from the lines after a failed one end where it did and are mostly the same lines, which the search
+            // would split and measure again, so the further cuts and the narrow gap are not tried again within it, as
+            // in a long table, where every line starts such a run, that would take time that grows with its square.
+            var group = Try(i, gapWidth, 2, narrow: false, others: i >= othersFrom, out int end);
+            if (group == null && end > i) othersFrom = Math.Max(othersFrom, end);
+            if (group == null && i >= narrowFrom)
             {
-                foreach (var g in common)
-                {
-                    if (j - i < 2 || g.X0 <= minX || g.X1 >= maxX || leftEnd > g.X0 || rightStart < g.X1) continue;
-                    best = g;
-                    bestEnd = j;
-                }
-                if (j >= lines.Count) break;
-                common = Intersect(common, Gaps(lines[j], minX, maxX, gapWidth), gapWidth);
-                leftEnd = Math.Min(leftEnd, LeftEnd(lines[j].Words));
-                rightStart = Math.Max(rightStart, RightStart(lines[j].Words));
-                j++;
+                group = Try(i, narrowWidth, NarrowRunLines, narrow: true, others: true, out end);
+                if (group == null && end > i) narrowFrom = end;
             }
-            if (bestEnd > 0 && Separate(lines.GetRange(i, bestEnd - i), (best.X0 + best.X1) / 2) is { } group)
+            if (group != null)
             {
                 Aligned(pending, body, blocks, plain);
                 pending = new List<FlowLine>();
                 blocks.Add(group);
-                i = bestEnd;
+                i = end;
                 continue;
             }
             pending.Add(lines[i++]);
         }
         Aligned(pending, body, blocks, plain);
 
-        GroupBlock? Separate(List<FlowLine> run, double cut)
+        // The parts side by side of the longest run of at least minLines lines from i that leaves a gap of at least
+        // width down every line, with text on both sides of it, split at the last such gap from the left or, when the
+        // parts there are not read apart and others is set, at the others from the widest; end is where the run ends.
+        GroupBlock? Try(int i, double width, int minLines, bool narrow, bool others, out int end)
+        {
+            end = i;
+            if (Run(i, width, minLines, out var found) is not int runEnd) return null;
+            end = runEnd;
+            var run = lines.GetRange(i, runEnd - i);
+            var group = Separate(run, (found[^1].X0 + found[^1].X1) / 2, narrow);
+            if (group != null || !others) return group;
+            // A table beside text leaves gaps between its columns too, and the one to its right is not the parts' gap.
+            // Only the widest few are tried, so a line of many spaced-out words takes bounded time.
+            foreach (var g in found.Take(found.Count - 1).OrderByDescending(g => g.X1 - g.X0).Take(MaxOtherCuts))
+                if (Separate(run, (g.X0 + g.X1) / 2, narrow) is { } other) return other;
+            return null;
+        }
+
+        // The end of the longest run of at least minLines lines from i that leaves a gap of at least width down every
+        // line, with text on both sides of it, and the gaps it leaves, from the left; null when there is none.
+        int? Run(int i, double width, int minLines, out List<(double X0, double X1)> best)
+        {
+            // The gaps every line from i on leaves, narrowed line by line while one stays wide enough.
+            var cache = width == gapWidth ? wideGaps : narrowGaps;
+            var common = cache[i] ??= Gaps(lines[i], minX, maxX, width);
+            int j = i + 1;
+            best = new List<(double X0, double X1)>();
+            int? bestEnd = null;
+            // The run's text must reach both sides of a gap: its leftmost word end and rightmost word start.
+            double leftEnd = LeftEnd(lines[i].Words), rightStart = RightStart(lines[i].Words);
+            while (common.Count > 0)
+            {
+                List<(double X0, double X1)>? found = null;
+                foreach (var g in common)
+                {
+                    if (j - i < minLines || g.X0 <= minX || g.X1 >= maxX || leftEnd > g.X0 || rightStart < g.X1) continue;
+                    (found ??= new List<(double X0, double X1)>()).Add(g);
+                }
+                if (found != null)
+                {
+                    best = found;
+                    bestEnd = j;
+                }
+                if (j >= lines.Count) break;
+                common = Intersect(common, cache[j] ??= Gaps(lines[j], minX, maxX, width), width);
+                leftEnd = Math.Min(leftEnd, LeftEnd(lines[j].Words));
+                rightStart = Math.Max(rightStart, RightStart(lines[j].Words));
+                j++;
+            }
+            return bestEnd;
+        }
+
+        GroupBlock? Separate(List<FlowLine> run, double cut, bool narrow)
         {
             var left = Split(run, w => w.CenterX < cut);
             var right = Split(run, w => w.CenterX > cut);
+            if (narrow && !(Running(left, gapWidth, out _) && Running(right, gapWidth, out _))) return null;
             // Parts side by side sit level with each other. A letter's date set on the right above the salutation, or a
             // signature set on the right below the closing, leaves a gap down the lines too, but each is only above or
             // below the other text and is read in its place.
@@ -427,7 +475,7 @@ internal static partial class PageStructure
                 && Math.Abs(o.Size - l.Size) <= 0.1 * Math.Max(l.Size, o.Size)));
             // Lists side by side line up as a table's rows do, but a table's cells seldom start with list markers.
             bool lists = ListItems(left) >= 2 && ListItems(right) >= 2;
-            if (shared > 0.3 * few.Count && !lists) return null;
+            if (shared > 0.3 * few.Count && !lists && !Columns(left, right, gapWidth)) return null;
             var group = new GroupBlock { Top = run.Min(l => l.Top), Left = run.Min(l => l.X0) };
             group.Parts.Add(Flow(left, body, columns: true));
             group.Parts.Add(Flow(right, body, columns: true));
@@ -435,6 +483,65 @@ internal static partial class PageStructure
             return group;
         }
     }
+
+    /// <summary>
+    /// Whether parts that share baselines, as a table's columns do, are still read apart: columns of running text set
+    /// on a baseline grid, as newspapers and journals set them, whose lines are full of words where a table's cells hold
+    /// a few, or a column of prose that wraps from line to line beside a table of its own, as a journal sets a table of
+    /// figures in one column beside the text of the other.
+    /// </summary>
+    private static bool Columns(List<FlowLine> left, List<FlowLine> right, double gapWidth)
+    {
+        bool leftRunning = Running(left, gapWidth, out double leftCells), rightRunning = Running(right, gapWidth, out double rightCells);
+        return leftRunning && rightRunning
+            || leftRunning && Wraps(left) && rightCells >= MinTableCells
+            || rightRunning && Wraps(right) && leftCells >= MinTableCells;
+    }
+
+    /// <summary>The cells to a line, on average, that make the lines beside a column of prose a table.</summary>
+    private const double MinTableCells = 2;
+
+    /// <summary>
+    /// Whether lines wrap as prose does: a good share of them go on in lower case on the next line or end with a hyphen.
+    /// </summary>
+    private static bool Wraps(List<FlowLine> lines)
+    {
+        int wraps = 0;
+        for (int i = 0; i + 1 < lines.Count; i++)
+            if (lines[i].Words[^1].Text.EndsWith('-') || lines[i + 1].Words[0].Text is { Length: > 0 } t && char.IsLower(t[0])) wraps++;
+        return wraps >= 0.3 * (lines.Count - 1);
+    }
+
+    /// <summary>
+    /// Whether lines are running text: a good many of them, holding on average as many letters to a stretch between
+    /// gaps of <paramref name="gapWidth"/> or more as a narrow newspaper column has to a line, which the entries of a
+    /// table seldom do. <paramref name="cellsPerLine"/> is how many such stretches a line has on average.
+    /// </summary>
+    private static bool Running(List<FlowLine> lines, double gapWidth, out double cellsPerLine)
+    {
+        cellsPerLine = 0;
+        if (lines.Count == 0) return false;
+        // Counted per stretch between gaps as wide as the one that splits the parts, so that a row of a wide table, many
+        // short cells to the line, is not taken for text. Narrower gaps do not count: a scan's text layer can leave a
+        // space between words as wide as a table's gap between cells.
+        int letters = 0, cells = 0;
+        foreach (var l in lines)
+        {
+            cells++;
+            double at = double.MaxValue;
+            foreach (var w in l.Words.OrderBy(w => w.X0))
+            {
+                if (w.X0 - at >= gapWidth) cells++;
+                at = at == double.MaxValue ? w.X1 : Math.Max(at, w.X1);
+                letters += w.Text.Length + 1;
+            }
+        }
+        cellsPerLine = (double)cells / lines.Count;
+        return lines.Count >= RunningLines && letters >= RunningLetters * cells;
+    }
+
+    /// <summary>The fewest lines, and the fewest letters a cell on average, that <see cref="Running"/> takes as running text.</summary>
+    private const int RunningLines = 5, RunningLetters = 20;
 
     /// <summary>
     /// The leftmost end of a line's words, as Enumerable.Min finds it, which is NaN when any end is; this runs for
@@ -469,7 +576,19 @@ internal static partial class PageStructure
     }
 
     /// <summary>A gap this many body font sizes wide between two parts of a page sets them side by side.</summary>
-    private const double SideGap = 1.5;
+    private const double SideGap = 1.2;
+
+    /// <summary>
+    /// A gap this many body font sizes wide sets apart columns of running text, when it runs down at least
+    /// <see cref="NarrowRunLines"/> lines.
+    /// </summary>
+    private const double NarrowGap = 0.6;
+
+    /// <summary>The fewest lines a gap narrower than <see cref="SideGap"/> must run down to set columns apart.</summary>
+    private const int NarrowRunLines = 8;
+
+    /// <summary>How many gaps besides the last of a run are tried as the one between its parts.</summary>
+    private const int MaxOtherCuts = 3;
 
     /// <summary>
     /// Whether one of <paramref name="lines"/> is level with the text of <paramref name="other"/>: it overlaps one of the
