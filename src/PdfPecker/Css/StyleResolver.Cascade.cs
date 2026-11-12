@@ -48,6 +48,12 @@ internal sealed partial class StyleResolver
         e.Style = Compute(e.Name, parent, e);
         if (e.Style.Contents) e.Style = ContentsStyle(e.Name, e.Style, parent);
         if (e.AltText != null && e.Style.Display == Display.Inline) e.Style = AltTextBox(e.Style);
+        // With field-sizing: content a drop-down is as wide as the option it shows, so the other options give it no width.
+        if (parent.FieldSizingContent && e.Name == "pdf-field-value" && e.HasAttribute("sizer") && e.HasAttribute("combo") && e.Style.Display != Display.None)
+        {
+            e.Style = e.Style.Clone();
+            e.Style.Display = Display.None;
+        }
         if (e.Style.CounterReset != null || e.Style.CounterSet != null || e.Style.CounterIncrement != null) _countersUsed = true;
     }
 
@@ -236,7 +242,7 @@ internal sealed partial class StyleResolver
             if (s.BorderLeftColor == null && s.BorderLeftStyle is BorderStyle.Inset or BorderStyle.Outset) s.BorderLeftColor = RuleBase;
         }
         if (s.Stretched != StretchSizes.None) ResolveStretched(s);
-        if (!s.ControlWidth.IsAuto && s.Width.IsAuto && s.WidthKeyword == SizeKeyword.None && !StretchedAcross(s, parent)) s.Width = s.ControlWidth;
+        if (!s.ControlWidth.IsAuto && !s.FieldSizingContent && s.Width.IsAuto && s.WidthKeyword == SizeKeyword.None && !StretchedAcross(s, parent)) s.Width = s.ControlWidth;
         // Flex and grid items are laid out as blocks, which carry their own opacity layer.
         bool inlineBox = s.Display == Display.Inline && (!parent.IsFlex || parent.LegacyBox) && !parent.IsGrid;
         s.InlineFade = inlineBox ? s.Opacity * (parent.Display == Display.Inline ? parent.InlineFade : 1) : 1;

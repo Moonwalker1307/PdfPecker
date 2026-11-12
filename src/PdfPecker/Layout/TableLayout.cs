@@ -2089,9 +2089,10 @@ internal sealed partial class LayoutEngine
             for (int c = 0; c < m.ColCount; c++) mn += m.ColMin[c];
             result = (mn, Math.Max(mn, mx + ColumnsMaxWidth(m)));
         }
-        else if (e.Control is { Kind: ControlKind.Text })
+        else if (e.Control is { Kind: ControlKind.Text } && !s.FieldSizingContent)
         {
-            // A text field is as wide as its size attribute (a textarea's cols) says, whatever its value, as in Chrome.
+            // A text field is as wide as its size attribute (a textarea's cols) says, whatever its value, as in Chrome;
+            // with field-sizing: content it is measured by its value like any other box.
             float w = FormControls.FieldWidthEm(FormControls.FieldChars(e) ?? 20) * s.FontSize;
             result = (w + frame, w + frame);
         }
