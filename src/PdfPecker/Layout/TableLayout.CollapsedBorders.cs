@@ -304,13 +304,14 @@ internal sealed partial class LayoutEngine
     /// to the pixel grid); as in Chrome, the borders stay on top. The borders the row's own cells and later rows draw
     /// come after its backgrounds and cover them anyway.
     /// </summary>
-    private sealed class EarlierBorders(float left, float right, float bottom)
-    {
-        public readonly float Left = left, Right = right, Bottom = bottom;
-        // The cells starting in the row whose top border was drawn before, with half its width, by column: in a table
-        // of thousands of columns most rows have few cells.
-        public readonly List<(int Col, int Span, float Inset)> Tops = new();
-    }
+    /// <param name="Left">Half the table's left border where the table draws it whole, else 0.</param>
+    /// <param name="Right">Half the table's right border where the table draws it whole, else 0.</param>
+    /// <param name="Bottom">Half the table's bottom border under its last row where the table draws it whole, else 0.</param>
+    /// <param name="Tops">
+    /// Whether a cell starting in the row has its top border drawn before (see <see cref="TopInset"/>). The cells are
+    /// asked again where a background is painted rather than listed here, as most rows paint none.
+    /// </param>
+    private readonly record struct EarlierBorders(float Left, float Right, float Bottom, bool Tops);
 
     /// <summary>
     /// The borders drawn before the backgrounds of row <paramref name="r"/> laid out at <paramref name="rowTop"/>: the
@@ -321,15 +322,16 @@ internal sealed partial class LayoutEngine
     {
         var t = m.TableStyle;
         int whole = m.WholeTableSides;
+        bool tops = false;
+        if (!AtPageTop(rowTop))
+            foreach (var cell in m.Rows[r].Cells)
+                tops |= TopInset(m, cell) > 0;
         var under = new EarlierBorders(
             (whole & BoxPainter.Left) != 0 ? t.BorderLeft / 2 : 0,
             (whole & BoxPainter.Right) != 0 ? t.BorderRight / 2 : 0,
-            r == m.Rows.Count - 1 && (whole & BoxPainter.Bottom) != 0 ? t.BorderBottom / 2 : 0);
-        if (!AtPageTop(rowTop))
-            foreach (var cell in m.Rows[r].Cells)
-                if (TopInset(m, cell) is var inset and > 0) under.Tops.Add((cell.Col, cell.ColSpan, inset));
-        if (under.Tops.Count == 0 && under.Left == 0 && under.Right == 0 && under.Bottom == 0) return null;
-        under.Tops.Sort(static (a, b) => a.Col.CompareTo(b.Col));
+            r == m.Rows.Count - 1 && (whole & BoxPainter.Bottom) != 0 ? t.BorderBottom / 2 : 0,
+            tops);
+        if (!tops && under.Left == 0 && under.Right == 0 && under.Bottom == 0) return null;
         return under;
     }
 

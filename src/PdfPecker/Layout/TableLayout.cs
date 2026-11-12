@@ -1440,14 +1440,14 @@ internal sealed partial class LayoutEngine
         // Under the cells, from the bottom up (CSS 2.1 §17.5.1): column groups, columns, the row group and the row.
         if (row.Cells.Count + row.Ending.Count > 0)
         {
-            var under = collapse ? BordersUnder(m, r, rowTop) : null;
+            EarlierBorders? under = collapse ? BordersUnder(m, r, rowTop) : null;
             if (m.ColGroupBackground != null) PaintColumns(m, m.ColGroupBackground, r, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
             if (m.ColBackground != null) PaintColumns(m, m.ColBackground, r, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
             if (row.Group?.Style is { } gs && CssColor.IsVisible(gs.BackgroundColor))
-                PaintRowBackground(m, gs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
+                PaintRowBackground(m, r, gs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
             var rs = row.Tr.Style;
             if (CssColor.IsVisible(rs.BackgroundColor))
-                PaintRowBackground(m, rs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
+                PaintRowBackground(m, r, rs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
         }
         return rowBottom;
     }
@@ -1747,11 +1747,11 @@ internal sealed partial class LayoutEngine
     /// The background of a row or row group across the table. With collapsed borders it stops where the borders already
     /// drawn round the row end (see <see cref="BordersUnder"/>), cell by cell.
     /// </summary>
-    private static void PaintRowBackground(TableModel m, uint color, GroupOp into, float top, float bottom, float[] colX, float[] widths, float hs,
-        EarlierBorders? under)
+    private static void PaintRowBackground(TableModel m, int r, uint color, GroupOp into, float top, float bottom, float[] colX, float[] widths,
+        float hs, EarlierBorders? earlier)
     {
         int n = m.ColCount;
-        if (under == null)
+        if (earlier is not { } under)
         {
             into.Ops.Add(new RectOp(colX[0], top, colX[n] - hs - colX[0], bottom - top, color));
             return;
@@ -1761,19 +1761,30 @@ internal sealed partial class LayoutEngine
         // band.
         float left = colX[0] + under.Left, right = colX[n] - hs - under.Right, b = bottom - under.Bottom;
         float runX = left, runInset = 0;
-        var tops = under.Tops;
-        for (int i = 0; i < tops.Count; i++)
+        // The row's cells whose top border was drawn before, which a row has in the order of their columns.
+        var cells = m.Rows[r].Cells;
+        int count = under.Tops ? cells.Count : 0;
+        for (int i = NextTop(0); i < count;)
         {
-            var (col, span, inset) = tops[m.Rtl ? tops.Count - 1 - i : i];
+            var cell = cells[m.Rtl ? count - 1 - i : i];
+            int col = cell.Col, span = cell.ColSpan;
+            float inset = TopInset(m, cell);
             float x0 = m.Rtl ? ColumnX(m, col + span - 1, colX, widths, hs) : colX[col];
             float x1 = m.Rtl ? col > 0 ? ColumnX(m, col - 1, colX, widths, hs) : colX[n] - hs : col + span < n ? colX[col + span] : colX[n] - hs;
             Switch(Math.Max(x0, left), inset);
-            int next = i + 1;
-            if (next < tops.Count && tops[m.Rtl ? tops.Count - 1 - next : next] is var (nc, ns, ni) && ni == inset
-                && (m.Rtl ? nc + ns == col : nc == col + span)) continue;
+            i = NextTop(i + 1);
+            if (i < count && cells[m.Rtl ? count - 1 - i : i] is var after && TopInset(m, after) == inset
+                && (m.Rtl ? after.Col + after.ColSpan == col : after.Col == col + span)) continue;
             Switch(Math.Min(x1, right), 0);
         }
         if (right > runX) into.Ops.Add(new RectOp(runX, top + runInset, right - runX, b - top - runInset, color));
+
+        // The first of the row's cells from the i-th on, counted from the left, that has such a border.
+        int NextTop(int i)
+        {
+            while (i < count && !(TopInset(m, cells[m.Rtl ? count - 1 - i : i]) > 0)) i++;
+            return i;
+        }
 
         // Ends the band so far at x and starts one with another inset there.
         void Switch(float x, float inset)
@@ -1790,13 +1801,13 @@ internal sealed partial class LayoutEngine
     /// borders it stops where the borders already drawn round the row end (see <see cref="BordersUnder"/>).
     /// </summary>
     private void PaintColumns(TableModel m, uint[] colors, int r, GroupOp into, float top, float bottom, float[] colX, float[] widths, float hs,
-        EarlierBorders? under)
+        EarlierBorders? earlier)
     {
         for (int c = 0; c < m.ColCount; c++)
         {
             if (!CssColor.IsVisible(colors[c]) || m.Grid[r, c] is not { } cell) continue;
             float x = ColumnX(m, c, colX, widths, hs), w = widths[c], t = top, b = bottom;
-            if (under != null)
+            if (earlier is { } under)
             {
                 bool leftEdge = m.Rtl ? c == m.ColCount - 1 : c == 0, rightEdge = m.Rtl ? c == 0 : c == m.ColCount - 1;
                 if (leftEdge) { x += under.Left; w -= under.Left; }
