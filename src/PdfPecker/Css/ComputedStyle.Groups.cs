@@ -5,6 +5,10 @@ namespace PdfPecker.Css;
 // inherited groups, and at one initial instance of each group of properties that are not inherited. A group is copied
 // the first time a style changes a value in it, so a style is a fraction of its full size and creating one copies
 // little. This is the same split Chrome makes in its computed styles.
+// A setter that is given the value the group already has leaves the group alone: a declaration that repeats the initial
+// or inherited value (display on every element sets LegacyBox, width its keyword) would otherwise copy a whole group
+// to change nothing. The SVG paint group is the exception, because sharing it with the parent is what tells an element
+// that sets no paint of its own (see InheritsSvgPaint).
 internal sealed partial class ComputedStyle
 {
     private TypographyFields _typography = TypographyFields.Initial;
@@ -40,50 +44,50 @@ internal sealed partial class ComputedStyle
 
     // ---- Inherited text and font properties that most text leaves at their initial values.
 
-    public string? FontVariationSettings { get => _typography.FontVariationSettings; set => Typography.FontVariationSettings = value; }
-    public bool FontOpticalSizingNone { get => _typography.FontOpticalSizingNone; set => Typography.FontOpticalSizingNone = value; }
-    public TextAlign? TextAlignLast { get => _typography.TextAlignLast; set => Typography.TextAlignLast = value; }
-    public TextJustify TextJustify { get => _typography.TextJustify; set => Typography.TextJustify = value; }
-    public TextSpacingTrim TextSpacingTrim { get => _typography.TextSpacingTrim; set => Typography.TextSpacingTrim = value; }
-    public TextAutospace TextAutospace { get => _typography.TextAutospace; set => Typography.TextAutospace = value; }
-    public TextOrientation TextOrientation { get => _typography.TextOrientation; set => Typography.TextOrientation = value; }
-    public bool TextCombineUpright { get => _typography.TextCombineUpright; set => Typography.TextCombineUpright = value; }
-    public TextAlign? BlockAlign { get => _typography.BlockAlign; set => Typography.BlockAlign = value; }
-    public int TabSize { get => _typography.TabSize; set => Typography.TabSize = value; }
-    public string[]? Quotes { get => _typography.Quotes; set => Typography.Quotes = value; }
-    public string? HyphenateCharacter { get => _typography.HyphenateCharacter; set => Typography.HyphenateCharacter = value; }
-    public string? BlockEllipsis { get => _typography.BlockEllipsis; set => Typography.BlockEllipsis = value; }
+    public string? FontVariationSettings { get => _typography.FontVariationSettings; set { if (_typography.FontVariationSettings != value) Typography.FontVariationSettings = value; } }
+    public bool FontOpticalSizingNone { get => _typography.FontOpticalSizingNone; set { if (_typography.FontOpticalSizingNone != value) Typography.FontOpticalSizingNone = value; } }
+    public TextAlign? TextAlignLast { get => _typography.TextAlignLast; set { if (_typography.TextAlignLast != value) Typography.TextAlignLast = value; } }
+    public TextJustify TextJustify { get => _typography.TextJustify; set { if (_typography.TextJustify != value) Typography.TextJustify = value; } }
+    public TextSpacingTrim TextSpacingTrim { get => _typography.TextSpacingTrim; set { if (_typography.TextSpacingTrim != value) Typography.TextSpacingTrim = value; } }
+    public TextAutospace TextAutospace { get => _typography.TextAutospace; set { if (_typography.TextAutospace != value) Typography.TextAutospace = value; } }
+    public TextOrientation TextOrientation { get => _typography.TextOrientation; set { if (_typography.TextOrientation != value) Typography.TextOrientation = value; } }
+    public bool TextCombineUpright { get => _typography.TextCombineUpright; set { if (_typography.TextCombineUpright != value) Typography.TextCombineUpright = value; } }
+    public TextAlign? BlockAlign { get => _typography.BlockAlign; set { if (_typography.BlockAlign != value) Typography.BlockAlign = value; } }
+    public int TabSize { get => _typography.TabSize; set { if (_typography.TabSize != value) Typography.TabSize = value; } }
+    public string[]? Quotes { get => _typography.Quotes; set { if (_typography.Quotes != value) Typography.Quotes = value; } }
+    public string? HyphenateCharacter { get => _typography.HyphenateCharacter; set { if (_typography.HyphenateCharacter != value) Typography.HyphenateCharacter = value; } }
+    public string? BlockEllipsis { get => _typography.BlockEllipsis; set { if (_typography.BlockEllipsis != value) Typography.BlockEllipsis = value; } }
     public HyphenateLimits HyphenateLimitChars { get => _typography.HyphenateLimitChars; set => Typography.HyphenateLimitChars = value; }
-    public int HyphenateLimitLines { get => _typography.HyphenateLimitLines; set => Typography.HyphenateLimitLines = value; }
-    public LineBreak LineBreak { get => _typography.LineBreak; set => Typography.LineBreak = value; }
-    public string? ListStyleString { get => _typography.ListStyleString; set => Typography.ListStyleString = value; }
-    public CounterStyle? ListCounterStyle { get => _typography.ListCounterStyle; set => Typography.ListCounterStyle = value; }
-    public string? ListStyleImage { get => _typography.ListStyleImage; set => Typography.ListStyleImage = value; }
+    public int HyphenateLimitLines { get => _typography.HyphenateLimitLines; set { if (_typography.HyphenateLimitLines != value) Typography.HyphenateLimitLines = value; } }
+    public LineBreak LineBreak { get => _typography.LineBreak; set { if (_typography.LineBreak != value) Typography.LineBreak = value; } }
+    public string? ListStyleString { get => _typography.ListStyleString; set { if (_typography.ListStyleString != value) Typography.ListStyleString = value; } }
+    public CounterStyle? ListCounterStyle { get => _typography.ListCounterStyle; set { if (_typography.ListCounterStyle != value) Typography.ListCounterStyle = value; } }
+    public string? ListStyleImage { get => _typography.ListStyleImage; set { if (_typography.ListStyleImage != value) Typography.ListStyleImage = value; } }
     public float ListStyleImageResolution { get => _typography.ListStyleImageResolution; set => Typography.ListStyleImageResolution = value; }
-    public CssGradient? ListStyleGradient { get => _typography.ListStyleGradient; set => Typography.ListStyleGradient = value; }
-    public bool TextIndentHanging { get => _typography.TextIndentHanging; set => Typography.TextIndentHanging = value; }
-    public bool TextIndentEachLine { get => _typography.TextIndentEachLine; set => Typography.TextIndentEachLine = value; }
-    public FontSynthesis Synthesis { get => _typography.Synthesis; set => Typography.Synthesis = value; }
+    public CssGradient? ListStyleGradient { get => _typography.ListStyleGradient; set { if (_typography.ListStyleGradient != value) Typography.ListStyleGradient = value; } }
+    public bool TextIndentHanging { get => _typography.TextIndentHanging; set { if (_typography.TextIndentHanging != value) Typography.TextIndentHanging = value; } }
+    public bool TextIndentEachLine { get => _typography.TextIndentEachLine; set { if (_typography.TextIndentEachLine != value) Typography.TextIndentEachLine = value; } }
+    public FontSynthesis Synthesis { get => _typography.Synthesis; set { if (_typography.Synthesis != value) Typography.Synthesis = value; } }
     public FontSizeAdjust SizeAdjust { get => _typography.SizeAdjust; set => Typography.SizeAdjust = value; }
-    public string? FontVariantEastAsian { get => _typography.FontVariantEastAsian; set => Typography.FontVariantEastAsian = value; }
-    public string? FontVariantPosition { get => _typography.FontVariantPosition; set => Typography.FontVariantPosition = value; }
-    public FontAlternates? FontVariantAlternates { get => _typography.FontVariantAlternates; set => Typography.FontVariantAlternates = value; }
-    public FontPalette? FontPalette { get => _typography.FontPalette; set => Typography.FontPalette = value; }
-    public string? FontVariantNumeric { get => _typography.FontVariantNumeric; set => Typography.FontVariantNumeric = value; }
-    public string? FontFeatureSettings { get => _typography.FontFeatureSettings; set => Typography.FontFeatureSettings = value; }
-    public bool CaptionBottom { get => _typography.CaptionBottom; set => Typography.CaptionBottom = value; }
-    public bool EmptyCellsHide { get => _typography.EmptyCellsHide; set => Typography.EmptyCellsHide = value; }
-    public bool ImageOrientationNone { get => _typography.ImageOrientationNone; set => Typography.ImageOrientationNone = value; }
-    public bool ImagePixelated { get => _typography.ImagePixelated; set => Typography.ImagePixelated = value; }
-    public RubyAlign RubyAlign { get => _typography.RubyAlign; set => Typography.RubyAlign = value; }
-    public bool RubyUnder { get => _typography.RubyUnder; set => Typography.RubyUnder = value; }
-    public int ImageQuality { get => _typography.ImageQuality; set => Typography.ImageQuality = value; }
+    public string? FontVariantEastAsian { get => _typography.FontVariantEastAsian; set { if (_typography.FontVariantEastAsian != value) Typography.FontVariantEastAsian = value; } }
+    public string? FontVariantPosition { get => _typography.FontVariantPosition; set { if (_typography.FontVariantPosition != value) Typography.FontVariantPosition = value; } }
+    public FontAlternates? FontVariantAlternates { get => _typography.FontVariantAlternates; set { if (_typography.FontVariantAlternates != value) Typography.FontVariantAlternates = value; } }
+    public FontPalette? FontPalette { get => _typography.FontPalette; set { if (_typography.FontPalette != value) Typography.FontPalette = value; } }
+    public string? FontVariantNumeric { get => _typography.FontVariantNumeric; set { if (_typography.FontVariantNumeric != value) Typography.FontVariantNumeric = value; } }
+    public string? FontFeatureSettings { get => _typography.FontFeatureSettings; set { if (_typography.FontFeatureSettings != value) Typography.FontFeatureSettings = value; } }
+    public bool CaptionBottom { get => _typography.CaptionBottom; set { if (_typography.CaptionBottom != value) Typography.CaptionBottom = value; } }
+    public bool EmptyCellsHide { get => _typography.EmptyCellsHide; set { if (_typography.EmptyCellsHide != value) Typography.EmptyCellsHide = value; } }
+    public bool ImageOrientationNone { get => _typography.ImageOrientationNone; set { if (_typography.ImageOrientationNone != value) Typography.ImageOrientationNone = value; } }
+    public bool ImagePixelated { get => _typography.ImagePixelated; set { if (_typography.ImagePixelated != value) Typography.ImagePixelated = value; } }
+    public int ImageQuality { get => _typography.ImageQuality; set { if (_typography.ImageQuality != value) Typography.ImageQuality = value; } }
+    public RubyAlign RubyAlign { get => _typography.RubyAlign; set { if (_typography.RubyAlign != value) Typography.RubyAlign = value; } }
+    public bool RubyUnder { get => _typography.RubyUnder; set { if (_typography.RubyUnder != value) Typography.RubyUnder = value; } }
     public float ImageMaxDpi { get => _typography.ImageMaxDpi; set => Typography.ImageMaxDpi = value; }
-    public uint AccentColor { get => _typography.AccentColor; set => Typography.AccentColor = value; }
-    public TextEdgeOver TextEdgeOver { get => _typography.TextEdgeOver; set => Typography.TextEdgeOver = value; }
-    public TextEdgeUnder TextEdgeUnder { get => _typography.TextEdgeUnder; set => Typography.TextEdgeUnder = value; }
-    public int Orphans { get => _typography.Orphans; set => Typography.Orphans = value; }
-    public int Widows { get => _typography.Widows; set => Typography.Widows = value; }
+    public uint AccentColor { get => _typography.AccentColor; set { if (_typography.AccentColor != value) Typography.AccentColor = value; } }
+    public TextEdgeOver TextEdgeOver { get => _typography.TextEdgeOver; set { if (_typography.TextEdgeOver != value) Typography.TextEdgeOver = value; } }
+    public TextEdgeUnder TextEdgeUnder { get => _typography.TextEdgeUnder; set { if (_typography.TextEdgeUnder != value) Typography.TextEdgeUnder = value; } }
+    public int Orphans { get => _typography.Orphans; set { if (_typography.Orphans != value) Typography.Orphans = value; } }
+    public int Widows { get => _typography.Widows; set { if (_typography.Widows != value) Typography.Widows = value; } }
 
     // The group to change a value in, copied first when other styles share it.
     private TypographyFields Typography => _typography.Shared ? _typography = _typography.Copy() : _typography;
@@ -147,22 +151,22 @@ internal sealed partial class ComputedStyle
 
     // ---- Inherited decoration, emphasis, shadow and stroke properties of text.
 
-    public uint? DecorationColor { get => _decoration.DecorationColor; set => Decoration.DecorationColor = value; }
-    public DecorationStyle DecorationStyle { get => _decoration.DecorationStyle; set => Decoration.DecorationStyle = value; }
+    public uint? DecorationColor { get => _decoration.DecorationColor; set { if (_decoration.DecorationColor != value) Decoration.DecorationColor = value; } }
+    public DecorationStyle DecorationStyle { get => _decoration.DecorationStyle; set { if (_decoration.DecorationStyle != value) Decoration.DecorationStyle = value; } }
     public Length? DecorationThickness { get => _decoration.DecorationThickness; set => Decoration.DecorationThickness = value; }
     public Length? UnderlineOffset { get => _decoration.UnderlineOffset; set => Decoration.UnderlineOffset = value; }
-    public SkipInk SkipInk { get => _decoration.SkipInk; set => Decoration.SkipInk = value; }
-    public UnderlinePosition UnderlinePosition { get => _decoration.UnderlinePosition; set => Decoration.UnderlinePosition = value; }
-    public EmphasisShape EmphasisShape { get => _decoration.EmphasisShape; set => Decoration.EmphasisShape = value; }
-    public bool EmphasisOpen { get => _decoration.EmphasisOpen; set => Decoration.EmphasisOpen = value; }
-    public string? EmphasisString { get => _decoration.EmphasisString; set => Decoration.EmphasisString = value; }
-    public uint? EmphasisColor { get => _decoration.EmphasisColor; set => Decoration.EmphasisColor = value; }
-    public bool EmphasisUnder { get => _decoration.EmphasisUnder; set => Decoration.EmphasisUnder = value; }
-    public BoxShadow[]? TextShadows { get => _decoration.TextShadows; set => Decoration.TextShadows = value; }
+    public SkipInk SkipInk { get => _decoration.SkipInk; set { if (_decoration.SkipInk != value) Decoration.SkipInk = value; } }
+    public UnderlinePosition UnderlinePosition { get => _decoration.UnderlinePosition; set { if (_decoration.UnderlinePosition != value) Decoration.UnderlinePosition = value; } }
+    public EmphasisShape EmphasisShape { get => _decoration.EmphasisShape; set { if (_decoration.EmphasisShape != value) Decoration.EmphasisShape = value; } }
+    public bool EmphasisOpen { get => _decoration.EmphasisOpen; set { if (_decoration.EmphasisOpen != value) Decoration.EmphasisOpen = value; } }
+    public string? EmphasisString { get => _decoration.EmphasisString; set { if (_decoration.EmphasisString != value) Decoration.EmphasisString = value; } }
+    public uint? EmphasisColor { get => _decoration.EmphasisColor; set { if (_decoration.EmphasisColor != value) Decoration.EmphasisColor = value; } }
+    public bool EmphasisUnder { get => _decoration.EmphasisUnder; set { if (_decoration.EmphasisUnder != value) Decoration.EmphasisUnder = value; } }
+    public BoxShadow[]? TextShadows { get => _decoration.TextShadows; set { if (_decoration.TextShadows != value) Decoration.TextShadows = value; } }
     public float TextStrokeWidth { get => _decoration.TextStrokeWidth; set => Decoration.TextStrokeWidth = value; }
-    public uint? TextFillColor { get => _decoration.TextFillColor; set => Decoration.TextFillColor = value; }
-    public uint? TextStrokeColor { get => _decoration.TextStrokeColor; set => Decoration.TextStrokeColor = value; }
-    public bool PaintStrokeFirst { get => _decoration.PaintStrokeFirst; set => Decoration.PaintStrokeFirst = value; }
+    public uint? TextFillColor { get => _decoration.TextFillColor; set { if (_decoration.TextFillColor != value) Decoration.TextFillColor = value; } }
+    public uint? TextStrokeColor { get => _decoration.TextStrokeColor; set { if (_decoration.TextStrokeColor != value) Decoration.TextStrokeColor = value; } }
+    public bool PaintStrokeFirst { get => _decoration.PaintStrokeFirst; set { if (_decoration.PaintStrokeFirst != value) Decoration.PaintStrokeFirst = value; } }
 
     // The group to change a value in, copied first when other styles share it.
     private DecorationFields Decoration => _decoration.Shared ? _decoration = _decoration.Copy() : _decoration;
@@ -291,61 +295,61 @@ internal sealed partial class ComputedStyle
 
     // ---- Background layers, masks, effects, border images, outlines and shadows: not inherited, and unset on most boxes.
 
-    public BoxShadow[]? BoxShadows { get => _visual.BoxShadows; set => Visual.BoxShadows = value; }
-    public BackgroundImage?[]? BackgroundImages { get => _visual.BackgroundImages; set => Visual.BackgroundImages = value; }
+    public BoxShadow[]? BoxShadows { get => _visual.BoxShadows; set { if (_visual.BoxShadows != value) Visual.BoxShadows = value; } }
+    public BackgroundImage?[]? BackgroundImages { get => _visual.BackgroundImages; set { if (_visual.BackgroundImages != value) Visual.BackgroundImages = value; } }
     public (BackgroundRepeat X, BackgroundRepeat Y)[]? BackgroundRepeats { get => _visual.BackgroundRepeats; set => Visual.BackgroundRepeats = value; }
-    public BackgroundOffset[]? BackgroundPositionsX { get => _visual.BackgroundPositionsX; set => Visual.BackgroundPositionsX = value; }
-    public BackgroundOffset[]? BackgroundPositionsY { get => _visual.BackgroundPositionsY; set => Visual.BackgroundPositionsY = value; }
-    public BackgroundSize[]? BackgroundSizes { get => _visual.BackgroundSizes; set => Visual.BackgroundSizes = value; }
-    public BackgroundBox[]? BackgroundOrigins { get => _visual.BackgroundOrigins; set => Visual.BackgroundOrigins = value; }
-    public BackgroundBox[]? BackgroundClips { get => _visual.BackgroundClips; set => Visual.BackgroundClips = value; }
-    public bool[]? BackgroundFixed { get => _visual.BackgroundFixed; set => Visual.BackgroundFixed = value; }
-    public string? SvgClipPath { get => _visual.SvgClipPath; set => Visual.SvgClipPath = value; }
-    public string? SvgMask { get => _visual.SvgMask; set => Visual.SvgMask = value; }
-    public string? SvgFilter { get => _visual.SvgFilter; set => Visual.SvgFilter = value; }
-    public SvgGeometry? SvgGeometry { get => _visual.SvgGeometry; set => Visual.SvgGeometry = value; }
-    public bool SvgMaskAlpha { get => _visual.SvgMaskAlpha; set => Visual.SvgMaskAlpha = value; }
-    public bool SvgNonScalingStroke { get => _visual.SvgNonScalingStroke; set => Visual.SvgNonScalingStroke = value; }
-    public uint SvgFloodColor { get => _visual.SvgFloodColor; set => Visual.SvgFloodColor = value; }
+    public BackgroundOffset[]? BackgroundPositionsX { get => _visual.BackgroundPositionsX; set { if (_visual.BackgroundPositionsX != value) Visual.BackgroundPositionsX = value; } }
+    public BackgroundOffset[]? BackgroundPositionsY { get => _visual.BackgroundPositionsY; set { if (_visual.BackgroundPositionsY != value) Visual.BackgroundPositionsY = value; } }
+    public BackgroundSize[]? BackgroundSizes { get => _visual.BackgroundSizes; set { if (_visual.BackgroundSizes != value) Visual.BackgroundSizes = value; } }
+    public BackgroundBox[]? BackgroundOrigins { get => _visual.BackgroundOrigins; set { if (_visual.BackgroundOrigins != value) Visual.BackgroundOrigins = value; } }
+    public BackgroundBox[]? BackgroundClips { get => _visual.BackgroundClips; set { if (_visual.BackgroundClips != value) Visual.BackgroundClips = value; } }
+    public bool[]? BackgroundFixed { get => _visual.BackgroundFixed; set { if (_visual.BackgroundFixed != value) Visual.BackgroundFixed = value; } }
+    public string? SvgClipPath { get => _visual.SvgClipPath; set { if (_visual.SvgClipPath != value) Visual.SvgClipPath = value; } }
+    public string? SvgMask { get => _visual.SvgMask; set { if (_visual.SvgMask != value) Visual.SvgMask = value; } }
+    public string? SvgFilter { get => _visual.SvgFilter; set { if (_visual.SvgFilter != value) Visual.SvgFilter = value; } }
+    public SvgGeometry? SvgGeometry { get => _visual.SvgGeometry; set { if (_visual.SvgGeometry != value) Visual.SvgGeometry = value; } }
+    public bool SvgMaskAlpha { get => _visual.SvgMaskAlpha; set { if (_visual.SvgMaskAlpha != value) Visual.SvgMaskAlpha = value; } }
+    public bool SvgNonScalingStroke { get => _visual.SvgNonScalingStroke; set { if (_visual.SvgNonScalingStroke != value) Visual.SvgNonScalingStroke = value; } }
+    public uint SvgFloodColor { get => _visual.SvgFloodColor; set { if (_visual.SvgFloodColor != value) Visual.SvgFloodColor = value; } }
     public float SvgFloodOpacity { get => _visual.SvgFloodOpacity; set => Visual.SvgFloodOpacity = value; }
-    public uint SvgLightingColor { get => _visual.SvgLightingColor; set => Visual.SvgLightingColor = value; }
-    public ClipShape? ClipShape { get => _visual.ClipShape; set => Visual.ClipShape = value; }
-    public Length[]? ClipRect { get => _visual.ClipRect; set => Visual.ClipRect = value; }
-    public string? BlendMode { get => _visual.BlendMode; set => Visual.BlendMode = value; }
-    public string?[]? BackgroundBlendModes { get => _visual.BackgroundBlendModes; set => Visual.BackgroundBlendModes = value; }
-    public bool Isolate { get => _visual.Isolate; set => Visual.Isolate = value; }
-    public bool BoxDecorationClone { get => _visual.BoxDecorationClone; set => Visual.BoxDecorationClone = value; }
-    public bool ScaleToFit { get => _visual.ScaleToFit; set => Visual.ScaleToFit = value; }
-    public bool RepeatOnPages { get => _visual.RepeatOnPages; set => Visual.RepeatOnPages = value; }
-    public bool ContinueDiscard { get => _visual.ContinueDiscard; set => Visual.ContinueDiscard = value; }
-    public FilterFunction[]? Filters { get => _visual.Filters; set => Visual.Filters = value; }
-    public FilterFunction[]? BackdropFilters { get => _visual.BackdropFilters; set => Visual.BackdropFilters = value; }
-    public BackgroundImage?[]? MaskImages { get => _visual.MaskImages; set => Visual.MaskImages = value; }
+    public uint SvgLightingColor { get => _visual.SvgLightingColor; set { if (_visual.SvgLightingColor != value) Visual.SvgLightingColor = value; } }
+    public ClipShape? ClipShape { get => _visual.ClipShape; set { if (_visual.ClipShape != value) Visual.ClipShape = value; } }
+    public Length[]? ClipRect { get => _visual.ClipRect; set { if (_visual.ClipRect != value) Visual.ClipRect = value; } }
+    public string? BlendMode { get => _visual.BlendMode; set { if (_visual.BlendMode != value) Visual.BlendMode = value; } }
+    public string?[]? BackgroundBlendModes { get => _visual.BackgroundBlendModes; set { if (_visual.BackgroundBlendModes != value) Visual.BackgroundBlendModes = value; } }
+    public bool Isolate { get => _visual.Isolate; set { if (_visual.Isolate != value) Visual.Isolate = value; } }
+    public bool BoxDecorationClone { get => _visual.BoxDecorationClone; set { if (_visual.BoxDecorationClone != value) Visual.BoxDecorationClone = value; } }
+    public bool ScaleToFit { get => _visual.ScaleToFit; set { if (_visual.ScaleToFit != value) Visual.ScaleToFit = value; } }
+    public bool RepeatOnPages { get => _visual.RepeatOnPages; set { if (_visual.RepeatOnPages != value) Visual.RepeatOnPages = value; } }
+    public bool ContinueDiscard { get => _visual.ContinueDiscard; set { if (_visual.ContinueDiscard != value) Visual.ContinueDiscard = value; } }
+    public FilterFunction[]? Filters { get => _visual.Filters; set { if (_visual.Filters != value) Visual.Filters = value; } }
+    public FilterFunction[]? BackdropFilters { get => _visual.BackdropFilters; set { if (_visual.BackdropFilters != value) Visual.BackdropFilters = value; } }
+    public BackgroundImage?[]? MaskImages { get => _visual.MaskImages; set { if (_visual.MaskImages != value) Visual.MaskImages = value; } }
     public (BackgroundRepeat X, BackgroundRepeat Y)[]? MaskRepeats { get => _visual.MaskRepeats; set => Visual.MaskRepeats = value; }
-    public BackgroundOffset[]? MaskPositionsX { get => _visual.MaskPositionsX; set => Visual.MaskPositionsX = value; }
-    public BackgroundOffset[]? MaskPositionsY { get => _visual.MaskPositionsY; set => Visual.MaskPositionsY = value; }
-    public BackgroundSize[]? MaskSizes { get => _visual.MaskSizes; set => Visual.MaskSizes = value; }
-    public BackgroundBox[]? MaskOrigins { get => _visual.MaskOrigins; set => Visual.MaskOrigins = value; }
-    public BackgroundBox[]? MaskClips { get => _visual.MaskClips; set => Visual.MaskClips = value; }
-    public MaskMode[]? MaskModes { get => _visual.MaskModes; set => Visual.MaskModes = value; }
-    public MaskComposite[]? MaskComposites { get => _visual.MaskComposites; set => Visual.MaskComposites = value; }
-    public BackgroundImage? BorderImageSource { get => _visual.BorderImageSource; set => Visual.BorderImageSource = value; }
-    public BorderImageValue[]? BorderImageSlice { get => _visual.BorderImageSlice; set => Visual.BorderImageSlice = value; }
-    public bool BorderImageFill { get => _visual.BorderImageFill; set => Visual.BorderImageFill = value; }
-    public BorderImageValue[]? BorderImageWidths { get => _visual.BorderImageWidths; set => Visual.BorderImageWidths = value; }
-    public BorderImageValue[]? BorderImageOutsets { get => _visual.BorderImageOutsets; set => Visual.BorderImageOutsets = value; }
-    public BorderImageRepeat BorderImageRepeatX { get => _visual.BorderImageRepeatX; set => Visual.BorderImageRepeatX = value; }
-    public BorderImageRepeat BorderImageRepeatY { get => _visual.BorderImageRepeatY; set => Visual.BorderImageRepeatY = value; }
-    public BorderStyle OutlineStyle { get => _visual.OutlineStyle; set => Visual.OutlineStyle = value; }
-    public bool OutlineAuto { get => _visual.OutlineAuto; set => Visual.OutlineAuto = value; }
+    public BackgroundOffset[]? MaskPositionsX { get => _visual.MaskPositionsX; set { if (_visual.MaskPositionsX != value) Visual.MaskPositionsX = value; } }
+    public BackgroundOffset[]? MaskPositionsY { get => _visual.MaskPositionsY; set { if (_visual.MaskPositionsY != value) Visual.MaskPositionsY = value; } }
+    public BackgroundSize[]? MaskSizes { get => _visual.MaskSizes; set { if (_visual.MaskSizes != value) Visual.MaskSizes = value; } }
+    public BackgroundBox[]? MaskOrigins { get => _visual.MaskOrigins; set { if (_visual.MaskOrigins != value) Visual.MaskOrigins = value; } }
+    public BackgroundBox[]? MaskClips { get => _visual.MaskClips; set { if (_visual.MaskClips != value) Visual.MaskClips = value; } }
+    public MaskMode[]? MaskModes { get => _visual.MaskModes; set { if (_visual.MaskModes != value) Visual.MaskModes = value; } }
+    public MaskComposite[]? MaskComposites { get => _visual.MaskComposites; set { if (_visual.MaskComposites != value) Visual.MaskComposites = value; } }
+    public BackgroundImage? BorderImageSource { get => _visual.BorderImageSource; set { if (_visual.BorderImageSource != value) Visual.BorderImageSource = value; } }
+    public BorderImageValue[]? BorderImageSlice { get => _visual.BorderImageSlice; set { if (_visual.BorderImageSlice != value) Visual.BorderImageSlice = value; } }
+    public bool BorderImageFill { get => _visual.BorderImageFill; set { if (_visual.BorderImageFill != value) Visual.BorderImageFill = value; } }
+    public BorderImageValue[]? BorderImageWidths { get => _visual.BorderImageWidths; set { if (_visual.BorderImageWidths != value) Visual.BorderImageWidths = value; } }
+    public BorderImageValue[]? BorderImageOutsets { get => _visual.BorderImageOutsets; set { if (_visual.BorderImageOutsets != value) Visual.BorderImageOutsets = value; } }
+    public BorderImageRepeat BorderImageRepeatX { get => _visual.BorderImageRepeatX; set { if (_visual.BorderImageRepeatX != value) Visual.BorderImageRepeatX = value; } }
+    public BorderImageRepeat BorderImageRepeatY { get => _visual.BorderImageRepeatY; set { if (_visual.BorderImageRepeatY != value) Visual.BorderImageRepeatY = value; } }
+    public BorderStyle OutlineStyle { get => _visual.OutlineStyle; set { if (_visual.OutlineStyle != value) Visual.OutlineStyle = value; } }
+    public bool OutlineAuto { get => _visual.OutlineAuto; set { if (_visual.OutlineAuto != value) Visual.OutlineAuto = value; } }
     public float OutlineWidth { get => _visual.OutlineWidth; set => Visual.OutlineWidth = value; }
     public float OutlineOffset { get => _visual.OutlineOffset; set => Visual.OutlineOffset = value; }
-    public uint? OutlineColor { get => _visual.OutlineColor; set => Visual.OutlineColor = value; }
-    public ObjectFit ObjectFit { get => _visual.ObjectFit; set => Visual.ObjectFit = value; }
+    public uint? OutlineColor { get => _visual.OutlineColor; set { if (_visual.OutlineColor != value) Visual.OutlineColor = value; } }
+    public ObjectFit ObjectFit { get => _visual.ObjectFit; set { if (_visual.ObjectFit != value) Visual.ObjectFit = value; } }
     public BackgroundOffset ObjectPositionX { get => _visual.ObjectPositionX; set => Visual.ObjectPositionX = value; }
     public BackgroundOffset ObjectPositionY { get => _visual.ObjectPositionY; set => Visual.ObjectPositionY = value; }
     /// <summary>object-view-box: the part of an image (an inset(), rect() or xywh() of its natural size) shown as the whole of it, or null.</summary>
-    public ClipShape? ObjectViewBox { get => _visual.ObjectViewBox; set => Visual.ObjectViewBox = value; }
+    public ClipShape? ObjectViewBox { get => _visual.ObjectViewBox; set { if (_visual.ObjectViewBox != value) Visual.ObjectViewBox = value; } }
 
     // The group to change a value in, copied first when other styles share it.
     private VisualFields Visual => _visual.Shared ? _visual = _visual.Copy() : _visual;
@@ -415,45 +419,45 @@ internal sealed partial class ComputedStyle
 
     // ---- Flexbox, grid, multi-column and legacy box properties: not inherited, and unset on most boxes.
 
-    public FlexDirection FlexDirection { get => _containers.FlexDirection; set => Containers.FlexDirection = value; }
-    public FlexWrap FlexWrap { get => _containers.FlexWrap; set => Containers.FlexWrap = value; }
+    public FlexDirection FlexDirection { get => _containers.FlexDirection; set { if (_containers.FlexDirection != value) Containers.FlexDirection = value; } }
+    public FlexWrap FlexWrap { get => _containers.FlexWrap; set { if (_containers.FlexWrap != value) Containers.FlexWrap = value; } }
     public float FlexGrow { get => _containers.FlexGrow; set => Containers.FlexGrow = value; }
     public float FlexShrink { get => _containers.FlexShrink; set => Containers.FlexShrink = value; }
     public Length FlexBasis { get => _containers.FlexBasis; set => Containers.FlexBasis = value; }
-    public int Order { get => _containers.Order; set => Containers.Order = value; }
-    public BoxAlign JustifyContent { get => _containers.JustifyContent; set => Containers.JustifyContent = value; }
-    public BoxAlign AlignItems { get => _containers.AlignItems; set => Containers.AlignItems = value; }
-    public BoxAlign AlignContent { get => _containers.AlignContent; set => Containers.AlignContent = value; }
-    public BoxAlign JustifyItems { get => _containers.JustifyItems; set => Containers.JustifyItems = value; }
-    public BoxAlign AlignSelf { get => _containers.AlignSelf; set => Containers.AlignSelf = value; }
-    public BoxAlign JustifySelf { get => _containers.JustifySelf; set => Containers.JustifySelf = value; }
+    public int Order { get => _containers.Order; set { if (_containers.Order != value) Containers.Order = value; } }
+    public BoxAlign JustifyContent { get => _containers.JustifyContent; set { if (_containers.JustifyContent != value) Containers.JustifyContent = value; } }
+    public BoxAlign AlignItems { get => _containers.AlignItems; set { if (_containers.AlignItems != value) Containers.AlignItems = value; } }
+    public BoxAlign AlignContent { get => _containers.AlignContent; set { if (_containers.AlignContent != value) Containers.AlignContent = value; } }
+    public BoxAlign JustifyItems { get => _containers.JustifyItems; set { if (_containers.JustifyItems != value) Containers.JustifyItems = value; } }
+    public BoxAlign AlignSelf { get => _containers.AlignSelf; set { if (_containers.AlignSelf != value) Containers.AlignSelf = value; } }
+    public BoxAlign JustifySelf { get => _containers.JustifySelf; set { if (_containers.JustifySelf != value) Containers.JustifySelf = value; } }
     public Length? RowGap { get => _containers.RowGap; set => Containers.RowGap = value; }
     public Length? ColumnGap { get => _containers.ColumnGap; set => Containers.ColumnGap = value; }
-    public TrackList? GridTemplateColumns { get => _containers.GridTemplateColumns; set => Containers.GridTemplateColumns = value; }
-    public TrackList? GridTemplateRows { get => _containers.GridTemplateRows; set => Containers.GridTemplateRows = value; }
-    public Track[]? GridAutoColumns { get => _containers.GridAutoColumns; set => Containers.GridAutoColumns = value; }
-    public Track[]? GridAutoRows { get => _containers.GridAutoRows; set => Containers.GridAutoRows = value; }
-    public bool GridAutoFlowColumn { get => _containers.GridAutoFlowColumn; set => Containers.GridAutoFlowColumn = value; }
-    public bool GridAutoFlowDense { get => _containers.GridAutoFlowDense; set => Containers.GridAutoFlowDense = value; }
+    public TrackList? GridTemplateColumns { get => _containers.GridTemplateColumns; set { if (_containers.GridTemplateColumns != value) Containers.GridTemplateColumns = value; } }
+    public TrackList? GridTemplateRows { get => _containers.GridTemplateRows; set { if (_containers.GridTemplateRows != value) Containers.GridTemplateRows = value; } }
+    public Track[]? GridAutoColumns { get => _containers.GridAutoColumns; set { if (_containers.GridAutoColumns != value) Containers.GridAutoColumns = value; } }
+    public Track[]? GridAutoRows { get => _containers.GridAutoRows; set { if (_containers.GridAutoRows != value) Containers.GridAutoRows = value; } }
+    public bool GridAutoFlowColumn { get => _containers.GridAutoFlowColumn; set { if (_containers.GridAutoFlowColumn != value) Containers.GridAutoFlowColumn = value; } }
+    public bool GridAutoFlowDense { get => _containers.GridAutoFlowDense; set { if (_containers.GridAutoFlowDense != value) Containers.GridAutoFlowDense = value; } }
     public GridLine GridColumnStart { get => _containers.GridColumnStart; set => Containers.GridColumnStart = value; }
     public GridLine GridColumnEnd { get => _containers.GridColumnEnd; set => Containers.GridColumnEnd = value; }
     public GridLine GridRowStart { get => _containers.GridRowStart; set => Containers.GridRowStart = value; }
     public GridLine GridRowEnd { get => _containers.GridRowEnd; set => Containers.GridRowEnd = value; }
-    public GridAreas? GridTemplateAreas { get => _containers.GridTemplateAreas; set => Containers.GridTemplateAreas = value; }
-    public int ColumnCount { get => _containers.ColumnCount; set => Containers.ColumnCount = value; }
+    public GridAreas? GridTemplateAreas { get => _containers.GridTemplateAreas; set { if (_containers.GridTemplateAreas != value) Containers.GridTemplateAreas = value; } }
+    public int ColumnCount { get => _containers.ColumnCount; set { if (_containers.ColumnCount != value) Containers.ColumnCount = value; } }
     public Length ColumnWidth { get => _containers.ColumnWidth; set => Containers.ColumnWidth = value; }
-    public BorderStyle ColumnRuleStyle { get => _containers.ColumnRuleStyle; set => Containers.ColumnRuleStyle = value; }
+    public BorderStyle ColumnRuleStyle { get => _containers.ColumnRuleStyle; set { if (_containers.ColumnRuleStyle != value) Containers.ColumnRuleStyle = value; } }
     public float ColumnRuleWidth { get => _containers.ColumnRuleWidth; set => Containers.ColumnRuleWidth = value; }
-    public uint? ColumnRuleColor { get => _containers.ColumnRuleColor; set => Containers.ColumnRuleColor = value; }
-    public bool ColumnSpanAll { get => _containers.ColumnSpanAll; set => Containers.ColumnSpanAll = value; }
-    public bool ColumnFillAuto { get => _containers.ColumnFillAuto; set => Containers.ColumnFillAuto = value; }
-    public int LineClamp { get => _containers.LineClamp; set => Containers.LineClamp = value; }
-    public bool LegacyBox { get => _containers.LegacyBox; set => Containers.LegacyBox = value; }
-    public bool BoxVertical { get => _containers.BoxVertical; set => Containers.BoxVertical = value; }
-    public BoxAlign BoxPack { get => _containers.BoxPack; set => Containers.BoxPack = value; }
-    public BoxAlign BoxAlignItems { get => _containers.BoxAlignItems; set => Containers.BoxAlignItems = value; }
+    public uint? ColumnRuleColor { get => _containers.ColumnRuleColor; set { if (_containers.ColumnRuleColor != value) Containers.ColumnRuleColor = value; } }
+    public bool ColumnSpanAll { get => _containers.ColumnSpanAll; set { if (_containers.ColumnSpanAll != value) Containers.ColumnSpanAll = value; } }
+    public bool ColumnFillAuto { get => _containers.ColumnFillAuto; set { if (_containers.ColumnFillAuto != value) Containers.ColumnFillAuto = value; } }
+    public int LineClamp { get => _containers.LineClamp; set { if (_containers.LineClamp != value) Containers.LineClamp = value; } }
+    public bool LegacyBox { get => _containers.LegacyBox; set { if (_containers.LegacyBox != value) Containers.LegacyBox = value; } }
+    public bool BoxVertical { get => _containers.BoxVertical; set { if (_containers.BoxVertical != value) Containers.BoxVertical = value; } }
+    public BoxAlign BoxPack { get => _containers.BoxPack; set { if (_containers.BoxPack != value) Containers.BoxPack = value; } }
+    public BoxAlign BoxAlignItems { get => _containers.BoxAlignItems; set { if (_containers.BoxAlignItems != value) Containers.BoxAlignItems = value; } }
     public float BoxFlex { get => _containers.BoxFlex; set => Containers.BoxFlex = value; }
-    public int BoxOrdinalGroup { get => _containers.BoxOrdinalGroup; set => Containers.BoxOrdinalGroup = value; }
+    public int BoxOrdinalGroup { get => _containers.BoxOrdinalGroup; set { if (_containers.BoxOrdinalGroup != value) Containers.BoxOrdinalGroup = value; } }
 
     // The group to change a value in, copied first when other styles share it.
     private ContainersFields Containers => _containers.Shared ? _containers = _containers.Copy() : _containers;
@@ -503,57 +507,57 @@ internal sealed partial class ComputedStyle
 
     // ---- Other properties that are not inherited and that few boxes set: transforms, generated content, counters, bookmarks, shapes, initial letters, footnotes, container queries and gap decorations.
 
-    public bool TableLayoutFixed { get => _rare.TableLayoutFixed; set => Rare.TableLayoutFixed = value; }
-    public string? TextOverflow { get => _rare.TextOverflow; set => Rare.TextOverflow = value; }
-    public TextBoxTrim TextBoxTrim { get => _rare.TextBoxTrim; set => Rare.TextBoxTrim = value; }
+    public bool TableLayoutFixed { get => _rare.TableLayoutFixed; set { if (_rare.TableLayoutFixed != value) Rare.TableLayoutFixed = value; } }
+    public string? TextOverflow { get => _rare.TextOverflow; set { if (_rare.TextOverflow != value) Rare.TextOverflow = value; } }
+    public TextBoxTrim TextBoxTrim { get => _rare.TextBoxTrim; set { if (_rare.TextBoxTrim != value) Rare.TextBoxTrim = value; } }
     public float AspectRatio { get => _rare.AspectRatio; set => Rare.AspectRatio = value; }
-    public bool AspectRatioAuto { get => _rare.AspectRatioAuto; set => Rare.AspectRatioAuto = value; }
-    public ContainerType ContainerType { get => _rare.ContainerType; set => Rare.ContainerType = value; }
-    public string[]? ContainerNames { get => _rare.ContainerNames; set => Rare.ContainerNames = value; }
+    public bool AspectRatioAuto { get => _rare.AspectRatioAuto; set { if (_rare.AspectRatioAuto != value) Rare.AspectRatioAuto = value; } }
+    public ContainerType ContainerType { get => _rare.ContainerType; set { if (_rare.ContainerType != value) Rare.ContainerType = value; } }
+    public string[]? ContainerNames { get => _rare.ContainerNames; set { if (_rare.ContainerNames != value) Rare.ContainerNames = value; } }
     public Length ControlWidth { get => _rare.ControlWidth; set => Rare.ControlWidth = value; }
-    public bool FieldSizingContent { get => _rare.FieldSizingContent; set => Rare.FieldSizingContent = value; }
-    public SizeKeyword WidthKeyword { get => _rare.WidthKeyword; set => Rare.WidthKeyword = value; }
-    public StretchSizes Stretched { get => _rare.Stretched; set => Rare.Stretched = value; }
-    public bool ColumnBreakBefore { get => _rare.ColumnBreakBefore; set => Rare.ColumnBreakBefore = value; }
-    public bool ColumnBreakAfter { get => _rare.ColumnBreakAfter; set => Rare.ColumnBreakAfter = value; }
-    public bool AvoidColumnBreakBefore { get => _rare.AvoidColumnBreakBefore; set => Rare.AvoidColumnBreakBefore = value; }
-    public bool AvoidColumnBreakAfter { get => _rare.AvoidColumnBreakAfter; set => Rare.AvoidColumnBreakAfter = value; }
-    public bool AvoidColumnBreakInside { get => _rare.AvoidColumnBreakInside; set => Rare.AvoidColumnBreakInside = value; }
-    public ShapeOutside? ShapeOutside { get => _rare.ShapeOutside; set => Rare.ShapeOutside = value; }
+    public SizeKeyword WidthKeyword { get => _rare.WidthKeyword; set { if (_rare.WidthKeyword != value) Rare.WidthKeyword = value; } }
+    public StretchSizes Stretched { get => _rare.Stretched; set { if (_rare.Stretched != value) Rare.Stretched = value; } }
+    public bool ColumnBreakBefore { get => _rare.ColumnBreakBefore; set { if (_rare.ColumnBreakBefore != value) Rare.ColumnBreakBefore = value; } }
+    public bool ColumnBreakAfter { get => _rare.ColumnBreakAfter; set { if (_rare.ColumnBreakAfter != value) Rare.ColumnBreakAfter = value; } }
+    public bool AvoidColumnBreakBefore { get => _rare.AvoidColumnBreakBefore; set { if (_rare.AvoidColumnBreakBefore != value) Rare.AvoidColumnBreakBefore = value; } }
+    public bool AvoidColumnBreakAfter { get => _rare.AvoidColumnBreakAfter; set { if (_rare.AvoidColumnBreakAfter != value) Rare.AvoidColumnBreakAfter = value; } }
+    public bool AvoidColumnBreakInside { get => _rare.AvoidColumnBreakInside; set { if (_rare.AvoidColumnBreakInside != value) Rare.AvoidColumnBreakInside = value; } }
+    public ShapeOutside? ShapeOutside { get => _rare.ShapeOutside; set { if (_rare.ShapeOutside != value) Rare.ShapeOutside = value; } }
+    public bool FieldSizingContent { get => _rare.FieldSizingContent; set { if (_rare.FieldSizingContent != value) Rare.FieldSizingContent = value; } }
     public Length ShapeMargin { get => _rare.ShapeMargin; set => Rare.ShapeMargin = value; }
     public float ShapeImageThreshold { get => _rare.ShapeImageThreshold; set => Rare.ShapeImageThreshold = value; }
-    public ShapeBox OverflowClipBox { get => _rare.OverflowClipBox; set => Rare.OverflowClipBox = value; }
-    public bool OverflowAuto { get => _rare.OverflowAuto; set => Rare.OverflowAuto = value; }
+    public ShapeBox OverflowClipBox { get => _rare.OverflowClipBox; set { if (_rare.OverflowClipBox != value) Rare.OverflowClipBox = value; } }
+    public bool OverflowAuto { get => _rare.OverflowAuto; set { if (_rare.OverflowAuto != value) Rare.OverflowAuto = value; } }
     public float OverflowClipMargin { get => _rare.OverflowClipMargin; set => Rare.OverflowClipMargin = value; }
     public float InitialLetterSize { get => _rare.InitialLetterSize; set => Rare.InitialLetterSize = value; }
-    public int InitialLetterSink { get => _rare.InitialLetterSink; set => Rare.InitialLetterSink = value; }
-    public bool InitialLetterSunk { get => _rare.InitialLetterSunk; set => Rare.InitialLetterSunk = value; }
-    public bool Footnote { get => _rare.Footnote; set => Rare.Footnote = value; }
-    public FootnoteDisplay FootnoteDisplay { get => _rare.FootnoteDisplay; set => Rare.FootnoteDisplay = value; }
-    public FootnotePolicy FootnotePolicy { get => _rare.FootnotePolicy; set => Rare.FootnotePolicy = value; }
-    public int? ZIndex { get => _rare.ZIndex; set => Rare.ZIndex = value; }
-    public TransformFn[]? Transform { get => _rare.Transform; set => Rare.Transform = value; }
-    public TransformFn[]? Translate { get => _rare.Translate; set => Rare.Translate = value; }
-    public TransformFn[]? Rotate { get => _rare.Rotate; set => Rare.Rotate = value; }
-    public TransformFn[]? Scale { get => _rare.Scale; set => Rare.Scale = value; }
+    public int InitialLetterSink { get => _rare.InitialLetterSink; set { if (_rare.InitialLetterSink != value) Rare.InitialLetterSink = value; } }
+    public bool InitialLetterSunk { get => _rare.InitialLetterSunk; set { if (_rare.InitialLetterSunk != value) Rare.InitialLetterSunk = value; } }
+    public bool Footnote { get => _rare.Footnote; set { if (_rare.Footnote != value) Rare.Footnote = value; } }
+    public FootnoteDisplay FootnoteDisplay { get => _rare.FootnoteDisplay; set { if (_rare.FootnoteDisplay != value) Rare.FootnoteDisplay = value; } }
+    public FootnotePolicy FootnotePolicy { get => _rare.FootnotePolicy; set { if (_rare.FootnotePolicy != value) Rare.FootnotePolicy = value; } }
+    public int? ZIndex { get => _rare.ZIndex; set { if (_rare.ZIndex != value) Rare.ZIndex = value; } }
+    public TransformFn[]? Transform { get => _rare.Transform; set { if (_rare.Transform != value) Rare.Transform = value; } }
+    public TransformFn[]? Translate { get => _rare.Translate; set { if (_rare.Translate != value) Rare.Translate = value; } }
+    public TransformFn[]? Rotate { get => _rare.Rotate; set { if (_rare.Rotate != value) Rare.Rotate = value; } }
+    public TransformFn[]? Scale { get => _rare.Scale; set { if (_rare.Scale != value) Rare.Scale = value; } }
     public Length TransformOriginX { get => _rare.TransformOriginX; set => Rare.TransformOriginX = value; }
     public Length TransformOriginY { get => _rare.TransformOriginY; set => Rare.TransformOriginY = value; }
-    public bool TransformOriginSet { get => _rare.TransformOriginSet; set => Rare.TransformOriginSet = value; }
-    public TransformBox TransformBox { get => _rare.TransformBox; set => Rare.TransformBox = value; }
+    public bool TransformOriginSet { get => _rare.TransformOriginSet; set { if (_rare.TransformOriginSet != value) Rare.TransformOriginSet = value; } }
+    public TransformBox TransformBox { get => _rare.TransformBox; set { if (_rare.TransformBox != value) Rare.TransformBox = value; } }
     public float? Perspective { get => _rare.Perspective; set => Rare.Perspective = value; }
     public Length PerspectiveOriginX { get => _rare.PerspectiveOriginX; set => Rare.PerspectiveOriginX = value; }
     public Length PerspectiveOriginY { get => _rare.PerspectiveOriginY; set => Rare.PerspectiveOriginY = value; }
-    public string? Content { get => _rare.Content; set => Rare.Content = value; }
-    public bool ContentNone { get => _rare.ContentNone; set => Rare.ContentNone = value; }
-    public string? StringSet { get => _rare.StringSet; set => Rare.StringSet = value; }
-    public string? RunningName { get => _rare.RunningName; set => Rare.RunningName = value; }
-    public bool AppearanceNone { get => _rare.AppearanceNone; set => Rare.AppearanceNone = value; }
-    public int? BookmarkLevel { get => _rare.BookmarkLevel; set => Rare.BookmarkLevel = value; }
-    public string? BookmarkLabel { get => _rare.BookmarkLabel; set => Rare.BookmarkLabel = value; }
-    public bool BookmarkClosed { get => _rare.BookmarkClosed; set => Rare.BookmarkClosed = value; }
-    public CounterOp[]? CounterReset { get => _rare.CounterReset; set => Rare.CounterReset = value; }
-    public CounterOp[]? CounterSet { get => _rare.CounterSet; set => Rare.CounterSet = value; }
-    public CounterOp[]? CounterIncrement { get => _rare.CounterIncrement; set => Rare.CounterIncrement = value; }
+    public string? Content { get => _rare.Content; set { if (_rare.Content != value) Rare.Content = value; } }
+    public bool ContentNone { get => _rare.ContentNone; set { if (_rare.ContentNone != value) Rare.ContentNone = value; } }
+    public string? StringSet { get => _rare.StringSet; set { if (_rare.StringSet != value) Rare.StringSet = value; } }
+    public string? RunningName { get => _rare.RunningName; set { if (_rare.RunningName != value) Rare.RunningName = value; } }
+    public bool AppearanceNone { get => _rare.AppearanceNone; set { if (_rare.AppearanceNone != value) Rare.AppearanceNone = value; } }
+    public int? BookmarkLevel { get => _rare.BookmarkLevel; set { if (_rare.BookmarkLevel != value) Rare.BookmarkLevel = value; } }
+    public string? BookmarkLabel { get => _rare.BookmarkLabel; set { if (_rare.BookmarkLabel != value) Rare.BookmarkLabel = value; } }
+    public bool BookmarkClosed { get => _rare.BookmarkClosed; set { if (_rare.BookmarkClosed != value) Rare.BookmarkClosed = value; } }
+    public CounterOp[]? CounterReset { get => _rare.CounterReset; set { if (_rare.CounterReset != value) Rare.CounterReset = value; } }
+    public CounterOp[]? CounterSet { get => _rare.CounterSet; set { if (_rare.CounterSet != value) Rare.CounterSet = value; } }
+    public CounterOp[]? CounterIncrement { get => _rare.CounterIncrement; set { if (_rare.CounterIncrement != value) Rare.CounterIncrement = value; } }
     /// <summary>The gap decoration properties other than a single column rule, or null when none is set.</summary>
     public GapRules? GapRules => _rare.GapRules;
 
