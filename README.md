@@ -349,7 +349,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   EPC or Swiss QR-bill code. On the zxing-cpp test images it reads about 85 % of what zxing-cpp reads, with no wrong reads.
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp, extract text with positions, extract images
   and read document properties. Text comes out in reading order: a tagged PDF's in the order of its tags, and columns
-  side by side one after the other, also on pages turned sideways or upside down. [More](https://pdfpecker.net/docs/merging/)
+  side by side one after the other, also on pages turned sideways or upside down. Ligatures and the Arabic and
+  Hebrew presentation forms older fonts map their glyphs to come out as plain letters. [More](https://pdfpecker.net/docs/merging/)
 - **Compacting and Fast Web View**: `PdfCompactor` makes any PDF smaller without changing how it looks, and
   `PdfOptions.Linearize` or `PdfLinearizer` writes a linearized PDF whose first page shows before the rest arrives,
   also encrypted: `PdfLinearizer` opens a protected PDF with its password and encrypts the result in the same pass.

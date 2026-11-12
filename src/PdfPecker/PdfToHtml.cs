@@ -349,7 +349,7 @@ public static class PdfToHtml
         try
         {
             if (options.IncludeText)
-                text = TextLayout.Build(doc.CollectText(index, options.RenderAnnotations, cancellationToken), index + 1, w, h, true, cancellationToken);
+                text = TextLayout.Build(doc.CollectText(index, options.RenderAnnotations, cancellationToken), index + 1, w, h, true, true, cancellationToken);
             pageLinks = links?.Read(index) ?? new List<PageLink>();
         }
         catch (PdfFormatException ex)
@@ -407,7 +407,7 @@ public static class PdfToHtml
                 turn.Apply(collected);
                 for (int i = 0; i < pageLinks.Count; i++) pageLinks[i] = turn.Turn(pageLinks[i]);
             }
-            var text = TextLayout.Build(collected.Glyphs, index + 1, turn.Width, turn.Height, true, cancellationToken);
+            var text = TextLayout.Build(collected.Glyphs, index + 1, turn.Width, turn.Height, true, true, cancellationToken);
             var blocks = StructuredBlocks(tree, index, collected, text, pageLinks, out bool tagged, cancellationToken);
             // Columns the layout found in pieces are read as PdfText reads them; a tagged page's order is its tags'.
             if (!tagged) blocks = TextReadingOrder.Columns(blocks);

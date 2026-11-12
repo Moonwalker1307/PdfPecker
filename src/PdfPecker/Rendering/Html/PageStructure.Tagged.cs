@@ -112,7 +112,7 @@ internal static partial class PageStructure
         if (taken == 0 || taken < TaggedCoverage * (taken + left)) return null;
         if (rest.Count == 0) return reader.Blocks;
         var blocks = reader.Blocks;
-        foreach (var block in Build(TextLayout.Build(rest, page + 1, width, height, true, cancellationToken), null, null, links, cancellationToken))
+        foreach (var block in Build(TextLayout.Build(rest, page + 1, width, height, true, true, cancellationToken), null, null, links, cancellationToken))
         {
             int at = blocks.FindIndex(b => b.Top > block.Top);
             block.Untagged = true;
@@ -690,14 +690,14 @@ internal static partial class PageStructure
                 if (k > start && ColumnStart(drawn[k - 1], g, right))
                 {
                     lines ??= new List<FlowLine>();
-                    lines.AddRange(PageStructure.Lines(TextLayout.Build(subset.GetRange(start, k - start), _page + 1, _width, _height, true, _cancel), _links));
+                    lines.AddRange(PageStructure.Lines(TextLayout.Build(subset.GetRange(start, k - start), _page + 1, _width, _height, true, true, _cancel), _links));
                     start = k;
                     right = double.MinValue;
                 }
                 right = Math.Max(right, Math.Max(g.X, g.EndX));
             }
-            if (lines == null) return PageStructure.Lines(TextLayout.Build(subset, _page + 1, _width, _height, true, _cancel), _links);
-            lines.AddRange(PageStructure.Lines(TextLayout.Build(subset.GetRange(start, subset.Count - start), _page + 1, _width, _height, true, _cancel), _links));
+            if (lines == null) return PageStructure.Lines(TextLayout.Build(subset, _page + 1, _width, _height, true, true, _cancel), _links);
+            lines.AddRange(PageStructure.Lines(TextLayout.Build(subset.GetRange(start, subset.Count - start), _page + 1, _width, _height, true, true, _cancel), _links));
             return lines;
 
             // Upright text that goes back up the page by more than a couple of lines, to the right of everything drawn
