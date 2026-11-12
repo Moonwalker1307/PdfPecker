@@ -202,24 +202,38 @@ internal sealed partial class LayoutEngine
             overflows = true;
         }
         else rows = FillRows(outer, page, room, limit, paginated, out overflows);
-        var grid = new ColumnGrid(outer, page, y, n, rows, overflows);
-        var fill = RunColumnPass(e, from, to, x, colW, grid, 0, noteMarks: true);
-        if (paginated && !AtPageTop(y) && fill.Notes!.FirstViolation < n)
+        // Footnote calls in the columns are placed with the columns, and their footnotes take the bottom of the pages the
+        // calls are on: the columns are laid out again, shorter on those pages by what the footnotes need, until they
+        // leave that room.
+        bool planNotes = Footnotes != null && paginated && !_measuring && _columnNotes == null && outer is not ColumnGrid
+                         && float.IsPositiveInfinity(limit);
+        Dictionary<int, float>? shorter = null;
+        (ColumnPass Pass, ColumnGrid Grid, float Height) best;
+        int row;
+        for (int attempt = 0; ; attempt++)
         {
-            // The columns on the rest of this page would leave lines alone that orphans keeps together: as in Chrome
-            // the columns start on the next page instead.
-            y = NextPage(y);
-            page = PageOf(y);
-            rows = FillRows(outer, page, Math.Max(0, FlowEnd(page) - y), limit, paginated, out overflows);
-            grid = new ColumnGrid(outer, page, y, n, rows, overflows);
-            fill = RunColumnPass(e, from, to, x, colW, grid, 0, noteMarks: true);
-        }
+            if (shorter != null) rows = NoteRows(outer, page, y, shorter, out overflows);
+            var grid = new ColumnGrid(outer, page, y, n, rows, overflows);
+            var fill = RunColumnPass(e, from, to, x, colW, grid, 0, noteMarks: true);
+            if (paginated && !AtPageTop(y) && fill.Notes!.FirstViolation < n)
+            {
+                // The columns on the rest of this page would leave lines alone that orphans keeps together: as in Chrome
+                // the columns start on the next page instead.
+                y = NextPage(y);
+                page = PageOf(y);
+                rows = shorter != null ? NoteRows(outer, page, y, shorter, out overflows)
+                    : FillRows(outer, page, Math.Max(0, FlowEnd(page) - y), limit, paginated, out overflows);
+                grid = new ColumnGrid(outer, page, y, n, rows, overflows);
+                fill = RunColumnPass(e, from, to, x, colW, grid, 0, noteMarks: true);
+            }
 
-        int endK = EndFragment(fill, grid);
-        int row = grid.RowOf(endK);
-        var best = (Pass: fill, Grid: grid, Height: Math.Min(grid.RowHeight(row), Tallest(fill, grid, row, endK)));
-        if (!balance && endK == grid.FirstFragmentOf(row)) best.Height = fill.End - grid.Start(endK);
-        else if (balance && endK < grid.FirstFragmentOf(row) + n) best = Balance(e, from, to, x, colW, best, row, endK);
+            int endK = EndFragment(fill, grid);
+            row = grid.RowOf(endK);
+            best = (Pass: fill, Grid: grid, Height: Math.Min(grid.RowHeight(row), Tallest(fill, grid, row, endK)));
+            if (!balance && endK == grid.FirstFragmentOf(row)) best.Height = fill.End - grid.Start(endK);
+            else if (balance && endK < grid.FirstFragmentOf(row) + n) best = Balance(e, from, to, x, colW, best, row, endK);
+            if (!planNotes || attempt >= MaxFootnotePasses || !ColumnsNeedFootnoteRoom(best.Pass, best.Grid, row, best.Height, ref shorter)) break;
+        }
 
         var (pass, bestGrid, rowH) = best;
         float bottom = PlaceColumns(pass, bestGrid, row, rowH, s, x, n, colW, gap);
@@ -254,6 +268,60 @@ internal sealed partial class LayoutEngine
             }
         }
         return rows.ToArray();
+    }
+
+    /// <summary>How many times columns are laid out again to leave room for the footnotes called in them.</summary>
+    private const int MaxFootnotePasses = 4;
+
+    /// <summary>
+    /// The column height of each page from the box's start to the last page that must leave room for footnotes: the room
+    /// on each, less what its footnote area takes now and the room <paramref name="shorter"/> keeps for the footnotes
+    /// called in the columns. The pages after them are as the outer grid makes them.
+    /// </summary>
+    private float[] NoteRows(PageGrid outer, int page, float y, Dictionary<int, float> shorter, out bool lastOverflows)
+    {
+        int last = page;
+        foreach (int p in shorter.Keys) last = Math.Max(last, p);
+        var rows = new float[last - page + 1];
+        for (int j = 0; j < rows.Length; j++)
+        {
+            float top = j == 0 ? y : outer.Start(page + j);
+            rows[j] = Math.Max(0, FlowEnd(page + j) - top - (shorter.TryGetValue(page + j, out float less) ? less : 0));
+        }
+        lastOverflows = false;
+        return rows;
+    }
+
+    /// <summary>
+    /// Whether the footnotes called in a layout of columns need more room at the bottom of a page than the columns leave
+    /// there; if so, <paramref name="shorter"/> grows by the shortage on each such page.
+    /// </summary>
+    private bool ColumnsNeedFootnoteRoom(ColumnPass p, ColumnGrid g, int lastRow, float lastHeight, ref Dictionary<int, float>? shorter)
+    {
+        if (p.Anchors == null) return false;
+        Dictionary<int, List<int>>? calls = null;
+        foreach (var (id, ay) in p.Anchors)
+        {
+            if (!FootnoteSetup.TryParseCallKey(id, out int k) || k >= Footnotes!.Bodies.Count || IsPlacedFootnote(k)) continue;
+            int row = g.RowOf(g.PageOf(ay + Eps));
+            calls ??= new Dictionary<int, List<int>>();
+            if (!calls.TryGetValue(row, out var list)) calls[row] = list = new List<int>();
+            if (!list.Contains(k)) list.Add(k);
+        }
+        if (calls == null) return false;
+        bool changed = false;
+        foreach (var (row, added) in calls)
+        {
+            if (row > lastRow) continue;
+            int page = g.FirstPage + row;
+            float bottom = g.RowTop(row) + (row == lastRow ? lastHeight : g.RowHeight(row));
+            float end = FlowEnd(page) - AddedFootnoteReserve(page, added);
+            if (bottom <= end + Eps) continue;
+            shorter ??= new Dictionary<int, float>();
+            shorter[page] = (shorter.TryGetValue(page, out float less) ? less : 0) + bottom - end;
+            changed = true;
+        }
+        return changed;
     }
 
     /// <summary>The fragment the content of a pass ends in.</summary>
