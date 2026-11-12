@@ -102,6 +102,34 @@ public class MarkdownTests
     }
 
     [Fact]
+    public void Bare_urls_follow_the_gfm_autolink_rules()
+    {
+        // Text inside a link is not linked a second time.
+        Assert.Equal("<p><a href=\"https://x.org\">see www.example.com</a></p>\n", Html("[see www.example.com](https://x.org)"));
+        Assert.Equal("<p><a href=\"https://x.org\">a@b.org</a></p>\n", Html("[a@b.org](https://x.org)"));
+        // A closing parenthesis ends the link only when it has no opening one in the link.
+        Assert.Equal("<p><a href=\"http://www.google.com/search?q=Markup+(business)\">www.google.com/search?q=Markup+(business)</a></p>\n",
+            Html("www.google.com/search?q=Markup+(business)"));
+        Assert.Equal("<p><a href=\"http://www.google.com/search?q=Markup+(business)\">www.google.com/search?q=Markup+(business)</a>))</p>\n",
+            Html("www.google.com/search?q=Markup+(business)))"));
+        Assert.Equal("<p>(<a href=\"http://www.google.com/search?q=Markup+(business)\">www.google.com/search?q=Markup+(business)</a>)</p>\n",
+            Html("(www.google.com/search?q=Markup+(business))"));
+        Assert.Equal("<p><a href=\"http://www.google.com/search?q=(business))+ok\">www.google.com/search?q=(business))+ok</a></p>\n",
+            Html("www.google.com/search?q=(business))+ok"));
+        // An entity reference at the end is left out of the link; an ampersand inside it is kept.
+        Assert.Equal("<p><a href=\"http://www.google.com/search?q=commonmark&amp;hl=en\">www.google.com/search?q=commonmark&amp;hl=en</a></p>\n",
+            Html("www.google.com/search?q=commonmark&hl=en"));
+        Assert.Equal("<p><a href=\"http://www.google.com/search?q=commonmark\">www.google.com/search?q=commonmark</a>&amp;hl;</p>\n",
+            Html("www.google.com/search?q=commonmark&hl;"));
+        // E-mail addresses: a trailing dot is punctuation, and a trailing hyphen or underscore is no address at all.
+        Assert.Equal("<p><a href=\"mailto:a.b-c_d@a.b\">a.b-c_d@a.b</a></p>\n", Html("a.b-c_d@a.b"));
+        Assert.Equal("<p><a href=\"mailto:a.b-c_d@a.b\">a.b-c_d@a.b</a>.</p>\n", Html("a.b-c_d@a.b."));
+        Assert.Equal("<p>a.b-c_d@a.b-</p>\n", Html("a.b-c_d@a.b-"));
+        Assert.Equal("<p>a.b-c_d@a.b_</p>\n", Html("a.b-c_d@a.b_"));
+        Assert.Equal("<p>foo@bar</p>\n", Html("foo@bar"));
+    }
+
+    [Fact]
     public void Strict_commonmark_mode_has_no_extensions()
     {
         var strict = new MarkdownOptions { GitHubExtensions = false, HeadingIds = false };
@@ -267,6 +295,22 @@ public class MarkdownTests
         Assert.Contains("<title>Heading</title>", MarkdownToHtml.ConvertDocument("---\nauthor: x\n---\n# Heading\n"));
         Assert.Contains("/Title (Annual: report)", Latin1(MarkdownToPdf.Convert(md, new PdfOptions { Compress = false })));
     }
+
+    [Theory]
+    [InlineData("title: 'It''s here'", "It's here")]
+    [InlineData("title: \"Tab\\tand \\\"quote\\\"\"", "Tab\tand &quot;quote&quot;")]
+    [InlineData("title: Hash#tag # comment", "Hash#tag")]
+    [InlineData("title:   spaced   ", "spaced")]
+    public void Front_matter_titles_read_yaml_scalars(string line, string title)
+        => Assert.Contains($"<title>{title}</title>", MarkdownToHtml.ConvertDocument($"---\n{line}\n---\nBody\n"));
+
+    [Theory]
+    [InlineData("title: |")]
+    [InlineData("title: >")]
+    [InlineData("title:")]
+    [InlineData("title: ''")]
+    public void Front_matter_without_a_one_line_title_falls_back_to_the_heading(string line)
+        => Assert.Contains("<title>Heading</title>", MarkdownToHtml.ConvertDocument($"---\n{line}\n---\n# Heading\n"));
 
     [Fact]
     public void Front_matter_needs_its_closing_line_at_the_start()
