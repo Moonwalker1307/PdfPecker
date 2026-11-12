@@ -10,37 +10,6 @@ internal static class WinAnsi
         0, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0, 0x017E, 0x0178,
     };
 
-    private static readonly Dictionary<char, byte> Extra = BuildExtra();
-
-    private static Dictionary<char, byte> BuildExtra()
-    {
-        var d = new Dictionary<char, byte>();
-        for (int i = 0; i < C1.Length; i++)
-            if (C1[i] != 0) d[(char)C1[i]] = (byte)(0x80 + i);
-        // Close substitutes for common characters that have no WinAnsi glyph.
-        d['\u2212'] = (byte)'-';  // minus sign
-        d['\u2010'] = (byte)'-';  // hyphen
-        d['\u2011'] = (byte)'-';  // non-breaking hyphen
-        d['\u2012'] = 0x96;       // figure dash
-        d['\u2015'] = 0x97;       // horizontal bar
-        d['\u2002'] = (byte)' ';
-        d['\u2003'] = (byte)' ';
-        d['\u2009'] = (byte)' ';
-        d['\u200A'] = (byte)' ';
-        d['\u202F'] = 0xA0;
-        d['\u2032'] = (byte)'\'';
-        d['\u2033'] = (byte)'"';
-        d['\u2044'] = (byte)'/';
-        d['\u2219'] = 0x95;
-        d['\u25CF'] = 0x95;       // black circle
-        d['\u2713'] = (byte)'v';
-        d['\u2190'] = (byte)'<';
-        d['\u2192'] = (byte)'>';
-        d['\u2264'] = (byte)'<';
-        d['\u2265'] = (byte)'>';
-        return d;
-    }
-
     public static int C1ToUnicode(int value)
     {
         int u = C1[value - 0x80];
@@ -56,15 +25,38 @@ internal static class WinAnsi
 
     private static readonly byte[] Table = BuildTable();
 
+    // The table is filled directly: looking every UTF-16 code unit up in a dictionary took about 10 ms of the first
+    // conversion of a process, before the method was optimised.
     private static byte[] BuildTable()
     {
         var t = new byte[65536];
-        for (int c = 0; c < t.Length; c++)
-        {
-            if (c < 0x80) t[c] = c >= 0x20 ? (byte)c : (byte)' ';
-            else if (c >= 0xA0 && c <= 0xFF) t[c] = (byte)c;
-            else t[c] = Extra.TryGetValue((char)c, out var b) ? b : (byte)'?';
-        }
+        t.AsSpan(0, 0x20).Fill((byte)' ');
+        for (int c = 0x20; c < 0x80; c++) t[c] = (byte)c;
+        t.AsSpan(0x80).Fill((byte)'?');
+        for (int c = 0xA0; c <= 0xFF; c++) t[c] = (byte)c;
+        for (int i = 0; i < C1.Length; i++)
+            if (C1[i] != 0) t[C1[i]] = (byte)(0x80 + i);
+        // Close substitutes for common characters that have no WinAnsi glyph.
+        t['\u2212'] = (byte)'-';  // minus sign
+        t['\u2010'] = (byte)'-';  // hyphen
+        t['\u2011'] = (byte)'-';  // non-breaking hyphen
+        t['\u2012'] = 0x96;       // figure dash
+        t['\u2015'] = 0x97;       // horizontal bar
+        t['\u2002'] = (byte)' ';
+        t['\u2003'] = (byte)' ';
+        t['\u2009'] = (byte)' ';
+        t['\u200A'] = (byte)' ';
+        t['\u202F'] = 0xA0;
+        t['\u2032'] = (byte)'\'';
+        t['\u2033'] = (byte)'"';
+        t['\u2044'] = (byte)'/';
+        t['\u2219'] = 0x95;
+        t['\u25CF'] = 0x95;       // black circle
+        t['\u2713'] = (byte)'v';
+        t['\u2190'] = (byte)'<';
+        t['\u2192'] = (byte)'>';
+        t['\u2264'] = (byte)'<';
+        t['\u2265'] = (byte)'>';
         return t;
     }
 }
