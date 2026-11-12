@@ -133,7 +133,6 @@ public class CssMathTests
     [Theory]
     [InlineData("calc(10pt + 5)")]        // a length plus a number
     [InlineData("calc(10pt * 5pt)")]      // a length times a length
-    [InlineData("calc(10pt / 0)")]
     [InlineData("calc(10pt / 2pt)")]
     [InlineData("calc(10pt + )")]
     [InlineData("calc(10pt")]
@@ -145,6 +144,34 @@ public class CssMathTests
     [InlineData("sin(10pt)")]
     public void Invalid_expressions_are_rejected(string css)
         => Assert.False(StyleResolver.TryParseLength(css, 12, 12, out _), css);
+
+    [Theory]
+    [InlineData("calc(infinity * 1px)", 25_165_800)]
+    [InlineData("calc(-infinity * 1px)", -25_165_800)]
+    [InlineData("calc(10pt / 0)", 25_165_800)]
+    [InlineData("calc(-10pt / 0)", -25_165_800)]
+    [InlineData("calc(infinity * 1px - 10px)", 25_165_800)]
+    public void Infinite_lengths_clamp_to_the_largest_length_as_in_chrome(string css, float expected)
+    {
+        // Chrome clamps an infinite length to 33,554,400 px; Tailwind CSS 4 writes rounded-full as calc(infinity * 1px).
+        Assert.True(StyleResolver.TryParseLength(css, 12, 12, out var len), css);
+        Assert.Equal(LengthUnit.Pt, len.Unit);
+        Assert.Equal(expected, len.Value);
+    }
+
+    [Fact]
+    public void An_infinite_border_radius_draws_a_pill()
+    {
+        static string Pill(string radius) => AllContent(ConvertUncompressed(
+            $"<div style=\"width:200px;height:40px;background:#2563eb;border-radius:{radius}\"></div>"));
+        string infinite = Pill("calc(infinity * 1px)");
+        Assert.Equal(Pill("9999px"), infinite);
+        Assert.NotEqual(Pill("0"), infinite);
+    }
+
+    [Fact]
+    public void Zero_divided_by_zero_is_rejected()
+        => Assert.False(StyleResolver.TryParseLength("calc(0pt / 0)", 12, 12, out _));
 
     [Fact]
     public void Deep_nesting_is_rejected_instead_of_overflowing_the_stack()
