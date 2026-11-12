@@ -471,11 +471,12 @@ internal sealed class HtmlParser
     {
         string s = _src;
         bool selfClosing = false;
+        var attributes = _attributes;
         while (p < s.Length)
         {
             char c = s[p];
             if (c <= ' ') { p++; continue; }
-            if (c == '>') { p++; return selfClosing; }
+            if (c == '>') { p++; break; }
             if (c == '/') { selfClosing = true; p++; continue; }
             selfClosing = false;
 
@@ -503,11 +504,26 @@ internal sealed class HtmlParser
                     value = HtmlEntities.DecodeAttribute(Source(vs, p - vs));
                 }
             }
-            if (attrName.Length > 0 && el.GetAttribute(attrName) == null)
-                el.AddAttribute(attrName, value);
+            if (attrName.Length > 0 && !Has(attributes, attrName))
+                attributes.Add(new KeyValuePair<string, string>(attrName, value));
+        }
+        if (attributes.Count > 0)
+        {
+            el.SetAttributes(attributes);
+            attributes.Clear();
         }
         return selfClosing;
+
+        static bool Has(List<KeyValuePair<string, string>> attributes, string name)
+        {
+            foreach (var a in attributes)
+                if (a.Key == name) return true;
+            return false;
+        }
     }
+
+    // The attributes of the tag being read: the element gets a list of exactly their number once the tag ends.
+    private readonly List<KeyValuePair<string, string>> _attributes = new();
 
     private void ImplicitlyClose(string name)
     {

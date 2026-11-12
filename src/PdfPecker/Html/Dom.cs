@@ -230,6 +230,9 @@ internal sealed class Element : Node
 
     public void AddAttribute(string name, string value) => (_attributes ??= new(2)).Add(new KeyValuePair<string, string>(name, value));
 
+    /// <summary>Gives an element without attributes a copy of the list, which takes no more room than they need.</summary>
+    public void SetAttributes(List<KeyValuePair<string, string>> attributes) => _attributes = new(attributes);
+
     public void AppendChild(Node node)
     {
         node.Parent = this;
