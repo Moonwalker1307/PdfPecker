@@ -17,6 +17,9 @@ internal static class CssMath
 {
     private const int MaxDepth = 32;
 
+    // Chrome's largest layout length, 33,554,400 px, in points.
+    private const float MaxLengthPt = 33_554_400 * 0.75f;
+
     /// <summary>True when <paramref name="v"/> contains a math function call (<c>calc(</c>, <c>min(</c>, <c>round(</c> and so on).</summary>
     public static bool HasMath(string v)
     {
@@ -41,6 +44,10 @@ internal static class CssMath
         if (!p.TryParseAll(out var t) || t.Kind != TermKind.Length) return false;
         if (t.Fn == null)
         {
+            // An infinite length (calc(infinity * 1px), or a length divided by zero) is valid and clamps to the largest
+            // length Chrome lays out, so a pill radius written as calc(infinity * 1px), as Tailwind CSS 4 does, still
+            // rounds the corners. NaN stays invalid.
+            if (float.IsInfinity(t.Pt)) t = t with { Pt = float.IsPositiveInfinity(t.Pt) ? MaxLengthPt : -MaxLengthPt };
             if (!float.IsFinite(t.Pt) || !float.IsFinite(t.Pct)) return false;
             len = t.Pct == 0 ? Length.Pt(t.Pt) : t.Pt == 0 ? new Length(t.Pct, LengthUnit.Percent) : Length.Calc(t.Pt, t.Pct);
         }
@@ -350,7 +357,9 @@ internal static class CssMath
 
         private static Term Scale(Term a, float k)
         {
-            if (a.Fn == null) return new Term(a.Kind, a.Pt * k, a.Pct * k);
+            // A part that is zero stays zero, so infinity times 1px is an infinite length with no percentage rather than
+            // NaN from 0% times infinity.
+            if (a.Fn == null) return new Term(a.Kind, a.Pt == 0 ? 0 : a.Pt * k, a.Pct == 0 ? 0 : a.Pct * k);
             var fa = a.Fn;
             return new Term(TermKind.Length, 0, 0, basis => fa(basis) * k);
         }
