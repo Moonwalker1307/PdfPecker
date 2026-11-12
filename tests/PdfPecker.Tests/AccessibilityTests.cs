@@ -320,4 +320,50 @@ public class AccessibilityTests
         Assert.Contains("/TOCI [/Div ", pdf);
         Assert.Contains("/Index [/Sect ", pdf);
     }
+
+    private const string PackedHtml = "<html lang=en><title>T</title><h1>Report</h1><table><tr><th>A</th><th>B</th></tr>"
+        + "<tr><td>1</td><td>2</td></tr></table><p>Text with a <a href='https://example.com'>link</a>.</p></html>";
+
+    [Fact]
+    public void The_structure_tree_of_a_compressed_file_is_in_object_streams()
+    {
+        // The structure elements are most of a long tagged file; packed and compressed, they take a fraction of it.
+        var pdf = HtmlToPdf.Convert(PackedHtml, new PdfOptions { Accessibility = PdfAccessibility.PdfUA1, CreationDate = DateTimeOffset.UnixEpoch });
+        PdfTestHelpers.AssertStructurallyValid(pdf);
+        var text = PdfTestHelpers.Latin1(pdf);
+        Assert.Contains("/Type/ObjStm", text);
+        Assert.Contains("/Type/XRef", text);
+        Assert.DoesNotContain("/StructElem", text);
+        var plain = PdfTestHelpers.ConvertUncompressed(PackedHtml, new PdfOptions { Accessibility = PdfAccessibility.PdfUA1, CreationDate = DateTimeOffset.UnixEpoch });
+        // Reading the tags back gives the same document either way.
+        Assert.Equal(PdfToMarkdown.Convert(plain), PdfToMarkdown.Convert(pdf));
+        Assert.Equal(PdfText.Extract(plain), PdfText.Extract(pdf));
+    }
+
+    [Fact]
+    public void An_encrypted_tagged_file_keeps_its_objects_apart()
+    {
+        // Strings inside an object stream are not encrypted on their own, so an encrypted file does not pack its tags.
+        var pdf = HtmlToPdf.Convert(PackedHtml, new PdfOptions
+        {
+            Accessibility = PdfAccessibility.Tagged,
+            Security = new PdfSecurity { OwnerPassword = "owner" },
+        });
+        PdfTestHelpers.AssertStructurallyValid(pdf);
+        Assert.DoesNotContain("/Type/ObjStm", PdfTestHelpers.Latin1(pdf));
+    }
+
+    [Fact]
+    public void A_tagged_file_with_object_streams_can_be_signed_and_linearized()
+    {
+        var options = new PdfOptions { Accessibility = PdfAccessibility.PdfUA1 };
+        var pdf = HtmlToPdf.Convert(PackedHtml, options);
+        var cert = SignatureVerificationTests.SelfSigned("Tagged Signer");
+        var signed = PdfSigner.Sign(pdf, new PdfSignatureOptions(cert));
+        var verification = Assert.Single(PdfSignatureVerifier.Verify(signed));
+        Assert.True(verification.ByteRangeValid && verification.DigestMatches && verification.SignatureValid, string.Join("\n", verification.Problems));
+        Assert.Equal(PdfText.Extract(pdf), PdfText.Extract(signed));
+        var linear = HtmlToPdf.Convert(PackedHtml, new PdfOptions { Accessibility = PdfAccessibility.PdfUA1, Linearize = true });
+        Assert.Equal(PdfToMarkdown.Convert(pdf), PdfToMarkdown.Convert(linear));
+    }
 }

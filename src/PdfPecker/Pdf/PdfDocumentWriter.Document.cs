@@ -164,16 +164,31 @@ internal sealed partial class PdfDocumentWriter
 
     /// <summary>
     /// Writes the cross-reference table and the trailer, with a new random file identifier, or with one hashed from the
-    /// file's bytes when the date is fixed, so that the same input gives the same file.
+    /// file's bytes when the date is fixed, so that the same input gives the same file. A file whose structure tree is in
+    /// object streams writes those streams and a cross-reference stream instead.
     /// </summary>
     private void WriteTrailer(WriteState doc)
     {
-        long xref = _out.Length;
         int count = _xref.Count;
+        if (_packed is { Count: > 0 })
+        {
+            // The packed objects are not in the table yet, and may have the highest numbers.
+            int firstStream = Math.Max(count, _packed.MaxId + 1);
+            _packed.Write(_out, firstStream, data => Images.PdfImage.Deflate(data, _level), _xref.Pack, _xref.Record);
+            int xrefId = firstStream + _packed.StreamCount;
+            System.Diagnostics.Debug.Assert(_xref.FirstMissing(xrefId) < 0, "An object id was handed out but never written.");
+            var streamFileId = FileId();
+            PdfObjectStreams.WriteXrefStream(_out, xrefId, _xref.Entry, doc.CatalogId, doc.InfoId, doc.EncryptId, streamFileId, streamFileId,
+                upperHexId: true, data => Images.PdfImage.Deflate(data, _level));
+            return;
+        }
+        long xref = _out.Length;
         // This writer numbers its objects up front and must write every one of them.
         System.Diagnostics.Debug.Assert(_xref.FirstMissing(count) < 0, "An object id was handed out but never written.");
         _xref.WriteTable(_out, count);
-        var fileId = FixedDate != null ? ReproducibleDate.FileId(_out.Span) : System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
+        var fileId = FileId();
         PdfXref.WriteTrailer(_out, count, doc.CatalogId, doc.InfoId, doc.EncryptId, fileId, fileId, upperHexId: true, xref);
     }
+
+    private byte[] FileId() => FixedDate != null ? ReproducibleDate.FileId(_out.Span) : System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
 }

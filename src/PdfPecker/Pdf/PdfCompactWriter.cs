@@ -18,9 +18,6 @@ namespace PdfPecker.Pdf;
 /// </remarks>
 internal sealed partial class PdfCompactWriter : PdfObjectWriter
 {
-    /// <summary>How many objects go into one object stream; more compress better, and every index still fits a byte.</summary>
-    private const int ObjectsPerStream = 200;
-
     /// <summary>
     /// How many rounds of merging run. Each round can merge objects whose only difference was a reference to two objects
     /// merged in the round before (a font whose font files were identical), so a few rounds reach every level.
@@ -325,7 +322,7 @@ internal sealed partial class PdfCompactWriter : PdfObjectWriter
         int count = _ids.Count + 1;
         var offsets = new long[count];
         var inStream = new (int Stream, int Index)[count];
-        var packed = new List<int>();
+        var packed = new PdfObjectStreams();
         foreach (int key in _order)
         {
             if (_canonical[key] != key) continue;
@@ -340,78 +337,21 @@ internal sealed partial class PdfCompactWriter : PdfObjectWriter
             }
             else
             {
-                packed.Add(key);
+                WriteObject(packed.Begin(id), _objects[key]);
+                packed.End();
             }
         }
 
-        var streamOffsets = new List<long>();
-        var body = new ByteBuffer();
-        var header = new ByteBuffer();
-        for (int start = 0; start < packed.Count; start += ObjectsPerStream)
-        {
-            PdfFile.CheckCancel();
-            int streamId = count + streamOffsets.Count;
-            int n = Math.Min(ObjectsPerStream, packed.Count - start);
-            body.Clear();
-            header.Clear();
-            for (int i = 0; i < n; i++)
-            {
-                int key = packed[start + i];
-                int id = _ids[key];
-                inStream[id] = (streamId, i);
-                if (i > 0) header.Sp();
-                header.Int(id).Sp().Int(body.Length);
-                if (i > 0) body.Nl();
-                WriteObject(body, _objects[key]);
-            }
-            header.Nl();
-            var data = Deflate(Concat(header.Span, body.Span));
-            streamOffsets.Add(_out.Length);
-            _out.Int(streamId).Ascii(" 0 obj\n<</Type/ObjStm/N ").Int(n).Ascii("/First ").Int(header.Length)
-                .Ascii("/Filter/FlateDecode/Length ").Int(data.Length).Ascii(">>stream\n").Bytes(data).Ascii("\nendstream");
-            PdfXref.End(_out);
-        }
+        var streamOffsets = new long[packed.StreamCount];
+        packed.Write(_out, count, data => Deflate(data), (id, stream, index) => inStream[id] = (stream, index),
+            (stream, offset) => streamOffsets[stream - count] = offset);
 
         // The cross-reference stream lists itself too. Its rows are type, offset or object stream, and generation or index.
-        int xrefId = count + streamOffsets.Count;
-        int size = xrefId + 1;
-        long xrefOffset = _out.Length;
-        int offsetBytes = BytesFor(Math.Max(xrefOffset, size));
-        const int FieldBytes = 2;
-        int rowLength = 1 + offsetBytes + FieldBytes;
-        var rows = new byte[size * rowLength];
-        for (int id = 0; id < size; id++)
-        {
-            var row = rows.AsSpan(id * rowLength, rowLength);
-            if (id == 0)
-            {
-                Put(row.Slice(1 + offsetBytes), 0xFFFF); // the head of the free list, generation 65535
-            }
-            else if (id < count && inStream[id].Stream != 0)
-            {
-                row[0] = 2;
-                Put(row.Slice(1, offsetBytes), inStream[id].Stream);
-                Put(row.Slice(1 + offsetBytes), inStream[id].Index);
-            }
-            else
-            {
-                long offset = id < count ? offsets[id] : id < xrefId ? streamOffsets[id - count] : xrefOffset;
-                row[0] = 1;
-                Put(row.Slice(1, offsetBytes), offset);
-            }
-        }
-        var xrefData = Deflate(PngUp(rows, rowLength));
+        int xrefId = count + streamOffsets.Length;
         var (id0, id1) = FileIds();
-        _out.Int(xrefId).Ascii(" 0 obj\n<</Type/XRef/Size ").Int(size).Ascii("/W[1 ").Int(offsetBytes).Ascii(" ").Int(FieldBytes)
-            .Ascii("]/Root ").Int(rootId).Ascii(" 0 R");
-        if (infoId != 0) _out.Ascii("/Info ").Int(infoId).Ascii(" 0 R");
-        _out.Ascii("/ID[");
-        PdfSyntax.Hex(_out, id0, upper: false);
-        PdfSyntax.Hex(_out, id1, upper: false);
-        _out.Ascii("]/Filter/FlateDecode/DecodeParms<</Predictor 12/Columns ").Int(rowLength).Ascii(">>/Length ").Int(xrefData.Length)
-            .Ascii(">>stream\n").Bytes(xrefData).Ascii("\nendstream");
-        PdfXref.End(_out);
-        _out.Ascii("startxref\n").Int(xrefOffset).Ascii("\n%%EOF\n");
+        PdfObjectStreams.WriteXrefStream(_out, xrefId,
+            id => id < count && inStream[id].Stream != 0 ? (2, inStream[id].Stream, inStream[id].Index) : (1, id < count ? offsets[id] : streamOffsets[id - count], 0),
+            rootId, infoId, 0, id0, id1, upperHexId: false, data => Deflate(data));
     }
 
     /// <summary>
@@ -439,42 +379,6 @@ internal sealed partial class PdfCompactWriter : PdfObjectWriter
         foreach (var (key, value) in s.Entries)
             if (key != "Length") WriteEntry(b, null, key, value, 0);
         b.Ascii("/Length ").Int(s.RawData.Length).Ascii(">>stream\n").Bytes(s.RawData).Ascii("\nendstream");
-    }
-
-    private static byte[] Concat(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
-    {
-        var result = new byte[a.Length + b.Length];
-        a.CopyTo(result);
-        b.CopyTo(result.AsSpan(a.Length));
-        return result;
-    }
-
-    /// <summary>The bytes a big-endian field needs to hold <paramref name="value"/>.</summary>
-    private static int BytesFor(long value)
-    {
-        int n = 1;
-        while (n < 8 && value >> (8 * n) != 0) n++;
-        return n;
-    }
-
-    /// <summary>Writes <paramref name="value"/> big-endian across <paramref name="field"/>.</summary>
-    private static void Put(Span<byte> field, long value)
-    {
-        for (int i = field.Length - 1; i >= 0; i--, value >>= 8) field[i] = (byte)value;
-    }
-
-    /// <summary>The rows with the PNG Up predictor: a filter byte, then each byte minus the one above it.</summary>
-    private static byte[] PngUp(byte[] rows, int rowLength)
-    {
-        int count = rows.Length / rowLength;
-        var result = new byte[count * (rowLength + 1)];
-        for (int r = 0; r < count; r++)
-        {
-            int to = r * (rowLength + 1), from = r * rowLength;
-            result[to] = 2;
-            for (int i = 0; i < rowLength; i++) result[to + 1 + i] = (byte)(rows[from + i] - (r > 0 ? rows[from - rowLength + i] : 0));
-        }
-        return result;
     }
 
     /// <summary>The XMP metadata of the catalog, which says whether the file claims PDF/A or PDF/UA.</summary>

@@ -29,45 +29,48 @@ internal sealed partial class PdfDocumentWriter
             if (elements.Any(e => Pdf17Only(e.Type) != null)) ns17Id = next++;
         }
 
-        Begin(rootId).Ascii("<< /Type /StructTreeRoot /K ").Int(tree.Root.Id).Ascii(" 0 R /ParentTree ").Int(parentTreeId)
+        var b = BeginStructure(rootId);
+        b.Ascii("<< /Type /StructTreeRoot /K ").Int(tree.Root.Id).Ascii(" 0 R /ParentTree ").Int(parentTreeId)
             .Ascii(" 0 R /ParentTreeNextKey ").Int(nextKey);
         // Elements with identifiers (footnote Notes) are listed in the ID tree, in the byte order of their identifiers.
         var identified = elements.Where(e => e.ElementId != null).OrderBy(e => e.ElementId, StringComparer.Ordinal).ToList();
         if (identified.Count > 0)
         {
-            _out.Ascii(" /IDTree << /Names [");
+            b.Ascii(" /IDTree << /Names [");
             foreach (var e in identified)
             {
-                WriteAsciiString(_out, e.ElementId!);
-                _out.Sp().Int(e.Id).Ascii(" 0 R ");
+                WriteAsciiString(b, e.ElementId!);
+                b.Sp().Int(e.Id).Ascii(" 0 R ");
             }
-            _out.Ascii("] >>");
+            b.Ascii("] >>");
         }
         if (ns2Id != 0)
         {
-            _out.Ascii(" /Namespaces [").Int(ns2Id).Ascii(" 0 R");
-            if (ns17Id != 0) _out.Ascii(" ").Int(ns17Id).Ascii(" 0 R");
-            _out.Ascii("]");
+            b.Ascii(" /Namespaces [").Int(ns2Id).Ascii(" 0 R");
+            if (ns17Id != 0) b.Ascii(" ").Int(ns17Id).Ascii(" 0 R");
+            b.Ascii("]");
         }
-        _out.Ascii(" >>");
-        End();
+        b.Ascii(" >>");
+        EndStructure();
         if (ns2Id != 0)
         {
             // Through WriteTextString, so an encrypted file encrypts the namespace names like every other string.
-            Begin(ns2Id).Ascii("<< /Type /Namespace /NS ");
-            WriteTextString(_out, "http://iso.org/pdf2/ssn");
-            _out.Ascii(" >>");
-            End();
+            b = BeginStructure(ns2Id);
+            b.Ascii("<< /Type /Namespace /NS ");
+            WriteTextString(b, "http://iso.org/pdf2/ssn");
+            b.Ascii(" >>");
+            EndStructure();
         }
         if (ns17Id != 0)
         {
-            Begin(ns17Id).Ascii("<< /Type /Namespace /NS ");
-            WriteTextString(_out, "http://iso.org/pdf/ssn");
-            _out.Ascii(" /RoleMapNS <<");
+            b = BeginStructure(ns17Id);
+            b.Ascii("<< /Type /Namespace /NS ");
+            WriteTextString(b, "http://iso.org/pdf/ssn");
+            b.Ascii(" /RoleMapNS <<");
             foreach (var type in elements.Select(e => e.Type).Where(t => Pdf17Only(t) != null).Distinct())
-                _out.Ascii(" /").Ascii(type).Ascii(" [/").Ascii(Pdf17Only(type)!).Sp().Int(ns2Id).Ascii(" 0 R]");
-            _out.Ascii(" >> >>");
-            End();
+                b.Ascii(" /").Ascii(type).Ascii(" [/").Ascii(Pdf17Only(type)!).Sp().Int(ns2Id).Ascii(" 0 R]");
+            b.Ascii(" >> >>");
+            EndStructure();
         }
 
         // The parent tree: a number tree with one flat /Nums array, in key order.
@@ -80,64 +83,78 @@ internal sealed partial class PdfDocumentWriter
         foreach (var form in _formStreams)
             if (form is { Key: >= 0 }) entries.Add((form.Key, form, null));
         entries.Sort((x, y) => x.Key.CompareTo(y.Key));
-        Begin(parentTreeId).Ascii("<< /Nums [");
+        b = BeginStructure(parentTreeId);
+        b.Ascii("<< /Nums [");
         foreach (var (key, stream, link) in entries)
         {
-            _out.Ascii("\n").Int(key).Sp();
-            if (link != null) { _out.Int(link.Id).Ascii(" 0 R"); continue; }
-            _out.Ascii("[");
-            foreach (var e in stream!.Elements) _out.Int(e.Id).Ascii(" 0 R ");
-            _out.Ascii("]");
+            b.Ascii("\n").Int(key).Sp();
+            if (link != null) { b.Int(link.Id).Ascii(" 0 R"); continue; }
+            b.Ascii("[");
+            foreach (var e in stream!.Elements) b.Int(e.Id).Ascii(" 0 R ");
+            b.Ascii("]");
         }
-        _out.Ascii("] >>");
-        End();
+        b.Ascii("] >>");
+        EndStructure();
 
         foreach (var e in elements)
         {
-            Begin(e.Id).Ascii("<< /Type /StructElem /S /").Ascii(e.Type).Ascii(" /P ").Int(e.Parent?.Id ?? rootId).Ascii(" 0 R");
-            if (ns2Id != 0) _out.Ascii(" /NS ").Int(Pdf17Only(e.Type) != null ? ns17Id : ns2Id).Ascii(" 0 R");
-            if (e.Lang != null) { _out.Ascii(" /Lang "); WriteTextString(_out, e.Lang); }
-            if (e.Alt != null) { _out.Ascii(" /Alt "); WriteTextString(_out, e.Alt); }
-            if (e.ElementId != null) { _out.Ascii(" /ID "); WriteAsciiString(_out, e.ElementId); }
+            b = BeginStructure(e.Id);
+            b.Ascii("<< /Type /StructElem /S /").Ascii(e.Type).Ascii(" /P ").Int(e.Parent?.Id ?? rootId).Ascii(" 0 R");
+            if (ns2Id != 0) b.Ascii(" /NS ").Int(Pdf17Only(e.Type) != null ? ns17Id : ns2Id).Ascii(" 0 R");
+            if (e.Lang != null) { b.Ascii(" /Lang "); WriteTextString(b, e.Lang); }
+            if (e.Alt != null) { b.Ascii(" /Alt "); WriteTextString(b, e.Alt); }
+            if (e.ElementId != null) { b.Ascii(" /ID "); WriteAsciiString(b, e.ElementId); }
             if (e.Scope != null || e.RowSpan > 1 || e.ColSpan > 1)
             {
-                _out.Ascii(" /A << /O /Table");
-                if (e.Scope != null) _out.Ascii(" /Scope /").Ascii(e.Scope);
-                if (e.RowSpan > 1) _out.Ascii(" /RowSpan ").Int(e.RowSpan);
-                if (e.ColSpan > 1) _out.Ascii(" /ColSpan ").Int(e.ColSpan);
-                _out.Ascii(" >>");
+                b.Ascii(" /A << /O /Table");
+                if (e.Scope != null) b.Ascii(" /Scope /").Ascii(e.Scope);
+                if (e.RowSpan > 1) b.Ascii(" /RowSpan ").Int(e.RowSpan);
+                if (e.ColSpan > 1) b.Ascii(" /ColSpan ").Int(e.ColSpan);
+                b.Ascii(" >>");
             }
             if (e.ListNumbering != null)
             {
                 // PDF 1.7 has no Ordered and Unordered numbering, so its nearest values stand in for them.
                 string numbering = Pdf20 ? e.ListNumbering : e.ListNumbering switch { "Ordered" => "Decimal", "Unordered" => "Disc", var n => n };
-                _out.Ascii(" /A << /O /List /ListNumbering /").Ascii(numbering).Ascii(" >>");
+                b.Ascii(" /A << /O /List /ListNumbering /").Ascii(numbering).Ascii(" >>");
             }
-            _out.Ascii(" /K [");
+            b.Ascii(" /K [");
             foreach (var k in e.Kids)
             {
                 switch (k)
                 {
                     case StructElem c:
-                        _out.Int(c.Id).Ascii(" 0 R ");
+                        b.Int(c.Id).Ascii(" 0 R ");
                         break;
                     case ContentSlot slot:
                         foreach (var (stream, mcid) in slot.Refs)
                         {
-                            _out.Ascii("<< /Type /MCR /Pg ").Int(pageIds[stream.Page]).Ascii(" 0 R /MCID ").Int(mcid);
-                            if (stream.FormId != 0) _out.Ascii(" /Stm ").Int(stream.FormId).Ascii(" 0 R");
-                            _out.Ascii(" >> ");
+                            b.Ascii("<< /Type /MCR /Pg ").Int(pageIds[stream.Page]).Ascii(" 0 R /MCID ").Int(mcid);
+                            if (stream.FormId != 0) b.Ascii(" /Stm ").Int(stream.FormId).Ascii(" 0 R");
+                            b.Ascii(" >> ");
                         }
                         break;
                     case AnnotRef annot:
-                        _out.Ascii("<< /Type /OBJR /Pg ").Int(pageIds[annot.Page]).Ascii(" 0 R /Obj ").Int(annot.Id).Ascii(" 0 R >> ");
+                        b.Ascii("<< /Type /OBJR /Pg ").Int(pageIds[annot.Page]).Ascii(" 0 R /Obj ").Int(annot.Id).Ascii(" 0 R >> ");
                         break;
                 }
             }
-            _out.Ascii("] >>");
-            End();
+            b.Ascii("] >>");
+            EndStructure();
         }
         return next;
+    }
+
+    /// <summary>
+    /// Starts a structure object: in an object stream when the file packs its structure tree, which is most of a long
+    /// tagged file and compresses to a fraction of its size, or directly in the file.
+    /// </summary>
+    private ByteBuffer BeginStructure(int id) => _packed != null ? _packed.Begin(id) : Begin(id);
+
+    private void EndStructure()
+    {
+        if (_packed != null) _packed.End();
+        else End();
     }
 
     /// <summary>Leaves out the structure elements without content and numbers the others, in tree order.</summary>
