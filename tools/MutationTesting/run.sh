@@ -21,7 +21,7 @@ case "$area" in
               filter="FullyQualifiedName~Css|FullyQualifiedName~Color|FullyQualifiedName~Unit" ;;
   barcodes)   paths="Barcodes/";                                           filter="FullyQualifiedName~Barcode" ;;
   text)       paths="Text/Bidi.cs Text/LineBreaker.cs Text/Hyphenator.cs Text/JustificationCharacters.cs"
-              filter="FullyQualifiedName~Bidi|FullyQualifiedName~LineBreak|FullyQualifiedName~Hyphenation|FullyQualifiedName~Justify" ;;
+              filter="FullyQualifiedName~Bidi|FullyQualifiedName~LineBreak|FullyQualifiedName~TextWrap|FullyQualifiedName~Hyphenation|FullyQualifiedName~Justify" ;;
   *) echo "Unknown area '$area'; use markdown, css-values, barcodes or text." >&2; exit 2 ;;
 esac
 
