@@ -85,6 +85,7 @@ internal sealed partial class PdfDocumentWriter
         private float _topReach;         // how far above the section's first page its ops may reach: into the bleed
         private float _bottomReach;      // how far below the section's last page its ops may reach
         private int _lastPage;           // the last page the section's content needs
+        private int _fullest;            // the most ops a page before the newest holds
         private int _backdrops;          // boxes with a backdrop-filter given a part on every page they reach
         private int _clipFirst, _clipLast = int.MaxValue; // the pages the clips being distributed show
         // The root's clip of the viewport's overflow being distributed, whose parts so far are added to the pages
@@ -192,8 +193,15 @@ internal sealed partial class PdfDocumentWriter
 
         private List<Placed> PageList(int p)
         {
-            // Sized like the page before: pages of a document tend to hold about as many ops each.
-            while (Pages.Count <= p) Pages.Add(new List<Placed>(Pages.Count > 0 ? Math.Max(16, Pages[^1].Count) : 16));
+            // Sized like the fullest page so far: pages of a document tend to hold about as many ops each, and a list
+            // sized like the page before alone doubles whenever its page holds a few ops more. At most twice the page
+            // before, so that one crowded page does not size all the sparse pages after it.
+            while (Pages.Count <= p)
+            {
+                int before = Pages.Count > 0 ? Pages[^1].Count : 0;
+                _fullest = Math.Max(_fullest, before);
+                Pages.Add(new List<Placed>(Math.Max(16, (int)Math.Min(_fullest, 2L * before))));
+            }
             return Pages[p];
         }
 
