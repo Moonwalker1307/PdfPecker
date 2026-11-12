@@ -45,9 +45,9 @@ dotnet run --project samples/PdfPecker.Razor.Sample -c Release -- output    # wr
 The libraries and tests target `net8.0`, `net9.0`, `net10.0` and `net11.0`. APIs that .NET 8 lacks, such as `Dictionary`
 alternate lookups and span `Split`, go behind `#if NET9_0_OR_GREATER` with a .NET 8 path next to them.
 
-`net8.0` and `net9.0` stay until 31 December 2026, the support date the README promises (Microsoft ended support for
-both on 10 November 2026). The first release after it drops them from every package, the CI matrix and the tool, and
-the `#if NET9_0_OR_GREATER` guards and their .NET 8 paths go with them.
+1.25.0 is the last release with `net8.0` and `net9.0`, as the README says (Microsoft ended support for both on
+10 November 2026). The release after it drops them from every package, the CI matrix and the tool, and the
+`#if NET9_0_OR_GREATER` guards and their .NET 8 paths go with them.
 
 The next .NET is tried before it ships: `-p:PreviewTargetFramework=net12.0` adds it as an extra target to the library
 and tests, and `.github/workflows/dotnet-preview.yml` builds and tests that on the latest .NET 12 preview SDK once one
