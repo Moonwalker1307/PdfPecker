@@ -103,6 +103,11 @@ internal sealed class Gradient
     // The pieces a span between two stops of different colours and alphas is cut into; see Premultiply.
     private const int PremultipliedPieces = 8;
 
+    // The most stops Premultiply adds to one gradient. Each added stop writes a function into the PDF, so cutting every
+    // span of a gradient with thousands of translucent stops made eight times the output and memory; past this, spans
+    // get fewer pieces, down to none, which interpolates them as before.
+    private const int MaxPremultipliedStops = 4096;
+
     /// <summary>
     /// Browsers interpolate translucent stops in premultiplied colours: between a red stop and a faint blue one the
     /// colour stays red until the blue gains weight, where interpolating the unblended colours turns pink at once. The
@@ -118,8 +123,9 @@ internal sealed class Gradient
         int n = Offsets.Length, spans = 0;
         for (int i = 0; i + 1 < n; i++)
             if (NeedsPieces(i)) spans++;
-        if (spans == 0) return;
-        int count = n + spans * (PremultipliedPieces - 1);
+        int pieces = spans == 0 ? 1 : Math.Min(PremultipliedPieces, 1 + MaxPremultipliedStops / spans);
+        if (pieces == 1) return;
+        int count = n + spans * (pieces - 1);
         var offsets = new float[count];
         var flat = new uint[count];
         var colors = new uint[count];
@@ -133,10 +139,10 @@ internal sealed class Gradient
             alpha[k++] = alphas[i];
             if (i + 1 == n || !NeedsPieces(i)) continue;
             float a0 = alphas[i] / 255f, a1 = alphas[i + 1] / 255f;
-            for (int p = 1; p < PremultipliedPieces; p++)
+            for (int p = 1; p < pieces; p++)
             {
                 // w is the weight of the second colour in the premultiplied mix; t is where along the span it is.
-                float w = (float)p / PremultipliedPieces;
+                float w = (float)p / pieces;
                 float t = w * a0 / (w * a0 + (1 - w) * a1);
                 offsets[k] = Offsets[i] + (Offsets[i + 1] - Offsets[i]) * t;
                 flat[k] = Lerp(Colors[i], Colors[i + 1], t);

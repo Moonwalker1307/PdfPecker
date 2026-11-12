@@ -2064,6 +2064,20 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_gradient_of_thousands_of_translucent_stops_gains_a_bounded_number_of_stops()
+    {
+        // Each span between stops of different colours and alphas gains stops for premultiplied interpolation, and each
+        // stop writes a function into the PDF: 5,000 such stops made 40,000, eight times the output and memory.
+        var stops = new StringBuilder("linear-gradient(90deg");
+        for (int k = 0; k < 5000; k++)
+            stops.Append(CultureInfo.InvariantCulture, $", rgba({k % 255}, 0, {k % 7}, 0.{k % 9 + 1}) {k / 50.0}%");
+        stops.Append(')');
+        var g = CssGradient.Parse(stops.ToString(), CssColor.Black, 12, 12, 5, 8)!.Resolve(200, 10, 0xFFFFFFFF);
+        Assert.InRange(g.Offsets.Length, 5000, 5000 + 4096);
+        Assert.Equal(g.Offsets.Length, g.Alphas!.Length);
+    }
+
+    [Fact]
     public void Long_lines_repeated_through_a_form_are_charged_by_the_rows_they_cross()
     {
         // A form strokes 20,000 lines from the bottom of the page to the top, and the page draws it a thousand times:
