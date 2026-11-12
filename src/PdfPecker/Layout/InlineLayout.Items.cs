@@ -63,6 +63,8 @@ internal sealed partial class InlineLayout
         // A ruby pair: how far its annotation reaches above the base's em box. The line holds only the base; the
         // annotation takes the leading around it, as emphasis marks do.
         public float RubyOver;
+        // The same below the base's em box, for an annotation under it (ruby-position: under).
+        public float RubyUnder;
         // How far its annotation may reach over the text on each side, when it is wider than the base.
         public float RubyOverhang;
 
@@ -80,7 +82,7 @@ internal sealed partial class InlineLayout
             Capture = null;
             AnchorId = null;
             Element = null;
-            FloatMin = RelX = RelY = TrimStart = TrimEnd = RubyOver = RubyOverhang = 0;
+            FloatMin = RelX = RelY = TrimStart = TrimEnd = RubyOver = RubyUnder = RubyOverhang = 0;
             MinWidth = -1;
             Level = Para = Justify = 0;
         }

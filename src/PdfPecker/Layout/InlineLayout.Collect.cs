@@ -407,8 +407,17 @@ internal sealed partial class InlineLayout
         // places ruby, in the line's leading where it fits (see MakeRoomForEmphasis).
         if (e is { Anonymous: true, Name: StyleResolver.RubyPairName })
         {
-            item.RubyOver = Math.Max(0, baseline - e.Style.TextSize * (1 - EmDescentOf(e.Style.Font)));
-            if (e.Children is [Element rt, Element rubyBase])
+            // An empty base has no line to give the pair its baseline, which then lies where a line of its text would
+            // put it in the base's em box.
+            if (e.Children is [_, Element { Children.Count: 0 }])
+            {
+                e.Style.Font.LineMetrics(e.Style.TextSize, out float ascent, out float descent);
+                float halfLeading = (e.Style.TextSize - ascent - descent) / 2;
+                item.BoxBaseline = baseline = e.Style.IsFlex ? halfLeading + ascent : c.Height - halfLeading - descent;
+            }
+            if (e.Style.IsFlex) item.RubyUnder = Math.Max(0, c.Height - baseline - e.Style.TextSize * EmDescentOf(e.Style.Font));
+            else item.RubyOver = Math.Max(0, baseline - e.Style.TextSize * (1 - EmDescentOf(e.Style.Font)));
+            if (e.Children is [Element rt, Element { Style.RubySpaceAround: true, Children.Count: > 0 } rubyBase])
             {
                 float excess = _engine.MeasureIntrinsic(rt).Max - _engine.MeasureIntrinsic(rubyBase).Max;
                 // The base's free space is spread around its characters, so only the share at its ends is blank for

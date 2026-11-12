@@ -147,6 +147,8 @@ public class HostileInputTests
     public void Many_ruby_pairs_stay_linear()
     {
         AssertStructurallyValid(Bounded("<p>" + Repeat("<ruby>漢<rp>(</rp><rt>かん</rt><rp>)</rp>字<rt>じ</rt></ruby>の", 20_000) + "</p>"));
+        // Annotations under their bases are column flex boxes, and annotations after the first of a base have empty bases.
+        AssertStructurallyValid(Bounded("<p style='ruby-position: under; ruby-align: space-between'>" + Repeat("<ruby>漢<rt>か ん</rt>" + Repeat("<rt>x</rt>", 10) + "</ruby>", 5_000) + "</p>"));
     }
 
     [Fact]

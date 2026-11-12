@@ -173,7 +173,7 @@ internal sealed partial class InlineLayout
             default:
                 float shift = it.Style.AtomicBaselineShift;
                 a = baseline - shift - it.RubyOver;
-                d = it.Height - baseline + shift;
+                d = it.Height - baseline + shift - it.RubyUnder;
                 break;
         }
     }
@@ -530,21 +530,23 @@ internal sealed partial class InlineLayout
         float lx = x + lineLeft + (rtl ? 0 : lineIndent);
         float extra = 0, charExtra = 0, leaderW = 0;
         // A ruby base or annotation narrower than the other spreads its free space around its characters, with half a
-        // share at each end (ruby-align: space-around), and is centred when it has nowhere to put it, as in Chrome.
-        if (block.RubySpaceAround && leaders == 0 && free > Eps && align == TextAlign.Center)
+        // share at each end (ruby-align: space-around), or between them only (space-between), and is centred when it
+        // has nowhere to put it, as in Chrome.
+        if ((block.RubySpaceAround || block.RubySpaceBetween) && leaders == 0 && free > Eps && align == TextAlign.Center)
         {
             _justifySplit = false;
             opportunities = JustificationOpportunities(line, TextJustify.Auto, rtl);
             if (_justifySplit) LineKerning(items);
+            int ends = block.RubySpaceAround ? 1 : 0;
             if (opportunities > 0)
             {
-                charExtra = free / (opportunities + 1);
-                return new LineFit(lx + charExtra / 2, charExtra, 0, charExtra);
+                charExtra = free / (opportunities + ends);
+                return new LineFit(lx + ends * charExtra / 2, charExtra, 0, charExtra);
             }
             if (opportunities < 0 && spaces > 0)
             {
-                extra = free / (spaces + 1);
-                return new LineFit(lx + extra / 2, extra, 0);
+                extra = free / (spaces + ends);
+                return new LineFit(lx + ends * extra / 2, extra, 0);
             }
         }
         // Leaders take the line's free space, so the text after them ends at the line's end.

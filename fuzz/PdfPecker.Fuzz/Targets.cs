@@ -94,7 +94,7 @@ internal static class Targets
         "<span style=\"box-shadow:inset 0 0 1e9px 1e9px red,inset 1px 1px blue;border-radius:50%\">x<br>y</span>",
         "text-autospace:normal", "text-autospace:ideograph-alpha ideograph-numeric replace", "<p style=\"text-autospace:auto;word-break:keep-all\">日a1本<b>b</b>語</p>",
         "<div style=\"columns:2\"><section><p>a</p><div><h2 style=\"column-span:all\">b</h2></div><p>c</p></section></div>", "<ol style=\"columns:2\"><li>a<h2 style=\"column-span:all\">b</h2>c</li></ol>",
-        "<ruby>漢<rt>かん</rt>字<rp>(</rp><rt>じ</rt><rp>)</rp></ruby>", "<ruby><rt>a</rt><rt>b</rt><rb>c</rb></ruby>", "<rt>x</rt>",
+        "<ruby>漢<rt>かん</rt>字<rp>(</rp><rt>じ</rt><rp>)</rp></ruby>", "<ruby><rt>a</rt><rt>b</rt><rb>c</rb></ruby>", "<rt>x</rt>", "ruby-position:under", "ruby-align:space-between", "<rtc><rt>y</rt></rtc>",
         "<ruby style=\"display:block;line-height:0\"><ruby>a<rt>b</rt></ruby><rt style=\"font-size:1e9px\">c</rt></ruby>",
     };
 

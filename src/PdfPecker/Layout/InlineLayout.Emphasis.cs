@@ -52,7 +52,7 @@ internal sealed partial class InlineLayout
         for (int li = 0; li < n; li++)
             foreach (var it in lines[li].Items)
                 if (it.Kind == ItemKind.Text && it.Style.EmphasisShape != EmphasisShape.None && it.Style.EmphasisMark != null
-                    || it.RubyOver > 0) return true;
+                    || it.RubyOver > 0 || it.RubyUnder > 0) return true;
         return false;
     }
 
@@ -95,13 +95,15 @@ internal sealed partial class InlineLayout
         bool marksOver = false, marksUnder = false;
         foreach (var it in line.Items)
         {
-            if (it.RubyOver > 0 && !IsLineAligned(it))
+            if ((it.RubyOver > 0 || it.RubyUnder > 0) && !IsLineAligned(it))
             {
-                // A ruby pair reaches from its annotation's top down to its base's bottom.
+                // A ruby pair reaches from its annotation's top down to its base's bottom, or from its base's top down to
+                // its annotation's bottom.
                 float shift = it.Style.AtomicBaselineShift;
                 contentOver = Math.Min(contentOver, shift - it.BoxBaseline);
                 contentUnder = Math.Max(contentUnder, shift + it.Height - it.BoxBaseline);
-                marksOver = true;
+                if (it.RubyOver > 0) marksOver = true;
+                if (it.RubyUnder > 0) marksUnder = true;
                 continue;
             }
             if (it.Kind is not (ItemKind.Text or ItemKind.Space)) continue;
