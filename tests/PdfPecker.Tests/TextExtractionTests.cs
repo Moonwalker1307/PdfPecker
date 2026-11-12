@@ -422,6 +422,59 @@ public class TextExtractionTests
     }
 
     [Theory]
+    [InlineData(2, "9mm")]
+    [InlineData(4, "10pt")]
+    [InlineData(5, "9pt")]
+    [InlineData(2, "7pt")]
+    public void Columns_on_a_baseline_grid_are_read_one_after_the_other(int columns, string gap)
+    {
+        // Paragraphs without space between them keep every line of each column level with a line of the next, as a
+        // newspaper's or a journal's baseline grid does, which looks like the rows of a table; the last case leaves a
+        // gutter narrower than a word space is wide in justified text.
+        var pdf = HtmlToPdf.Convert(
+            "<style>@page{size:A4;margin:18mm 16mm} body{margin:0;font:10pt/12pt serif} h2{font:bold 10pt/12pt sans-serif;margin:0}" +
+            $" p{{margin:0;text-indent:1em}}</style><div style='columns:{columns};column-gap:{gap};text-align:justify'>" +
+            string.Concat(Story.Select(p => p.Length < 20 ? "<h2>" + p + "</h2>" : "<p>" + p + "</p>")) + "</div>");
+        AssertStoryInOrder(PdfText.ExtractPage(pdf, 1).Text);
+        AssertStoryInOrder(PdfToMarkdown.Convert(pdf));
+    }
+
+    [Fact]
+    public void A_column_of_prose_beside_a_table_of_figures_is_read_before_it()
+    {
+        // The table's rows sit on the text's baselines, as a journal sets a table of figures in one column beside the
+        // text of the other, which used to make the text and the figures one table read across.
+        string rows = string.Concat(Enumerable.Range(0, 14).Select(r =>
+            $"<tr><td>{1958 + r}</td><td>{(17.5 + r * 1.25).ToString("F2", System.Globalization.CultureInfo.InvariantCulture)}</td><td>{100 + 7 * r}</td><td>{(0.4 + r * 0.3).ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}</td></tr>"));
+        var pdf = HtmlToPdf.Convert(
+            "<style>@page{size:A4;margin:18mm 16mm} body{margin:0;font:10pt/12pt serif} p{margin:0;text-indent:1em}" +
+            " td{padding:0 0 0 18pt;line-height:12pt;text-align:right}</style>" +
+            "<div style='display:flex;gap:18pt'><div style='width:250px;text-align:justify'>" +
+            string.Concat(Story.Take(2).Select(p => "<p>" + p + "</p>")) +
+            "</div><table style='border-collapse:collapse'>" + rows + "</table></div>");
+        var text = PdfText.ExtractPage(pdf, 1).Text;
+        string flat = text.Replace('\n', ' ').Replace("  ", " ");
+        int first = flat.IndexOf(Story[0], StringComparison.Ordinal), second = flat.IndexOf(Story[1], StringComparison.Ordinal);
+        Assert.True(first >= 0 && second > first, text);
+        Assert.True(flat.IndexOf("1958", StringComparison.Ordinal) > second, text);
+    }
+
+    [Fact]
+    public void Columns_beside_a_line_in_the_margin_are_read_one_after_the_other()
+    {
+        // A single line beside the columns, such as a running head set in the margin, makes them a part of their own;
+        // its other part is too short to be a column, which used to have the columns read across.
+        var pdf = HtmlToPdf.Convert(
+            "<style>@page{size:A4;margin:18mm 30mm 18mm 16mm} body{margin:0;font:10.5pt/1.4 serif} h2{font:bold 12.5pt/1.25 sans-serif;margin:10pt 0 4pt}" +
+            " p{margin:0 0 6pt}</style><div style='position:absolute;right:-24mm;top:120mm;font-size:9pt'>Quarterly</div>" +
+            "<div style='columns:2;column-gap:9mm;text-align:justify'>" +
+            string.Concat(Story.Select(p => p.Length < 20 ? "<h2>" + p + "</h2>" : "<p>" + p + "</p>")) + "</div>");
+        var text = PdfText.ExtractPage(pdf, 1).Text;
+        AssertStoryInOrder(text);
+        Assert.Contains("Quarterly", text);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void A_column_that_starts_higher_than_the_first_is_read_after_it(bool boxes)
