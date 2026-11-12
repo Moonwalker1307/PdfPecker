@@ -100,6 +100,22 @@ steps: fetch veraPDF with Maven, `dotnet run -c Release --project tools/Conforma
 `fuzz/PdfPecker.Fluent.Fuzz` builds random documents from random fluent calls; both run nightly in `fuzz.yml`. How to
 run a target, reproduce a finding and turn it into a test is in `fuzz/README.md`.
 
+## Mutation testing
+
+`.github/workflows/mutation.yml` runs [Stryker.NET](https://stryker-mutator.io) every Sunday, one job per area
+(`markdown`, `css-values`, `barcodes`, `text`), through `tools/MutationTesting/run.sh <area>`. Stryker changes the
+area's code one mutant at a time (a `<` for a `<=`, a removed statement) and runs the area's tests against each; a
+mutant that no test notices points at behaviour nothing pins down. The job never fails: the score and a per-file table
+go to the job summary, and the HTML report (an artifact) shows each surviving mutant in its source. Turn the ones that
+matter into tests; some are equivalent (`>>` and `>>>` on a `uint`) and stay.
+
+The script edits the working tree, so run it locally only in a scratch clone: it builds net10.0 only and puts
+`// Stryker disable all` at the top of every library file outside the area, because Stryker's `--mutate` only filters
+the report and otherwise compiles all 160,000 mutants of the library into one assembly, which makes the coverage pass
+take hours. The tests are filtered to the area's classes for speed, so a mutant killed only by another class shows as a
+survivor. An area takes about an hour on four cores. The Markdown score needs the CommonMark spec (see above); offline
+it drops by about 12 points.
+
 ## Performance
 
 Nightly, `perf.yml` runs the benchmark on main and compares it with the previous night's run. For a change of your

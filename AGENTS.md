@@ -124,9 +124,9 @@ packages' READMEs and nuget.org pages.
 - `fuzz/PdfPecker.Fuzz` – the dependency-free mutation fuzzer; `fuzz/PdfPecker.Fluent.Fuzz` – the generative fuzzer of
   the fluent package.
 - `tools/` – generators for checked-in data (see "Change-specific guidance"), the veraPDF conformance samples, the
-  HarfBuzz shaping reference and the third-party PDF fixtures.
+  HarfBuzz shaping reference, the third-party PDF fixtures and the mutation testing script (`tools/MutationTesting`).
 - `.github/workflows/` – `nuget.yml`, `dotnet-preview.yml`, `conformance.yml`, `codeql.yml`, `perf.yml`, `fuzz.yml`,
-  `vulnerability-scan.yml`, `dependabot-auto-merge.yml`; see `CONFIG.md`.
+  `mutation.yml`, `vulnerability-scan.yml`, `dependabot-auto-merge.yml`; see `CONFIG.md`.
 - The user manual at pdfpecker.net/docs is not here: it is generated from `docs/*.md` in the PdfPecker.Web repository.
 
 ## Build and verify
