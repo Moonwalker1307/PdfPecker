@@ -267,10 +267,13 @@ internal sealed partial class LayoutEngine
         trs.AddRange(body);
         trs.AddRange(foot);
 
-        var occupied = new List<List<bool>>();
-        bool IsOccupied(int r, int c) => r < occupied.Count && c < occupied[r].Count && occupied[r][c];
+        // The places that cells spanning rows take in the rows below their first, which is all a row asks about: its own
+        // cells lie left of the place it looks at. A table without such cells keeps no record at all.
+        List<List<bool>>? occupied = null;
+        bool IsOccupied(int r, int c) => occupied != null && r < occupied.Count && c < occupied[r].Count && occupied[r][c];
         void Occupy(int r, int c)
         {
+            occupied ??= new List<List<bool>>();
             while (occupied.Count <= r) occupied.Add(new List<bool>());
             var row = occupied[r];
             while (row.Count <= c) row.Add(false);
@@ -299,7 +302,7 @@ internal sealed partial class LayoutEngine
                 int rowspan = ParseInt(td.GetAttribute("rowspan"), 1);
                 if (rowspan <= 0 || r + rowspan > groupEnd) rowspan = groupEnd - r;
                 var cell = new CellModel { Td = td, Row = r, Col = col, ColSpan = colspan, RowSpan = Math.Max(1, rowspan) };
-                for (int rr = r; rr < r + cell.RowSpan; rr++)
+                for (int rr = r + 1; rr < r + cell.RowSpan; rr++)
                     for (int cc = col; cc < col + colspan; cc++) Occupy(rr, cc);
                 m.Rows[r].Cells.Add(cell);
                 m.Rows[r + cell.RowSpan - 1].Ending.Add(cell);
