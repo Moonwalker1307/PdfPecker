@@ -312,11 +312,11 @@ internal sealed partial class PdfDocumentWriter
         {
             int k = font.KernUnits(text[i - 1], text[i]);
             if (k == 0) continue;
-            WriteTextBytes(b, text.Substring(runStart, i - runStart));
+            WriteTextBytes(b, text.AsSpan(runStart, i - runStart));
             b.Int(-k);
             runStart = i;
         }
-        WriteTextBytes(b, text.Substring(runStart));
+        WriteTextBytes(b, text.AsSpan(runStart));
         b.Ascii("] TJ");
     }
 
@@ -809,7 +809,7 @@ internal sealed partial class PdfDocumentWriter
         b.Ascii("ET\n");
     }
 
-    private static void WriteTextBytes(ByteBuffer b, string text)
+    private static void WriteTextBytes(ByteBuffer b, ReadOnlySpan<char> text)
     {
         b.Byte((byte)'(');
         foreach (char ch in text)
