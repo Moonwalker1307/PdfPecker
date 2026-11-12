@@ -32,7 +32,7 @@ public class ComputedStyleInheritanceTests
         "InlineFade",
     ];
 
-    // The fields CreateChild resets to their initial values. The three groups hold the rarely set ones.
+    // The fields CreateChild resets to their initial values. The four groups hold the rarely set ones.
     private static readonly string[] Reset =
     [
         "Display", "InlineTable", "Contents", "UnicodeBidi", "BackgroundColor", "CanvasBackground", "RubySpaceAround", "RubySpaceBetween",
@@ -40,11 +40,11 @@ public class ComputedStyleInheritanceTests
         "BorderTopWidth", "BorderRightWidth", "BorderBottomWidth", "BorderLeftWidth",
         "BorderTopStyle", "BorderRightStyle", "BorderBottomStyle", "BorderLeftStyle", "BorderHiddenSides",
         "BorderTopColor", "BorderRightColor", "BorderBottomColor", "BorderLeftColor", "BorderRadii", "CornerShapes",
-        "Width", "Height", "MinWidth", "MaxWidth", "MinHeight", "MaxHeight", "BorderBox", "VerticalAlign",
+        "Width", "Height", "BorderBox", "VerticalAlign",
         "PageBreakBefore", "PageBreakAfter", "AvoidBreakInside", "AvoidBreakBefore", "AvoidBreakAfter",
-        "Floated", "Float", "ClearLeft", "ClearRight", "Opacity", "Position", "Top", "Right", "Bottom", "Left",
+        "Floated", "Float", "ClearLeft", "ClearRight", "Opacity", "Position",
         "FormattingRoot", "OverflowX", "OverflowY",
-        "_visual", "_containers", "_rare",
+        "_visual", "_containers", "_rare", "_limits",
     ];
 
     // The fields CreateChild sets from the parent itself rather than copying or resetting them.

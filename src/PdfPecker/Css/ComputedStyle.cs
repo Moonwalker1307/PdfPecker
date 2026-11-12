@@ -259,6 +259,10 @@ internal readonly struct Length
     /// <summary>Any other value that depends on a percentage, such as <c>min(100%, 600pt)</c>: points as a function of the reference length.</summary>
     public static Length Calc(Func<float, float> fn) => new(0, new CalcParts(0, fn));
 
+    /// <summary>Whether <paramref name="other"/> is this very value: the same bits, unit and calc() parts.</summary>
+    public bool Same(Length other)
+        => Unit == other.Unit && BitConverter.SingleToInt32Bits(Value) == BitConverter.SingleToInt32Bits(other.Value) && ReferenceEquals(_calc, other._calc);
+
     public bool IsAuto => Unit == LengthUnit.Auto;
     /// <summary>True when the value depends on the reference length: a percentage, or a Calc containing one.</summary>
     public bool IsPercent => Unit is LengthUnit.Percent or LengthUnit.Calc;
@@ -376,7 +380,6 @@ internal sealed partial class ComputedStyle
     public float[]? CornerShapes;
     public bool TextOverflowEllipsis => TextOverflow != null;
     public Length Width = Length.Auto, Height = Length.Auto;
-    public Length MinWidth = Length.Auto, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
     public bool BorderBox;
     public VerticalAlign VerticalAlign;
     public Length VerticalAlignLength = Length.Zero; // the raise of vertical-align: <length-percentage>
@@ -390,7 +393,6 @@ internal sealed partial class ComputedStyle
     // their own, so their text, decorations and backgrounds are faded instead.
     public float InlineFade = 1;
     public Position Position;
-    public Length Top = Length.Auto, Right = Length.Auto, Bottom = Length.Auto, Left = Length.Auto;
     public bool FormattingRoot;                 // overflow other than visible, or display: flow-root
     public Overflow OverflowX, OverflowY;
 
@@ -684,9 +686,6 @@ internal sealed partial class ComputedStyle
         c.BorderRadii = null;
         c.CornerShapes = null;
         c.Width = c.Height = Length.Auto;
-        c.MinWidth = Length.Auto; // min-width: auto, which differs from 0 for boxes with aspect-ratio
-        c.MinHeight = Length.Zero;
-        c.MaxWidth = c.MaxHeight = Length.Auto;
         c.BorderBox = false;
         c.VerticalAlign = VerticalAlign.Baseline;
         c.PageBreakBefore = c.PageBreakAfter = c.AvoidBreakInside = false;
@@ -696,7 +695,6 @@ internal sealed partial class ComputedStyle
         c.ClearLeft = c.ClearRight = false;
         c.Opacity = 1;
         c.Position = Position.Static;
-        c.Top = c.Right = c.Bottom = c.Left = Length.Auto;
         c.FormattingRoot = false;
         c.OverflowX = c.OverflowY = Overflow.Visible;
         c.UnicodeBidi = UnicodeBidi.Normal;

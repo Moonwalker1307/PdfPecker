@@ -17,6 +17,7 @@ internal sealed partial class ComputedStyle
     private VisualFields _visual = VisualFields.Initial;
     private ContainersFields _containers = ContainersFields.Initial;
     private RareFields _rare = RareFields.Initial;
+    private LimitsFields _limits = LimitsFields.Initial;
 
     // Marks the inherited groups as shared before a copy of the style takes them, so that the first change on either
     // side copies the group instead of changing it under the other.
@@ -32,6 +33,7 @@ internal sealed partial class ComputedStyle
         if (!_visual.Shared) _visual.Shared = true;
         if (!_containers.Shared) _containers.Shared = true;
         if (!_rare.Shared) _rare.Shared = true;
+        if (!_limits.Shared) _limits.Shared = true;
     }
 
     // A child starts with the initial values of the properties that are not inherited.
@@ -40,6 +42,7 @@ internal sealed partial class ComputedStyle
         _visual = VisualFields.Initial;
         _containers = ContainersFields.Initial;
         _rare = RareFields.Initial;
+        _limits = LimitsFields.Initial;
     }
 
     // ---- Inherited text and font properties that most text leaves at their initial values.
@@ -500,6 +503,38 @@ internal sealed partial class ComputedStyle
         public ContainersFields Copy()
         {
             var c = (ContainersFields)MemberwiseClone();
+            c.Shared = false;
+            return c;
+        }
+    }
+
+    // ---- The smallest and largest sizes and the insets of positioned boxes: not inherited, and auto on most boxes.
+
+    public Length MinWidth { get => _limits.MinWidth; set { if (!_limits.MinWidth.Same(value)) Limits.MinWidth = value; } }
+    public Length MaxWidth { get => _limits.MaxWidth; set { if (!_limits.MaxWidth.Same(value)) Limits.MaxWidth = value; } }
+    public Length MinHeight { get => _limits.MinHeight; set { if (!_limits.MinHeight.Same(value)) Limits.MinHeight = value; } }
+    public Length MaxHeight { get => _limits.MaxHeight; set { if (!_limits.MaxHeight.Same(value)) Limits.MaxHeight = value; } }
+    public Length Top { get => _limits.Top; set { if (!_limits.Top.Same(value)) Limits.Top = value; } }
+    public Length Right { get => _limits.Right; set { if (!_limits.Right.Same(value)) Limits.Right = value; } }
+    public Length Bottom { get => _limits.Bottom; set { if (!_limits.Bottom.Same(value)) Limits.Bottom = value; } }
+    public Length Left { get => _limits.Left; set { if (!_limits.Left.Same(value)) Limits.Left = value; } }
+
+    // The group to change a value in, copied first when other styles share it.
+    private LimitsFields Limits => _limits.Shared ? _limits = _limits.Copy() : _limits;
+
+    private sealed class LimitsFields
+    {
+        public static readonly LimitsFields Initial = new() { Shared = true };
+
+        public bool Shared;
+        public Length MinWidth = Length.Auto; // min-width: auto, which differs from 0 for boxes with aspect-ratio
+        public Length MinHeight = Length.Zero;
+        public Length MaxWidth = Length.Auto, MaxHeight = Length.Auto;
+        public Length Top = Length.Auto, Right = Length.Auto, Bottom = Length.Auto, Left = Length.Auto;
+
+        public LimitsFields Copy()
+        {
+            var c = (LimitsFields)MemberwiseClone();
             c.Shared = false;
             return c;
         }
