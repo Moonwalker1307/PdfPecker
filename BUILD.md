@@ -51,7 +51,7 @@ alternate lookups and span `Split`, go behind `#if NET9_0_OR_GREATER` with a .NE
 
 The next .NET is tried before it ships: `-p:PreviewTargetFramework=net12.0` adds it as an extra target to the library
 and tests, and `.github/workflows/dotnet-preview.yml` builds and tests that on the latest .NET 12 preview SDK once one
-is out. The released package gets the new target only once that .NET is generally available.
+is out; until then the workflow runs only by hand. The released package gets the new target only once that .NET is generally available.
 
 The command-line tool stays on `net8.0`, `net9.0` and `net10.0`: its Native AOT packages are named in the package's
 `net10.0` folder, which a .NET 11 SDK also reads, and a `net11.0` folder would make a .NET 11 SDK install a
