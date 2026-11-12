@@ -1764,6 +1764,20 @@ internal sealed partial class LayoutEngine
         // The row's cells whose top border was drawn before, which a row has in the order of their columns.
         var cells = m.Rows[r].Cells;
         int count = under.Tops ? cells.Count : 0;
+        // Only where removing collapsed rows and columns left two overlapping cells in one column are the cells sorted
+        // again, as they were when they were listed for each row: that sort keeps no order among equal columns, and
+        // the bands must stay where they were.
+        for (int i = 1; i < count; i++)
+        {
+            if (cells[i].Col != cells[i - 1].Col) continue;
+            var sorted = new List<CellModel>();
+            foreach (var cell in cells)
+                if (TopInset(m, cell) > 0) sorted.Add(cell);
+            sorted.Sort(static (x, y) => x.Col.CompareTo(y.Col));
+            cells = sorted;
+            count = sorted.Count;
+            break;
+        }
         for (int i = NextTop(0); i < count;)
         {
             var cell = cells[m.Rtl ? count - 1 - i : i];
