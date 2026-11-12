@@ -156,7 +156,7 @@ internal sealed partial class PdfFormEditor
         /// <summary>Writes the Type 0 font, its CID font, descriptor, font file and ToUnicode map, as the HTML writer does.</summary>
         public void Finish(PdfFormEditor e)
         {
-            var used = _subset.Used().ToList();
+            var used = _subset.Used();
             string baseFont = _subset.Tag() + "+" + _program.PostScriptName;
             var cidRef = e.Reserve();
             var descRef = e.Reserve();

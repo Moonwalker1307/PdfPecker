@@ -73,7 +73,7 @@ internal sealed partial class PdfDocumentWriter
     {
         var program = subset.Program;
         var drawings = _colorDrawings[subset];
-        var used = subset.Used().ToList();
+        var used = subset.Used();
         int pages = ColorFontPages(subset);
         int firstProc = id + pages * 3;
         // Glyph space is a thousandth of an em, as for the other fonts, so the widths are the same numbers.
@@ -119,9 +119,7 @@ internal sealed partial class PdfDocumentWriter
                 .Int((int)Math.Round(program.CapHeight * scale)).Ascii(" /StemV 0 >>");
             End();
 
-            var codes = new List<(int Code, int CodePoint, string? Text)>(last - first + 1);
-            for (int cid = first; cid <= last; cid++) codes.Add((cid - first, used[cid].CodePoint, used[cid].Text));
-            WriteToUnicode(fontId + 2, codes, oneByte: true);
+            WriteToUnicode(fontId + 2, used, first, last - first + 1, oneByte: true);
         }
     }
 
