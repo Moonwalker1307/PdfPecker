@@ -85,6 +85,14 @@ public class HostileInputTests
         Assert.Single(doc.Children.OfType<Html.Element>());
     }
 
+    [Fact]
+    public void A_head_opened_again_and_again_stays_linear()
+    {
+        // Head content after </head> opens the head again; that must not move the children it already has each time.
+        var doc = Bounded(() => Html.HtmlParser.Parse("<head>" + Repeat("<meta></head>", 200_000)));
+        Assert.Equal(200_000, doc.FindFirst("head")!.Children.Count);
+    }
+
     // 3D transform lists multiply 4x4 matrices: huge, tiny, NaN-making and behind-the-viewer values must end in a drawn
     // or hidden box, never an exception, and a long list stays capped.
     [Theory]

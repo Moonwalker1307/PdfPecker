@@ -48,6 +48,14 @@ internal sealed class HtmlParser
 
     private void Push(Element el)
     {
+        _stack.Add(el);
+        // A head that is opened again with more children than are copied keeps its list, as PopTo leaves it there:
+        // moving them each time would make a document of many such tags take time with the square of their number.
+        if (el.Children.Count > MaxCopiedChildren)
+        {
+            _ownLists.Add(el.Children);
+            return;
+        }
         List<Node> shared;
         if (_spareLists.Count > 0)
         {
@@ -62,7 +70,6 @@ internal sealed class HtmlParser
             shared.AddRange(own);
             own.Clear();
         }
-        _stack.Add(el);
         _ownLists.Add(own);
     }
 
