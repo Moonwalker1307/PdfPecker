@@ -285,7 +285,17 @@ public class KerningAndBoxTests
     {
         var html = "<div style='width:100px;height:40px;box-shadow:2px 2px 0 rgba(0,0,0,.5)'></div>";
         Assert.Empty(ShadowMasks(html));
-        Assert.Contains(Layout(html).OfType<RectOp>(), r => r.Color == 0xFF7F7F7Fu); // flattened on white, as before
+        Assert.Contains(Layout(html).OfType<RectOp>(), r => r.Color == 0x80000000u); // its own colour and alpha, as in Chrome
+    }
+
+    [Fact]
+    public void Overlapping_sharp_shadows_blend()
+    {
+        // The second shadow is painted first and the first over it, each at its own alpha, so where they overlap the
+        // colours mix as in Chrome instead of the first one hiding the second.
+        var html = "<div style='width:100px;height:40px;box-shadow:4px 4px 0 rgba(255,0,0,.4), 8px 8px 0 rgba(0,0,255,.4)'></div>";
+        var colors = Layout(html).OfType<RectOp>().Select(r => r.Color).Distinct().ToList();
+        Assert.Equal([0x660000FFu, 0x66FF0000u], colors);
     }
 
     /// <summary>The soft-mask layers of the blurred box shadows in a document.</summary>
