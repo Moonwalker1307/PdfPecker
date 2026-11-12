@@ -458,6 +458,7 @@ internal sealed partial class StyleResolver
         if (parent.Name == "details" && !parent.HasAttribute("open")) HideClosedDetails(parent);
         WrapTableParts(parent);
         if (parent.Name == "ruby") WrapRubyPairs(parent);
+        if (parent.Style is { IsMultiColumn: true }) LiftSpanners(parent);
         if (scope != null)
             foreach (var name in scope)
             {
