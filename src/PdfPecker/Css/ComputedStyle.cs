@@ -120,6 +120,7 @@ internal sealed class SvgDashArray
 }
 
 internal enum TextAlign : byte { Left, Right, Center, Justify, Start, End } // Start and End follow the direction
+internal enum RubyAlign : byte { SpaceAround, Start, Center, SpaceBetween }
 // text-justify; distribute is inter-character's old name.
 internal enum TextJustify : byte { Auto, None, InterWord, InterCharacter }
 // text-spacing-trim: how fullwidth CJK punctuation sheds its blank half. normal trims it next to other punctuation and
@@ -345,6 +346,7 @@ internal sealed partial class ComputedStyle
     public bool Collapsed; // visibility: collapse, which removes table rows and columns (Visible is false too)
     public bool CanvasBackground; // the background is painted on every page's canvas instead of on this box (html/body propagation)
     public bool RubySpaceAround;  // a ruby base or annotation: free space goes around its characters (ruby-align: space-around); not inherited
+    public bool RubySpaceBetween; // a ruby base or annotation: free space goes between its characters (ruby-align: space-between); not inherited
     public bool BorderCollapse;
     public float BorderSpacingH, BorderSpacingV; // initially 0; the user agent style gives <table> 2px
     public string? FontFamilyName;
@@ -672,7 +674,7 @@ internal sealed partial class ComputedStyle
         c.Contents = false;
         c.BackgroundColor = 0;
         c.CanvasBackground = false;
-        c.RubySpaceAround = false;
+        c.RubySpaceAround = c.RubySpaceBetween = false;
         c.MarginTop = c.MarginRight = c.MarginBottom = c.MarginLeft = Length.Zero;
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;
         c.BorderTopWidth = c.BorderRightWidth = c.BorderBottomWidth = c.BorderLeftWidth = 1.5f;

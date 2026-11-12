@@ -11,8 +11,8 @@ head, script, style, title, meta, link, base, template, noscript, datalist, para
 li { display: list-item; }
 /* Ruby: an rt annotates the base before it (see StyleResolver.Ruby.cs); rp is for browsers without ruby. */
 rp { display: none; }
-rt { font-size: 50%; line-height: normal; text-emphasis: none; }
-ruby > rt { display: block; white-space: nowrap; }
+rt { line-height: normal; text-emphasis: none; }
+ruby > rt { display: block; white-space: nowrap; font-size: 50%; }
 table { display: table; border-collapse: separate; border-spacing: 2px; box-sizing: border-box; }
 caption { display: table-caption; text-align: center; }
 thead { display: table-header-group; vertical-align: middle; }

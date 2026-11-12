@@ -223,6 +223,17 @@ internal sealed partial class StyleResolver
             case "text-emphasis-style": ApplyEmphasisStyle(s, in d); break;
             case "text-emphasis-color": ApplyEmphasisColor(s, in d); break;
             case "text-emphasis-position": ApplyEmphasisPosition(s, in d); break;
+            case "ruby-position":
+                // alternate and inter-character are drawn as over, as Chrome draws them.
+                if (d.Lower is "over" or "under" or "alternate" or "inter-character" or "initial") s.RubyUnder = d.Lower == "under";
+                break;
+            case "ruby-align":
+                if (d.Lower switch
+                    {
+                        "space-around" or "initial" => RubyAlign.SpaceAround, "start" => RubyAlign.Start, "center" => RubyAlign.Center,
+                        "space-between" => RubyAlign.SpaceBetween, _ => (RubyAlign?)null,
+                    } is { } rubyAlign) s.RubyAlign = rubyAlign;
+                break;
             case "text-box-trim": if (CssParser.ParseTextBoxTrim(d.Lower) is { } trim) s.TextBoxTrim = trim; break;
             case "text-box-edge": if (CssParser.ParseTextBoxEdge(d.Lower) is { } edge) (s.TextEdgeOver, s.TextEdgeUnder) = edge; break;
             case "text-overflow": ApplyTextOverflow(s, in d); break;

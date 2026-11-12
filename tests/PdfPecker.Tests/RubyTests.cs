@@ -108,4 +108,63 @@ public class RubyTests
         Assert.True(Find(texts, "note").Baseline < Find(texts, "base").Baseline);
         Assert.True(Find(texts, "base").X < Find(texts, "tail").X);
     }
+
+    [Fact]
+    public void Ruby_position_under_puts_the_annotation_below_the_base_on_its_baseline()
+    {
+        var over = Texts("<p>A <ruby>base<rt>note</rt></ruby> B</p>");
+        var under = Texts("<p>A <ruby style='ruby-position: under'>base<rt>note</rt></ruby> B</p>");
+        // The base stays on the line's baseline, beside the text around it, and the annotation goes under it.
+        Assert.Equal(Find(under, "A").Baseline, Find(under, "base").Baseline, 0.01f);
+        Assert.True(Find(under, "note").Baseline > Find(under, "base").Baseline + 5, $"{Find(under, "note").Baseline}");
+        Assert.Equal(Find(over, "note").X, Find(under, "note").X, 0.01f);
+    }
+
+    [Fact]
+    public void Ruby_position_under_is_inherited_from_the_ruby_and_set_on_an_rt()
+    {
+        var texts = Texts("<p><ruby style='ruby-position: under'>a<rt>1</rt>b<rt style='ruby-position: over'>2</rt></ruby></p>");
+        Assert.True(Find(texts, "1").Baseline > Find(texts, "a").Baseline);
+        Assert.True(Find(texts, "2").Baseline < Find(texts, "b").Baseline);
+    }
+
+    [Fact]
+    public void Ruby_align_places_the_narrower_of_base_and_annotation()
+    {
+        // A wide base under a short annotation: start puts the annotation at the base's start, center in its middle,
+        // space-between at its two ends and space-around (the initial value) with half a share at each end. Latin text
+        // spreads at its spaces only, so the annotation that spreads has one.
+        string Html(string align, string note = "ab") => $"<p><ruby style='ruby-align: {align}'>MMMM<rt>{note}</rt></ruby></p>";
+        float BaseX(List<TextOp> t) => Find(t, "MMMM").X;
+        var start = Texts(Html("start"));
+        Assert.Equal(BaseX(start), Find(start, "ab").X, 0.01f);
+        var center = Texts(Html("center"));
+        var c = Find(center, "ab");
+        var m = Find(center, "MMMM");
+        Assert.Equal(m.X + m.Font.Measure("MMMM", m.Size) / 2, c.X + c.Font.Measure("ab", c.Size) / 2, 0.5f);
+        var between = Texts(Html("space-between", "a b"));
+        var b = between.Where(t => t.Size < 15).ToList();
+        Assert.Equal(BaseX(between), b.Min(t => t.X), 0.01f);
+        var around = Texts(Html("space-around", "a b"));
+        Assert.True(around.Where(t => t.Size < 15).Min(t => t.X) > BaseX(around) + 1);
+    }
+
+    [Fact]
+    public void A_second_rt_annotates_an_empty_base_after_the_first_pair()
+    {
+        // As in Chrome, consecutive annotations of one base go over an empty base after it rather than into the line.
+        var texts = Texts("<p><ruby>base<rt>one</rt><rt>two</rt></ruby>end</p>");
+        var two = Find(texts, "two");
+        Assert.Equal(Find(texts, "one").Baseline, two.Baseline, 0.01f);
+        Assert.True(two.X >= Find(texts, "base").X + Find(texts, "base").Font.Measure("base", Find(texts, "base").Size) - 0.5f);
+        Assert.True(Find(texts, "end").X >= two.X + two.Font.Measure("two", two.Size) - 0.5f);
+    }
+
+    [Fact]
+    public void An_rt_in_an_rtc_is_ordinary_text_as_in_Chrome()
+    {
+        var texts = Texts("<p><ruby>base<rt>note</rt><rtc><rt>Tokyo</rt></rtc></ruby></p>");
+        Assert.Equal(Find(texts, "base").Size, Find(texts, "Tokyo").Size, 0.01f);
+        Assert.Equal(Find(texts, "base").Baseline, Find(texts, "Tokyo").Baseline, 0.01f);
+    }
 }
