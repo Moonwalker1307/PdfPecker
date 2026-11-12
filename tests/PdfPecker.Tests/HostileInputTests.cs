@@ -226,6 +226,16 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Columns_full_of_footnote_calls_stay_bounded()
+    {
+        // Columns are laid out again to leave room for the footnotes called in them, a few times at most.
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded("<style>.fn { float: footnote }</style><div style='columns: 3'>"
+            + Repeat("<p>a<span class='fn'>note</span> b c d e f g h</p>", 2000) + "</div>"));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(20), $"{watch.Elapsed}");
+    }
+
+    [Fact]
     public void Balancing_lines_of_thousands_of_tiny_words_stays_fast()
     {
         // Choosing breaks again costs the square of a line's break opportunities: tiny words on wide lines keep their

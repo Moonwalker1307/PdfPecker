@@ -310,6 +310,17 @@ internal sealed partial class LayoutEngine
 
     private readonly Dictionary<int, List<FootnotePart>> _footnoteParts = new();
 
+    /// <summary>
+    /// How much taller the footnote area of a page would be with footnotes <paramref name="added"/> whole after its own:
+    /// what columns laid out before their calls are placed must leave free at the bottom of that page.
+    /// </summary>
+    private float AddedFootnoteReserve(int page, List<int> added)
+    {
+        var parts = PartsOn(page);
+        foreach (int k in added) parts.Add(new FootnotePart(k, page, 0, float.PositiveInfinity, false, page));
+        return Math.Min(AreaFrameHeight(page) + AreaContent(parts), AreaFrameHeight(page) + MaxAreaContent(page)) - FootnoteReserve(page);
+    }
+
     private void UpdateFootnoteReserves()
     {
         _footnoteReserve.Clear();

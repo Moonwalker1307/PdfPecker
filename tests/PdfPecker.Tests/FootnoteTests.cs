@@ -280,6 +280,25 @@ public class FootnoteTests
     }
 
     [Fact]
+    public void Columns_leave_room_at_the_bottom_of_each_page_for_the_footnotes_called_in_them()
+    {
+        // Twelve paragraphs in two columns over several pages, each calling a footnote: the columns end above the
+        // footnote area of every page instead of running into it.
+        var body = string.Concat(Enumerable.Range(1, 12).Select(i => $"<p>{Lorem[..90]}<span class='fn'>Column note {i} long enough for two lines in the footnote area at the bottom.</span> {Lorem[90..]}</p>"));
+        var pdf = ConvertUncompressed(Style + "<div style='columns: 2; column-gap: 12pt'>" + body + "</div>", SmallPage());
+        AssertStructurallyValid(pdf);
+        var runs = Runs(pdf);
+        var notes = runs.Where(r => r.Text.Contains("Column note", StringComparison.Ordinal) || r.Text.Contains("footnote area", StringComparison.Ordinal)).ToList();
+        Assert.Equal(12, runs.Count(r => r.Text.Contains("Column note", StringComparison.Ordinal)));
+        foreach (var page in notes.GroupBy(r => r.Page))
+        {
+            float areaTop = page.Max(r => r.Y) + 8; // the first note's line, its ascent and the area's border and padding
+            var text = runs.Where(r => r.Page == page.Key && r.Text.Contains("dolor", StringComparison.Ordinal)).ToList();
+            Assert.All(text, r => Assert.True(r.Y > areaTop + 10, $"page {page.Key}: text at {r.Y}, footnote area from {areaTop}"));
+        }
+    }
+
+    [Fact]
     public void A_footnote_with_paragraphs_starts_its_first_paragraph_with_the_marker()
     {
         var pdf = ConvertUncompressed(Style + "<p>Text.</p><aside class='fn'><p>First para.</p><p>Second para.</p></aside>", SmallPage());
