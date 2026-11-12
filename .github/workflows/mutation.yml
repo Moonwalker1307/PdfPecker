@@ -1,0 +1,113 @@
+name: Mutation testing
+
+# Weekly, and on demand. Stryker.NET changes the library's code one mutant at a time and checks that some test fails;
+# a mutant that survives points at behaviour no test pins down. It runs one area at a time, with that area's tests,
+# because a whole-library run would take days. It never fails the build: the reports are read by a person and turned
+# into tests. See tools/MutationTesting/run.sh and TESTING.md.
+on:
+  schedule:
+    # Sundays 04:13 Copenhagen time in winter (cron runs in UTC, so 05:13 in summer).
+    - cron: "13 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      area:
+        description: One area (markdown, css-values, barcodes, text), or "all"
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # A job-level `if` cannot read the matrix, so the areas to run are chosen here, as in fuzz.yml.
+  areas:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        env:
+          ALL: markdown css-values barcodes text
+          AREA: ${{ github.event_name == 'schedule' && 'all' || inputs.area }}
+        run: |
+          if [ "$AREA" = "all" ]; then
+            picked="$ALL"
+          elif [[ " $ALL " == *" $AREA "* ]]; then
+            picked="$AREA"
+          else
+            echo "::error::Unknown area '$AREA'; use one of: $ALL, or all"
+            exit 1
+          fi
+          json=$(printf '%s\n' $picked | jq -R . | jq -cs .)
+          echo "matrix=$json" >> "$GITHUB_OUTPUT"
+
+  mutate:
+    name: mutate ${{ matrix.area }}
+    needs: areas
+    runs-on: ubuntu-latest
+    # An area took 60 to 80 minutes on a 4-core VM.
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        area: ${{ fromJSON(needs.areas.outputs.matrix) }}
+    steps:
+      # Actions are pinned to commits so a moved tag cannot change what runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # global.json asks for the .NET 11 SDK; the run targets net10.0 only, so it needs that runtime too.
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: |
+            10.0.x
+            11.0.x
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            Directory.Build.props
+
+      # Pinned, so a new Stryker release cannot change the scores from one week to the next unnoticed.
+      - name: Install Stryker.NET
+        run: dotnet tool install --global dotnet-stryker --version 5.1.0
+
+      - name: Mutate ${{ matrix.area }}
+        env:
+          AREA: ${{ matrix.area }}
+          STRYKER_CONCURRENCY: 4
+        run: tools/MutationTesting/run.sh "$AREA" "$GITHUB_WORKSPACE/mutation-report"
+
+      - name: Summary
+        if: ${{ always() }}
+        env:
+          AREA: ${{ matrix.area }}
+        run: |
+          report=mutation-report/reports/mutation-report.json
+          [ -f "$report" ] || exit 0
+          jq -r --arg area "$AREA" '
+            [.files | to_entries[] | {file: (.key | sub(".*/src/PdfPecker/"; "")), m: .value.mutants}]
+            | map({file, killed: ([.m[] | select(.status == "Killed" or .status == "Timeout")] | length),
+                   survived: ([.m[] | select(.status == "Survived" or .status == "NoCoverage")] | length)})
+            | map(select(.killed + .survived > 0)) as $rows
+            | ($rows | map(.killed) | add) as $k | ($rows | map(.survived) | add) as $s
+            | "### Mutation score for \($area): \(if $k + $s > 0 then ($k * 1000 / ($k + $s) | floor) / 10 else 0 end)%",
+              "", "| File | Killed | Survived or not covered |", "| --- | --- | --- |",
+              ($rows | sort_by(-.survived)[] | "| \(.file) | \(.killed) | \(.survived) |")
+          ' "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutation-report-${{ matrix.area }}
+          path: mutation-report/reports/
+          if-no-files-found: ignore
+          retention-days: 30

@@ -38,6 +38,7 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 | `codeql.yml` | PRs, pushes and a schedule | CodeQL analysis. |
 | `perf.yml` | Nightly | Benchmark on main, run twice keeping each case's better time, against the previous run for allocation and the median of the three previous runs on the same processor for time. |
 | `fuzz.yml` | Nightly | Fuzzes every target, including `fluent`, the fluent package's generative fuzzer. |
+| `mutation.yml` | Weekly (Sunday), and by hand for one area | Stryker.NET mutation testing of one area of the library per job (`tools/MutationTesting/run.sh`), with the score in the job summary and the HTML report as an artifact. Never fails; see `TESTING.md`. |
 | `vulnerability-scan.yml` | Daily, and PRs that change it | OSV-Scanner checks every NuGet package (transitive ones too, from lock files the restore writes) and the veraPDF Maven project against osv.dev and reports to Security → Code scanning, failing the run when something is affected. A second job opens an issue for each new .NET security release of a supported version, since the Native AOT tool and the Python, Node and Rust packages carry the runtime they were built with. |
 | `dependabot-auto-merge.yml` | Dependabot PRs | Turns on auto-merge (squash) for patch and minor updates, so GitHub merges them once the required checks pass. Major updates and veraPDF updates wait for a person. |
 
