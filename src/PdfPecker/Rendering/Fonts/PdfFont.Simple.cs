@@ -88,6 +88,7 @@ internal sealed partial class PdfFont
             var trueType = TrueTypeFont.Parse(file.DecodeStream((fontFile2 ?? fontFile3)!));
             if (trueType != null && trueType.HasGlyf)
             {
+                trueType.CheckTrickyName(BaseFont);
                 Source = trueType;
                 MapTrueType(trueType, baseEncoding, differences, symbolic, hasEncoding);
                 FillMissingWidths(haveWidths, trueType);

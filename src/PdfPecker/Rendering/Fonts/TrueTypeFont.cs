@@ -114,6 +114,7 @@ internal sealed partial class TrueTypeFont : IGlyphSource
         if (font.Table("hmtx") is { } hmtx) font._hmtx = hmtx.Offset;
         if (font.Table("CFF ") is { } cff) font.CffTable = data.AsSpan(cff.Offset, cff.Length).ToArray();
         font.ReadLoca();
+        font.DetectTricky();
         font.ReadCmapDirectory();
         font._glyphCache = new PathData?[Math.Max(0, font.GlyphCount)];
         return font;
