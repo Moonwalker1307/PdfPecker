@@ -77,6 +77,7 @@ internal sealed partial class PdfFont
             var trueType = TrueTypeFont.Parse(file.DecodeStream((fontFile2 ?? fontFile3)!));
             if (trueType != null && trueType.HasGlyf)
             {
+                trueType.CheckTrickyName(BaseFont);
                 Source = trueType;
                 if (file.Resolve(cidFont["CIDToGIDMap"]) is PdfStream map) _cidToGid = ReadCidToGid(file.DecodeStream(map));
                 return true;

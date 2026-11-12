@@ -350,7 +350,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp, extract text with positions, extract images
   and read document properties. Text comes out in reading order: a tagged PDF's in the order of its tags, and columns
   side by side one after the other, also on pages turned sideways or upside down, in newspapers and journals whose
-  columns share a baseline grid or a narrow gutter, and from the right on right-to-left pages. [More](https://pdfpecker.net/docs/merging/)
+  columns share a baseline grid or a narrow gutter, and from the right on right-to-left pages. Ligatures and the
+  Arabic and Hebrew presentation forms older fonts map their glyphs to come out as plain letters. [More](https://pdfpecker.net/docs/merging/)
 - **Compacting and Fast Web View**: `PdfCompactor` makes any PDF smaller without changing how it looks, and
   `PdfOptions.Linearize` or `PdfLinearizer` writes a linearized PDF whose first page shows before the rest arrives,
   also encrypted: `PdfLinearizer` opens a protected PDF with its password and encrypts the result in the same pass.
@@ -375,6 +376,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   renders a page straight into a buffer of yours as grey, RGB or RGBA pixels, sized by `GetPixelSize`, for OCR and image
   processing. Comments that carry no appearance of their own (notes, highlights, underlines, strike-outs, squiggly
   lines, shapes, lines with their arrowheads, ink and free text) are drawn from their properties, as viewers draw them.
+  Older Taiwanese and Japanese fonts that build their characters with TrueType instructions (MingLiU, PMingLiU, DFKai-SB
+  and other DynaLab fonts) run those instructions, as FreeType does, so their characters come out whole.
   [More](https://pdfpecker.net/docs/pdf-to-image/)
 - **Image decoding**: `ImageToPixels.Convert(image)` reads a PNG, JPEG, GIF, WebP, BMP or TIFF file (any page of a
   multi-page TIFF) straight to grey, RGB or RGBA pixels, with the same colour conversions, EXIF orientation and size

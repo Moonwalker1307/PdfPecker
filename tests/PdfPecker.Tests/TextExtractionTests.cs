@@ -673,8 +673,32 @@ public class TextExtractionTests
         {
             Text = g.Text, X = g.X, Y = g.Y, EndX = g.End, EndY = g.Y, DirX = 1, Size = 13, Font = "NotoNaskhArabic-Regular", Moved = true, Mcid = -1,
         }).ToList();
-        var page = TextLayout.Build(glyphs, 1, 595, 842, expandLigatures: false);
+        var page = TextLayout.Build(glyphs, 1, 595, 842, expandLigatures: false, foldPresentationForms: true);
         Assert.Equal(new[] { "عن العام الذي", "140 محاضرة ومعرضاً" }, page.Lines.Select(l => l.Text));
+    }
+
+    [Theory]
+    [InlineData(true, "الإثنين ثقافة")]
+    [InlineData(false, "\uFE8D\uFEF9\uFE9B\uFEE8\uFEF2\uFEE6 \uFE9B\uFED8\uFE8E\uFED3\uFE94")]
+    public void Arabic_presentation_forms_come_out_as_letters(bool fold, string expected)
+    {
+        // Fonts made for systems without shaping map each contextual glyph to its presentation form, as an older
+        // newspaper's PDF does here, one glyph per form drawn right to left: "ﺛﻘﺎﻓﺔ" (culture) and "اﻹﺛﻨﲔ" (Monday),
+        // whose lam-alef ligature and final yeh with its dots are a single glyph each.
+        string[] words = { "\uFE94\uFED3\uFE8E\uFED8\uFE9B", "\uFEE6\uFEF2\uFEE8\uFE9B\uFEF9\uFE8D" };
+        var glyphs = new List<TextGlyph>();
+        double x = 100;
+        foreach (string word in words)
+        {
+            foreach (char c in word)
+            {
+                glyphs.Add(new TextGlyph { Text = c.ToString(), X = x, Y = 100, EndX = x + 6, EndY = 100, DirX = 1, Size = 12, Font = "Arabic", Moved = true, Mcid = -1 });
+                x += 6;
+            }
+            x += 4;
+        }
+        var page = TextLayout.Build(glyphs, 1, 595, 842, expandLigatures: true, foldPresentationForms: fold);
+        Assert.Equal(expected, page.Lines.Single().Text);
     }
 
     [Fact]

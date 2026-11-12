@@ -25,6 +25,12 @@ public sealed class PdfTextOptions
     public bool ExpandLigatures { get; set; } = true;
 
     /// <summary>
+    /// Whether Hebrew and Arabic presentation forms (U+FB1D to U+FDFF and U+FE70 to U+FEFC), which some fonts map their
+    /// contextual glyphs to, come out as the plain letters they stand for, such as "ثقافة" for "ﺛﻘﺎﻓﺔ". Default: true.
+    /// </summary>
+    public bool FoldPresentationForms { get; set; } = true;
+
+    /// <summary>
     /// The order the lines of a page are read in. Default: <see cref="PdfTextOrder.Reading"/>, which follows a tagged
     /// PDF's structure and reads columns side by side one after the other.
     /// </summary>
@@ -345,7 +351,7 @@ public static class PdfText
             if (options.Order == PdfTextOrder.TopToBottom)
             {
                 var glyphs = doc.CollectText(index, options.IncludeAnnotations, cancellationToken);
-                var page = TextLayout.Build(glyphs, index + 1, w, h, options.ExpandLigatures, cancellationToken);
+                var page = TextLayout.Build(glyphs, index + 1, w, h, options.ExpandLigatures, options.FoldPresentationForms, cancellationToken);
                 doc.Recycle(glyphs);
                 return page;
             }
@@ -353,7 +359,7 @@ public static class PdfText
             var collected = doc.CollectText(index, options.IncludeAnnotations, rules: true, cancellationToken);
             var turn = TextTurn.Of(collected.Glyphs, w, h, doc.Pages[index].Rotate);
             if (turn.Turned) turn.Apply(collected);
-            var text = TextLayout.Build(collected.Glyphs, index + 1, turn.Width, turn.Height, options.ExpandLigatures, cancellationToken);
+            var text = TextLayout.Build(collected.Glyphs, index + 1, turn.Width, turn.Height, options.ExpandLigatures, options.FoldPresentationForms, cancellationToken);
             var blocks = PdfToHtml.StructuredBlocks(tree, index, collected, text, new List<PageLink>(), out bool tagged, cancellationToken);
             doc.Recycle(collected);
             var arranged = TextReadingOrder.Arrange(text, blocks, tagged, cancellationToken);
