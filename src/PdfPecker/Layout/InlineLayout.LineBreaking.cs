@@ -478,8 +478,7 @@ internal sealed partial class InlineLayout
         /// </summary>
         private readonly int Shaped(int from, int to, int i)
         {
-            var text = _inline._contextText;
-            text.Clear();
+            var text = (_inline._contextText ??= new System.Text.StringBuilder(256)).Clear();
             for (int m = from; m <= to; m++)
             {
                 var it = At(m, i);

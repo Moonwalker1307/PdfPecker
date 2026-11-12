@@ -28,13 +28,15 @@ internal sealed partial class InlineLayout
     private const float MaxLeaderLength = 14400;
     private const int MaxLeaderCopies = 1 << 16;
 
-    private readonly StringBuilder _runText = new(256);
+    // The two builders are made when first used: the layout of a page header, a footer or a table of short cells needs
+    // neither, and a document has one layout per such band.
+    private StringBuilder? _runText;
     private float[] _xs = new float[64];
     private float[] _lineA = new float[32], _lineD = new float[32];
     private float[] _kern = new float[16];
     // The line's last run of text and the chunk that may join it, which line breaking measures shaped (see ContextOf).
     private readonly List<Item> _contextItems = new();
-    private readonly StringBuilder _contextText = new(256);
+    private StringBuilder? _contextText;
     // The extents of the inline boxes aligned to the top or bottom of the line being drawn (see AlignedSubtrees).
     private Dictionary<ComputedStyle, (float A, float D)>? _alignedSubtrees;
 
@@ -789,7 +791,7 @@ internal sealed partial class InlineLayout
             }
             if (same) return source;
         }
-        var sb = _runText.Clear();
+        var sb = (_runText ??= new StringBuilder(256)).Clear();
         if (rtlRun)
             for (int k = end - 1; k >= start; k--) sb.Append(items[k].Source, items[k].Start, items[k].Length);
         else
