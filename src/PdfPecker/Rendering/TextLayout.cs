@@ -54,7 +54,7 @@ internal static class TextLayout
     }
 
     public static PdfTextPage Build(List<TextGlyph> glyphs, int pageNumber, double width, double height, bool expandLigatures,
-        CancellationToken cancellationToken = default)
+        bool foldPresentationForms, CancellationToken cancellationToken = default)
     {
         var all = CollectionsMarshal.AsSpan(glyphs);
         bool drawsSpaces = false, upright = all.Length > 0;
@@ -88,7 +88,7 @@ internal static class TextLayout
             foreach (var line in groupLines)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var textLine = MakeLine(glyphs, line, cx, cy, angle, expandLigatures, drawsSpaces, directions, scratch);
+                var textLine = MakeLine(glyphs, line, cx, cy, angle, expandLigatures, foldPresentationForms, drawsSpaces, directions, scratch);
                 if (textLine == null) continue;
                 if (sb.Length > 0)
                 {
@@ -666,7 +666,7 @@ internal static class TextLayout
         public readonly StringBuilder Line = new(), Word = new();
     }
 
-    private static PdfTextLine? MakeLine(List<TextGlyph> glyphs, Line line, double cx, double cy, int angle, bool expandLigatures, bool drawsSpaces,
+    private static PdfTextLine? MakeLine(List<TextGlyph> glyphs, Line line, double cx, double cy, int angle, bool expandLigatures, bool foldPresentationForms, bool drawsSpaces,
         LineDirections directions, Scratch scratch)
     {
         // Visual order with spaces: a glyph drawn twice in the same place (fake bold) counts once, and a gap wider than
@@ -751,7 +751,7 @@ internal static class TextLayout
             if (word.Length == 0) { font = g.Font; color = g.Color; wv = it.V; }
             else if (g.Color != (colors is { Count: > 0 } ? colors[^1].Item2 : color) && (colors?.Count ?? 0) < 64)
                 (colors ??= new List<(int, uint)>()).Add((word.Length, g.Color));
-            AppendText(word, g.Text, expandLigatures);
+            AppendText(word, g.Text, expandLigatures, foldPresentationForms);
             wu0 = Math.Min(wu0, it.U0); wu1 = Math.Max(wu1, it.U1);
             if (it.Size > wsize) { wsize = it.Size; wv = it.V; }
             lu0 = Math.Min(lu0, it.U0); lu1 = Math.Max(lu1, it.U1); lsize = Math.Max(lsize, it.Size);
@@ -782,7 +782,7 @@ internal static class TextLayout
         }
     }
 
-    private static void AppendText(StringBuilder sb, string text, bool expandLigatures)
+    private static void AppendText(StringBuilder sb, string text, bool expandLigatures, bool foldPresentationForms)
     {
         foreach (char c in text)
         {
@@ -793,9 +793,18 @@ internal static class TextLayout
                 _ => null,
             } : null;
             if (expanded != null) sb.Append(expanded);
-            else if (c != '­' && c != '\0') sb.Append(c);
+            else if (foldPresentationForms && IsPresentationForm(c)) sb.Append(UnicodeNormalization.Normalize(c.ToString(), NormalizationForm.FormKC));
+            else if (c != '\u00AD' && c != '\0') sb.Append(c);
         }
     }
+
+    /// <summary>
+    /// Whether a character is a Hebrew or Arabic presentation form (U+FB1D to U+FDFF and U+FE70 to U+FEFC). Fonts made for
+    /// systems without shaping map their contextual glyphs to these, so a search for the plain letters would not find the
+    /// text; their compatibility decomposition is the letters a reader typed. Hebrew and Arabic only, so the Latin
+    /// ligatures keep their own option and nothing else changes.
+    /// </summary>
+    private static bool IsPresentationForm(char c) => c is (>= '\uFB1D' and <= '\uFDFF') or (>= '\uFE70' and <= '\uFEFC');
 
     /// <summary>
     /// The order to read a line's items in. The items are in visual order, left to right; a line with right-to-left
