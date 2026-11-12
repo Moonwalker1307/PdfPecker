@@ -26,7 +26,8 @@ internal static partial class BoxPainter
 
     /// <summary>
     /// Paints outer box shadows under the box, the first shadow on top, only outside the border box, as browsers clip
-    /// them there. A sharp shadow is opaque, blended over white by its alpha. A blur becomes bands that fade out like a
+    /// them there. A sharp shadow is painted in its own colour and alpha, so that what lies under it, and the shadows after
+    /// it in the list, show through as in browsers. A blur becomes bands that fade out like a
     /// Gaussian edge, each painted over the one before; they are grey levels in a layer that is a soft mask
     /// (<see cref="LayerOp.MaskFill"/>), through which the shadow's colour is painted, so that what lies under the
     /// shadow shows through it. The shadows go in a group marked as ink overflow (<see cref="GroupOp.Ink"/>), so a
@@ -73,7 +74,7 @@ internal static partial class BoxPainter
                 uint a = CoveredAlpha(alpha, cover);
                 if (a == 0) continue;
                 // In the mask, the band's alpha is a grey level.
-                uint c = bands == 1 ? CssColor.FlattenOnWhite(a << 24 | (color & 0xFFFFFF)) : 0xFF000000 | a << 16 | a << 8 | a;
+                uint c = bands == 1 ? a << 24 | (color & 0xFFFFFF) : 0xFF000000 | a << 16 | a << 8 | a;
                 if (radii is { } r)
                     into.Ops.Add(new RoundRectOp(sx, sy, sw, shh, r.Outset(grow), c).WithHole(x, y, w, h, r));
                 else PaintOutside(into, sx, sy, sw, shh, x, y, w, h, c);

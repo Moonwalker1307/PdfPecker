@@ -350,10 +350,20 @@ public class BorderStyleAndShadowTests
     }
 
     [Fact]
-    public void A_sharp_shadow_is_written_as_before()
+    public void A_sharp_translucent_shadow_lets_what_is_under_it_show_through()
     {
-        // Without a blur there is one band, still flattened on white: no alpha state is added for it.
-        var pdf = HtmlToPdf.Convert(Body + "<div style='width:100px;height:60px;box-shadow:4px 4px 0 rgba(0,0,0,.5)'></div>", new PdfOptions { Compress = false });
+        // As in Chrome, a shadow of half alpha is painted at half alpha, not as an opaque grey: the text of a box behind
+        // it and the second shadow under the first stay visible. One alpha state, and still no soft mask.
+        var pdf = PdfTestHelpers.Latin1(HtmlToPdf.Convert(Body + "<div style='width:100px;height:60px;box-shadow:4px 4px 0 rgba(0,0,0,.5)'></div>",
+            new PdfOptions { Compress = false }));
+        Assert.Contains("/ca 0.5", pdf);
+        Assert.DoesNotContain("/SMask", pdf);
+    }
+
+    [Fact]
+    public void An_opaque_sharp_shadow_is_written_as_before()
+    {
+        var pdf = HtmlToPdf.Convert(Body + "<div style='width:100px;height:60px;box-shadow:4px 4px 0 #888'></div>", new PdfOptions { Compress = false });
         Assert.DoesNotContain("/ca ", PdfTestHelpers.Latin1(pdf));
     }
 
