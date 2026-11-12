@@ -1553,12 +1553,13 @@ internal sealed partial class LayoutEngine
             float h = specifiedH - sizing;
             contentH = Math.Max(0, h);
         }
-        else if (e.Control is { Multiline: true } textarea)
+        else if (e.Control is { Multiline: true } textarea && !s.FieldSizingContent)
         {
             // A textarea with an auto height shows its rows whatever its content, with its padding and borders around
-            // them whatever its box-sizing, as in Chrome.
+            // them whatever its box-sizing, as in Chrome. With field-sizing: content it is as tall as its lines.
             contentH = textarea.Rows * s.LineHeight;
         }
+        else if (e.Control is { Multiline: true }) contentH = Math.Max(contentH, s.LineHeight); // an empty one keeps a line
         // aspect-ratio with an auto height: at least the ratio's height; taller content still makes it grow, except in a
         // flex container, whose content overflows it as in Chrome.
         if (!isImage && !isSvg && RatioHeight(s, contentW, frame, frameV, hasHOverride, cbH) is float ratioH && (contentH < ratioH || s.IsFlex))

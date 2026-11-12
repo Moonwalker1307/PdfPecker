@@ -474,6 +474,46 @@ public class BrowserMatchTests
     }
 
     [Fact]
+    public void A_text_field_sized_by_its_content_is_as_wide_as_its_value()
+    {
+        // field-sizing: content: Chrome makes the field 54.69px wide for "Example" in 12px Arial with 3px of padding and
+        // a 1px border on each side, and ignores the size attribute.
+        var ops = Layout("""
+            <input value="Example" style="field-sizing: content; font: 12px Arial; padding: 0 3px; border: 1px solid; border-radius: 0; background: #f00">
+            <input value="x" size="40" style="field-sizing: content; font: 12px Arial; padding: 0; border: 0; border-radius: 0; background: #0f0">
+            """);
+        Near(54.69f * 0.75f, Box(ops, "#f00").W, 0.5f);
+        Near(6 * 0.75f, Box(ops, "#0f0").W, 0.5f);
+    }
+
+    [Fact]
+    public void A_textarea_sized_by_its_content_takes_its_longest_line_and_its_lines()
+    {
+        // Chrome: 55.36px wide (49.36px for "two three", 2px of padding and a 1px border each side) and 34px tall (two
+        // lines of 14px), whatever rows says; an empty one keeps one line.
+        var ops = Layout("""
+            <textarea rows="6" style="field-sizing: content; font: 12px Arial; padding: 2px; border: 1px solid; border-radius: 0; background: #f00">one
+            two three</textarea>
+            <textarea style="field-sizing: content; font: 12px Arial; padding: 2px; border: 1px solid; border-radius: 0; background: #0f0"></textarea>
+            """);
+        Near(55.36f * 0.75f, Box(ops, "#f00").W, 0.5f);
+        Near(34 * 0.75f, Box(ops, "#f00").H, 0.5f);
+        Near(20 * 0.75f, Box(ops, "#0f0").H, 0.5f);
+    }
+
+    [Fact]
+    public void A_drop_down_sized_by_its_content_is_as_wide_as_the_option_it_shows()
+    {
+        // Chrome: 106px for the widest option, but 63.38px with field-sizing: content, for "Sweden" alone: narrower by
+        // the 42px between the two option texts. (The room around the text is the same for both.)
+        var ops = Layout("""
+            <select style="font: 12px Arial; padding: 0; border: 0; border-radius: 0; background: #f00"><option>Sweden</option><option>United Kingdom</option></select>
+            <select style="field-sizing: content; font: 12px Arial; padding: 0; border: 0; border-radius: 0; background: #0f0"><option>Sweden</option><option>United Kingdom</option></select>
+            """);
+        Near(42.02f * 0.75f, Box(ops, "#f00").W - Box(ops, "#0f0").W, 0.5f);
+    }
+
+    [Fact]
     public void A_check_box_hangs_its_bottom_margin_below_the_baseline()
     {
         // Chrome puts the 13px box with its 3px margins on the baseline by its border box, so an 8px line is 19px tall

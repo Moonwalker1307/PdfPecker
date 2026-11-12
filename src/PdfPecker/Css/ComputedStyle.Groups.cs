@@ -507,6 +507,7 @@ internal sealed partial class ComputedStyle
     public ContainerType ContainerType { get => _rare.ContainerType; set => Rare.ContainerType = value; }
     public string[]? ContainerNames { get => _rare.ContainerNames; set => Rare.ContainerNames = value; }
     public Length ControlWidth { get => _rare.ControlWidth; set => Rare.ControlWidth = value; }
+    public bool FieldSizingContent { get => _rare.FieldSizingContent; set => Rare.FieldSizingContent = value; }
     public SizeKeyword WidthKeyword { get => _rare.WidthKeyword; set => Rare.WidthKeyword = value; }
     public StretchSizes Stretched { get => _rare.Stretched; set => Rare.Stretched = value; }
     public bool ColumnBreakBefore { get => _rare.ColumnBreakBefore; set => Rare.ColumnBreakBefore = value; }
@@ -572,6 +573,7 @@ internal sealed partial class ComputedStyle
         public ContainerType ContainerType;
         public string[]? ContainerNames; // container-name; null for none
         public Length ControlWidth = Length.Auto;   // a text field's own width, used while width is auto and not stretched
+        public bool FieldSizingContent;             // field-sizing: content: a form control takes the size of its value
         public SizeKeyword WidthKeyword;            // width: min-content, max-content or fit-content; Width is then auto
         public StretchSizes Stretched;              // the sizes set to stretch, which become lengths once the box's margins are known
         public bool ColumnBreakBefore, ColumnBreakAfter; // break-before/after: column, which only breaks inside a multicol

@@ -175,6 +175,9 @@ internal sealed partial class StyleResolver
                 if (d.Lower == "auto") s.AccentColor = 0;
                 else if (CssColor.TryParse(d.Value, s.Color, out var accent)) s.AccentColor = accent;
                 break;
+            case "field-sizing":
+                if (d.Lower is "content" or "fixed") s.FieldSizingContent = d.Lower == "content";
+                break;
             case "appearance":
                 if (IsAppearance(d.Lower)) s.AppearanceNone = d.Lower == "none";
                 break;
