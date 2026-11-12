@@ -212,6 +212,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Spanners_deep_in_nested_blocks_stay_linear()
+    {
+        // Each block around a spanner is split once for each spanner in it: thousands of spanners at the bottom of
+        // hundreds of nested blocks, and a spanner at every level, are lifted only from a few blocks deep.
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded("<style>h2 { column-span: all; margin: 0 } div { padding: 1px }</style><section style='columns: 2'>"
+            + Repeat("<div>a<h2>s</h2>", 250) + Repeat("b<h2>t</h2>", 3000) + Repeat("</div>", 250) + "</section>"));
+        AssertStructurallyValid(Bounded("<section style='columns: 3'><ol>" + Repeat("<li>a<h2 style='column-span: all'>s</h2>b</li>", 5000) + "</ol></section>"));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(20), $"{watch.Elapsed}");
+    }
+
+    [Fact]
     public void Balancing_lines_of_thousands_of_tiny_words_stays_fast()
     {
         // Choosing breaks again costs the square of a line's break opportunities: tiny words on wide lines keep their

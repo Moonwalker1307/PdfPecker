@@ -156,6 +156,59 @@ public class Css3LayoutTests
         Near(250, Box(ops, "#0000fe").X);
     }
 
+    [Fact]
+    public void A_spanner_in_blocks_of_the_columns_spans_them_too()
+    {
+        // As in Chrome, the section and div around the heading are split around it, each part with its share of the
+        // section's padding: the top before the heading, the bottom after it.
+        var ops = Layout(@"<div style='columns: 2; column-gap: 0'><section style='padding: 10pt 0'>
+            <p style='height: 10pt; margin: 0; background: #ff0000'></p><p style='height: 20pt; margin: 0; background: #ff0001'></p>
+            <div><h2 style='column-span: all; height: 10pt; margin: 0; background: #00ff00'></h2></div>
+            <p style='height: 20pt; margin: 0; background: #0000ff'></p><p style='height: 10pt; margin: 0; background: #0000fe'></p></section></div>
+            <p style='height: 5pt; margin: 0; background: #00fe00'></p>");
+        Near(10, Box(ops, "#ff0000").Y);
+        var span = Box(ops, "#00ff00");
+        Near(0, span.X); Near(500, span.W); Near(20, span.Y);
+        Near(250, Box(ops, "#ff0001").X);
+        Near(30, Box(ops, "#0000ff").Y);
+        Near(250, Box(ops, "#0000fe").X);
+        Near(50, Box(ops, "#00fe00").Y);
+    }
+
+    [Fact]
+    public void A_spanner_in_a_box_of_its_own_formatting_context_stays_in_its_column()
+    {
+        var ops = Layout(@"<div style='columns: 2; column-gap: 0'><div style='overflow: hidden'>
+            <p style='height: 20pt; margin: 0'></p><h2 style='column-span: all; height: 10pt; margin: 0; background: #00ff00'></h2></div></div>");
+        Near(250, Box(ops, "#00ff00").W);
+    }
+
+    [Fact]
+    public void An_ordered_list_split_by_a_spanner_goes_on_counting()
+    {
+        var ops = Layout(@"<div style='columns: 2'><ol start='4'><li>one</li><li>two<h2 style='column-span: all; margin: 0'>span</h2>more</li>
+            <li>three</li></ol></div>");
+        var markers = ops.OfType<TextOp>().Select(t => t.Text.Trim()).Where(t => t.EndsWith('.')).ToList();
+        Assert.Equal(["4.", "5.", "6."], markers);
+    }
+
+    [Fact]
+    public void A_second_style_pass_sees_the_document_as_written()
+    {
+        var doc = HtmlParser.Parse("<div style='columns: 2'><section id=s><p>a</p><h2 style='column-span: all'>b</h2><p>c</p></section></div>");
+        var resolver = new StyleResolver(new Stylesheet(), Width, PageHeight);
+        resolver.ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var columns = Find(doc, "div").Single();
+        Assert.Equal(["section", "h2", "section"], columns.Children.OfType<Element>().Select(e => e.Name));
+        Assert.Equal("s", columns.Children.OfType<Element>().First().Id);
+        Assert.Null(columns.Children.OfType<Element>().Last().GetAttribute("id"));
+        resolver.ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        Assert.Equal(["section", "h2", "section"], columns.Children.OfType<Element>().Select(e => e.Name));
+        var section = (Element)columns.Children.OfType<Element>().First();
+        Assert.Equal(["p"], section.Children.OfType<Element>().Select(e => e.Name));
+        Assert.Same(columns, Find(doc, "h2").Single().Parent);
+    }
+
     // Lines w0..w{n-1} of one paragraph, 10pt apart.
     private static string Lines(int n, string style = "")
         => $"<p style='margin: 0; font: 8pt/10pt sans-serif; {style}'>" + string.Join("<br>", Enumerable.Range(0, n).Select(i => $"w{i}x")) + "</p>";
