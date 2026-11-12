@@ -243,7 +243,7 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   (`text-underline-position`), solid underlines, overlines and line-throughs as thick and placed as Chrome draws them, drop caps, `::first-line` styles with a background, `::marker` styles (a larger marker font or a tall marker image makes its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
   text, as in Chrome), images and gradients in `::before` and `::after` content, inline SVG (with
-  percentage coordinates and sizes, as in Bootstrap's placeholder images, `cx`, `cy`, `r`, `rx`, `ry`, `x`, `y`, `width`, `height`, `d: path()` and `stop-color` set from style sheets, HTML in `<foreignObject>`, and icons drawn
+  percentage coordinates and sizes, as in Bootstrap's placeholder images, `cx`, `cy`, `r`, `rx`, `ry`, `x`, `y`, `width`, `height`, `d: path()` and `stop-color` set from style sheets, HTML in `<foreignObject>`, text placed character by character with lists of `x`, `y`, `dx`, `dy` and `rotate`, and icons drawn
   with `<use>` from a sprite of symbols that is itself hidden, in the `currentColor` where they are used, as in Bootstrap's icon sprites; lengths in mm, cm, in, pt and em; nested `<svg>` and `<symbol>` viewports with `preserveAspectRatio` and clipping; also CSS `transform` with `transform-box` and
   `transform-origin` on SVG elements, such as a gauge needle turning about its own centre, and `vector-effect: non-scaling-stroke`
   for hairlines in a scaled chart, though markers still scale) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and

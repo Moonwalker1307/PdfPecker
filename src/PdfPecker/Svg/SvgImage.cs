@@ -1247,13 +1247,21 @@ internal sealed partial class SvgImage
 
     // ------------------------------------------------------------------ text
 
+    /// <summary>The x, y, dx, dy and rotate lists of a text element, and how many of its characters were laid out.</summary>
+    private sealed class PositionLists(List<float> x, List<float> y, List<float> dx, List<float> dy, List<float> rotate)
+    {
+        public readonly List<float> X = x, Y = y, Dx = dx, Dy = dy, Rotate = rotate;
+        public int Count;
+    }
+
     private readonly struct TextRun
     {
         public readonly string Text;
         public readonly ComputedStyle Style;
         public readonly float X, Y, Width;
         public readonly SvgPathMeasure? Path; // on a textPath: X is the distance along it and Y the shift off it
-        public TextRun(string text, ComputedStyle style, float x, float y, float width, SvgPathMeasure? path = null)
+        public readonly float Rotate;         // degrees clockwise about the start of the baseline: rotate gives each glyph its own run
+        public TextRun(string text, ComputedStyle style, float x, float y, float width, SvgPathMeasure? path = null, float rotate = 0)
         {
             Text = text;
             Style = style;
@@ -1261,12 +1269,16 @@ internal sealed partial class SvgImage
             Y = y;
             Width = width;
             Path = path;
+            Rotate = rotate;
         }
     }
 
     /// <summary>
-    /// Lays out a &lt;text&gt; element and its tspans: x/y start a new text chunk (aligned by text-anchor), dx/dy shift
-    /// the pen, white space collapses as with xml:space="default". Only the first value of each position list is used.
+    /// Lays out a &lt;text&gt; element and its tspans: white space collapses as with xml:space="default", and the n-th
+    /// value of an x, y, dx, dy or rotate list applies to the n-th character of the element's text (SVG 2 §11.8.1): x and
+    /// y place it and start a new text chunk (aligned by text-anchor), dx and dy shift the pen before it, and rotate
+    /// turns it about its origin, the last value of the list for every character after. An element's own value wins over
+    /// its ancestors'.
     /// Inside a textPath, the pen's x is the distance along the path and its y the shift off it, as in Chromium.
     /// <paramref name="style"/> is the text element's style where it is drawn; inside what a use element draws, its
     /// tspans inherit from that style as shapes do (see <see cref="InUse"/>).
@@ -1280,6 +1292,8 @@ internal sealed partial class SvgImage
         bool lastSpace = true;
         SvgPathMeasure? onPath = null;
 
+        // The position lists of the elements being walked, innermost last, and how many characters of each were laid out.
+        var lists = new List<PositionLists>();
         void Walk(Element el, ComputedStyle st, int depth)
         {
             if (depth > 16 || st.Display == Display.None) return;
@@ -1288,17 +1302,13 @@ internal sealed partial class SvgImage
                 WalkTextPath(el, st, depth);
                 return;
             }
-            var xs = Lens(el, "x", Axis.X);
+            if (depth == 0) chunkStarts.Add(runs.Count);
             // Along a path, y has no meaning: only dy shifts the text off it.
-            var ys = onPath == null ? Lens(el, "y", Axis.Y) : new List<float>();
-            if (xs.Count > 0 || ys.Count > 0 || depth == 0) chunkStarts.Add(runs.Count);
-            if (xs.Count > 0) penX = xs[0];
-            if (ys.Count > 0) penY = ys[0];
-            var dxs = Lens(el, "dx", Axis.X);
-            var dys = Lens(el, "dy", Axis.Y);
-            if (dxs.Count > 0) penX += dxs[0];
-            if (dys.Count > 0) penY += dys[0];
+            var own = new PositionLists(Lens(el, "x", Axis.X), onPath == null ? Lens(el, "y", Axis.Y) : new List<float>(),
+                Lens(el, "dx", Axis.X), Lens(el, "dy", Axis.Y), ParseNumbers(el.GetAttribute("rotate")));
+            lists.Add(own);
             WalkChildren(el, st, depth);
+            lists.RemoveAt(lists.Count - 1);
         }
 
         // A textPath starts a chunk at its startOffset along the referenced path. Text after it continues from the path's
@@ -1342,11 +1352,50 @@ internal sealed partial class SvgImage
                     lastSpace = c == ' ';
                 }
                 if (sb.Length == 0) continue;
-                var str = sb.ToString();
-                float size = st.FontSize / 0.75f;
-                float w = st.Font.Measure(str, size) + st.LetterSpacing / 0.75f * TextFont.SpacedCharacters(str, 0, str.Length);
-                runs.Add(new TextRun(str, st, penX, penY, w, onPath));
+                AddText(sb.ToString(), st);
+            }
+        }
+
+        // Adds text as runs: one for the whole text unless a character has a position, a shift or a rotation of its own.
+        void AddText(string str, ComputedStyle st)
+        {
+            float size = st.FontSize / 0.75f;
+            int from = 0;
+            float rotate = 0;
+            for (int i = 0; i < str.Length; i += char.IsHighSurrogate(str[i]) && i + 1 < str.Length ? 2 : 1)
+            {
+                float? x = null, y = null, dx = null, dy = null, turn = null;
+                for (int k = lists.Count - 1; k >= 0; k--)
+                {
+                    var l = lists[k];
+                    int n = l.Count;
+                    x ??= n < l.X.Count ? l.X[n] : null;
+                    y ??= n < l.Y.Count ? l.Y[n] : null;
+                    dx ??= n < l.Dx.Count ? l.Dx[n] : null;
+                    dy ??= n < l.Dy.Count ? l.Dy[n] : null;
+                    turn ??= l.Rotate.Count > 0 ? l.Rotate[Math.Min(n, l.Rotate.Count - 1)] : null;
+                }
+                foreach (var l in lists) l.Count++;
+                float r = onPath == null ? turn ?? 0 : 0;
+                if (x == null && y == null && dx == null && dy == null && r == 0 && rotate == 0) continue;
+                // Every character placed on its own is a shape of its own, which the drawing's budget pays for.
+                if (i > from && --_budget.Remaining < 0) continue;
+                Flush(i);
+                if (x != null || y != null) chunkStarts.Add(runs.Count);
+                penX = (x ?? penX) + (dx ?? 0);
+                penY = (y ?? penY) + (dy ?? 0);
+                rotate = r;
+            }
+            Flush(str.Length);
+
+            void Flush(int to)
+            {
+                if (to <= from) return;
+                var piece = from == 0 && to == str.Length ? str : str.Substring(from, to - from);
+                float w = st.Font.Measure(piece, size) + st.LetterSpacing / 0.75f * TextFont.SpacedCharacters(piece, 0, piece.Length);
+                runs.Add(new TextRun(piece, st, penX, penY, w, onPath, rotate));
                 penX += w;
+                from = to;
             }
         }
         Walk(text, style, 0);
@@ -1358,7 +1407,7 @@ internal sealed partial class SvgImage
             var trimmed = last.Text.TrimEnd(' ');
             float size = last.Style.FontSize / 0.75f;
             runs[^1] = new TextRun(trimmed, last.Style, last.X, last.Y,
-                last.Style.Font.Measure(trimmed, size) + last.Style.LetterSpacing / 0.75f * TextFont.SpacedCharacters(trimmed, 0, trimmed.Length), last.Path);
+                last.Style.Font.Measure(trimmed, size) + last.Style.LetterSpacing / 0.75f * TextFont.SpacedCharacters(trimmed, 0, trimmed.Length), last.Path, last.Rotate);
         }
 
         chunkStarts.Add(runs.Count);
@@ -1520,7 +1569,7 @@ internal sealed partial class SvgImage
         {
             var fr = fontRuns[rtl ? fontRuns.Count - 1 - r : r];
             float w = fr.Font.MeasureUnits(run.Text, fr.Start, fr.Length) * size / 1000f + s.LetterSpacing / 0.75f * TextFont.SpacedCharacters(run.Text, fr.Start, fr.Length);
-            EmitTextShape(new TextRun(run.Text.Substring(fr.Start, fr.Length), s, x, run.Y, w, run.Path), fr.Font, shift, ctm, opacity, rtl);
+            EmitTextShape(new TextRun(run.Text.Substring(fr.Start, fr.Length), s, x, run.Y, w, run.Path, run.Rotate), fr.Font, shift, ctm, opacity, rtl);
             x += w;
         }
     }
@@ -1538,6 +1587,12 @@ internal sealed partial class SvgImage
             _ => 0,
         };
         float minX = x, minY = y - 0.8f * size, maxX = x + run.Width, maxY = y + 0.2f * size;
+        if (run.Rotate != 0)
+        {
+            // A turned glyph stays within its reach from its origin, in any direction.
+            float reach = Math.Max(run.Width, size);
+            (minX, minY, maxX, maxY) = (x - reach, y - reach, x + reach, y + reach);
+        }
         if (run.Path is { } path)
         {
             // Every glyph is placed on its own, so the drawing's budget pays for each.
@@ -1553,7 +1608,8 @@ internal sealed partial class SvgImage
             Rtl = rtl,
             FontSize = size,
             CharSpacing = s.LetterSpacing / 0.75f,
-            TextMatrix = run.Path == null ? new Matrix(1, 0, 0, -1, x, y).Then(ctm) : ctm,
+            TextMatrix = run.Path != null ? ctm : run.Rotate == 0 ? new Matrix(1, 0, 0, -1, x, y).Then(ctm)
+                : new Matrix(1, 0, 0, -1, 0, 0).Then(Matrix.Rotate(run.Rotate)).Then(Matrix.Translate(x, y)).Then(ctm),
             TextPath = run.Path,
             PathStart = x,
             PathShift = y,
