@@ -322,6 +322,50 @@ public class GraphicsFeatureTests
     }
 
     [Fact]
+    public void Svg_text_position_lists_place_each_character()
+    {
+        // The n-th value of x, y, dx and dy belongs to the n-th character, a tspan's own values win over its text's, and
+        // characters past the lists follow on from the last one placed, as in Chrome.
+        var doc = Styled("""
+            <svg id="s" width="400" height="100" font-family="Helvetica">
+              <text x="10 40" y="30 50" font-size="20">ABC</text>
+              <text x="200" y="40" dx="0 5" dy="0 -6 6" font-size="20">abcd<tspan x="300 320">ef</tspan>g</text>
+            </svg>
+            """);
+        var texts = SvgImage.Build(ById(doc, "s")).Shapes.Where(s => s.Kind == SvgShape.KindText).ToList();
+        Assert.Equal(new[] { "A", "BC", "a", "b", "cd", "e", "f", "g" }, texts.Select(t => t.Text));
+        Near(10, texts[0].TextMatrix.E); Near(30, texts[0].TextMatrix.F);
+        Near(40, texts[1].TextMatrix.E); Near(50, texts[1].TextMatrix.F);
+        var font = texts[2].Font!;
+        Near(200 + font.Measure("a", 20) + 5, texts[3].TextMatrix.E, 0.01f);
+        Near(34, texts[3].TextMatrix.F);
+        Near(40, texts[4].TextMatrix.F); // dy shifts the pen, so the shift stays with the characters after it
+        Near(300, texts[5].TextMatrix.E); Near(320, texts[6].TextMatrix.E);
+        Near(320 + font.Measure("f", 20), texts[7].TextMatrix.E, 0.01f);
+    }
+
+    [Fact]
+    public void Svg_text_rotate_turns_each_glyph_and_its_last_value_repeats()
+    {
+        var doc = Styled("""
+            <svg id="s" width="400" height="100" font-family="Helvetica">
+              <text x="10" y="40" rotate="0 90" font-size="20">abc</text>
+              <text x="10" y="80" rotate="0" font-size="20">plain</text>
+            </svg>
+            """);
+        var texts = SvgImage.Build(ById(doc, "s")).Shapes.Where(s => s.Kind == SvgShape.KindText).ToList();
+        Assert.Equal(new[] { "a", "b", "c", "plain" }, texts.Select(t => t.Text));
+        // Turned a quarter clockwise in the y-down user space, with the glyph flipped upright first.
+        foreach (var turned in texts.Skip(1).Take(2))
+        {
+            Near(0, turned.TextMatrix.A); Near(1, turned.TextMatrix.B);
+            Near(1, turned.TextMatrix.C); Near(0, turned.TextMatrix.D);
+        }
+        Near(40, texts[1].TextMatrix.F);
+        Near(1, texts[3].TextMatrix.A); Near(-1, texts[3].TextMatrix.D);
+    }
+
+    [Fact]
     public void Svg_text_is_written_into_the_pdf()
     {
         var pdf = ConvertUncompressed("<svg width='200' height='40'><text x='0' y='30' font-family='Courier' fill='blue'>Svg label</text></svg>");

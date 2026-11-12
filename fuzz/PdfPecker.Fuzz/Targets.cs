@@ -140,7 +140,7 @@ internal static class Targets
     {
         "<g>", "</g>", "<defs>", "<use href=\"#a\"/>", "<symbol id=\"a\">", "<pattern id=\"a\" width=\"1\" height=\"1\">", "<mask id=\"a\">", "<clipPath id=\"a\">", "<marker id=\"a\">",
         "<filter id=\"a\">", "<feGaussianBlur stdDeviation=\"1e9\"/>", "<feTurbulence numOctaves=\"99999\"/>", "<feConvolveMatrix order=\"99999\"/>", "<feMorphology radius=\"1e9\"/>",
-        "<feImage href=\"#a\"/>", "<feComposite operator=\"arithmetic\"/>", "<text>", "<tspan>", "<textPath href=\"#a\">", "<image href=\"#a\"/>", "<foreignObject>", "<switch>",
+        "<feImage href=\"#a\"/>", "<feComposite operator=\"arithmetic\"/>", "<text>", "<tspan>", "<text x=\"1 2 3\" y=\"4 5\" dx=\"1e9 -1e9\" dy=\"9 9 9\" rotate=\"1e9 45\">", "<tspan x=\"0 1\" rotate=\"-90\">", "<textPath href=\"#a\">", "<image href=\"#a\"/>", "<foreignObject>", "<switch>",
         "<linearGradient id=\"a\" href=\"#a\">", "<radialGradient id=\"a\" href=\"#a\">", "<stop offset=\"1e9\"/>", "<path d=\"M0 0 A 1e9 1e9 0 1 1 1 1\"/>", "<path d=\"M0 0 L1e9 1e9\"/>",
         "stroke-dasharray=\"0.0001\"", "stroke-width=\"1e9\"", "transform=\"scale(1e9)\"", "transform=\"matrix(0 0 0 0 0 0)\"", "viewBox=\"0 0 0 0\"", "viewBox=\"0 0 1e9 1e9\"",
         "width=\"1e9\"", "filter=\"url(#a)\"", "mask=\"url(#a)\"", "clip-path=\"url(#a)\"", "marker-start=\"url(#a)\"", "fill=\"url(#a)\"", "href=\"#a\"", "font-size=\"1e9\"", "textLength=\"1e9\"",

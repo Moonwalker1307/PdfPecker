@@ -201,6 +201,17 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_text_with_a_position_for_every_character_stays_bounded()
+    {
+        // Each character with a value of its own is a shape of its own, which the drawing's budget pays for.
+        string values = string.Join(" ", Enumerable.Repeat("1", 200_000));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded($"<svg width='400' height='100'><text x='0' y='50' dx='{values}' rotate='{values}'>{Repeat("ab", 100_000)}"
+            + $"<tspan dy='{values}'>{Repeat("c", 200_000)}</tspan></text></svg>"));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(20), $"{watch.Elapsed}");
+    }
+
+    [Fact]
     public void Spanners_deep_in_nested_blocks_stay_linear()
     {
         // Each block around a spanner is split once for each spanner in it: thousands of spanners at the bottom of
