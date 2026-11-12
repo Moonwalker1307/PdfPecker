@@ -11,7 +11,8 @@ dotnet add package PdfPecker.Testing
 It works with xUnit, NUnit, MSTest or any other test framework, because a failed check throws `PdfAssertException`,
 which every framework reports as a failed test. Its only dependency is [PdfPecker](https://www.nuget.org/packages/PdfPecker),
 which reads and renders the PDFs; the PDFs under test can come from PdfPecker, PdfPecker.Fluent or anything else.
-PdfPecker.Testing is released together with PdfPecker and always has the same version.
+PdfPecker.Testing is released together with PdfPecker and always has the same version. 1.25.0 is the last release
+for .NET 8 and 9; the next release targets .NET 10 and later only.
 
 ```csharp
 using PdfPecker.Testing;
