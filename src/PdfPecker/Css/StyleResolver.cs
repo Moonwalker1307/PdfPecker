@@ -233,7 +233,9 @@ internal sealed partial class StyleResolver
         _byId = null;
         _containers.Clear();
         _containersSeen.Clear();
+        _classLists.Clear();
         Prepare(document);
+        _classLists.Clear();
         // cq units outside every container fall back to the viewport units; a style pass of another document (an SVG
         // image) in the middle of this one gets its own.
         var savedUnits = ContainerQuery.SetUnits(float.NaN, float.NaN);
@@ -321,7 +323,13 @@ internal sealed partial class StyleResolver
         return true;
     }
 
-    private static void Prepare(Element parent)
+    // The words of the class attributes seen in this pass, so that the many elements with the same attribute (the
+    // cells of a column, the items of a list) share one array instead of splitting the attribute each time.
+    private readonly Dictionary<string, string[]> _classLists = new(StringComparer.Ordinal);
+    // The last sibling seen of each element name, which Prepare fills and empties again for each parent.
+    private readonly List<Element> _lastOfName = new(4);
+
+    private void Prepare(Element parent)
     {
         // Only an earlier pass leaves boxes to undo, and one look at the children spares the first pass the passes below.
         bool earlier = parent.DomChildren != null;
@@ -350,7 +358,7 @@ internal sealed partial class StyleResolver
         int index = 0;
         Element? prev = null;
         // The last sibling seen of each element name, for :nth-of-type(). Siblings use only a few names.
-        List<Element>? lastOfName = count > 1 ? new List<Element>(4) : null;
+        List<Element>? lastOfName = count > 1 ? _lastOfName : null;
         foreach (var c in parent.Children)
         {
             c.Parent = parent; // display: contents gave it another parent in the last pass
@@ -383,8 +391,11 @@ internal sealed partial class StyleResolver
             e.FirstLine = null;
             var cls = e.GetAttribute("class");
             if (!string.IsNullOrWhiteSpace(cls))
-                e.Classes = cls!.Split(WhitespaceSeparators, StringSplitOptions.RemoveEmptyEntries);
-            Prepare(e);
+            {
+                if (!_classLists.TryGetValue(cls!, out var classes))
+                    _classLists[cls!] = classes = cls!.Split(WhitespaceSeparators, StringSplitOptions.RemoveEmptyEntries);
+                e.Classes = classes;
+            }
         }
         foreach (var c in parent.Children)
         {
@@ -393,6 +404,10 @@ internal sealed partial class StyleResolver
             foreach (var last in lastOfName)
                 if (last.Name == e.Name) { e.TypeCount = last.TypeIndex; break; }
         }
+        // The children come after the siblings are counted, so that every level can use the one list of names.
+        lastOfName?.Clear();
+        foreach (var c in parent.Children)
+            if (c is Element e) Prepare(e);
     }
 
     private void ResolveChildren(Element parent)
