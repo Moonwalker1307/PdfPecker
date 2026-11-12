@@ -23,7 +23,7 @@ internal sealed partial class TrueTypeFont
 
     public bool HasGlyf => _glyf >= 0 && _loca.Length > 1;
 
-    private readonly record struct Component(int Gid, Matrix Transform);
+    private readonly record struct Component(int Gid, Matrix Transform, int Flags = 0, int Arg1 = 0, int Arg2 = 0);
 
     /// <summary>The points of a simple glyph, with the index of the last point of each contour.</summary>
     private readonly struct SimpleGlyph(int[] xs, int[] ys, bool[] onCurve, int[] contourEnds)
@@ -49,7 +49,7 @@ internal sealed partial class TrueTypeFont
         try
         {
             int budget = ComponentBudgetPerGlyph;
-            AppendGlyph(path, gid, Matrix.Identity, 0, ref budget);
+            if (!_tricky || !TryAppendHinted(path, gid)) AppendGlyph(path, gid, Matrix.Identity, 0, ref budget);
         }
         catch (IndexOutOfRangeException ex)
         {
@@ -127,7 +127,9 @@ internal sealed partial class TrueTypeFont
 
     // Reads all the component records before any component is drawn, so that a damaged record loses the whole glyph
     // rather than part of it.
-    private List<Component> ReadComponents(int at)
+    private List<Component> ReadComponents(int at) => ReadComponents(at, out _);
+
+    private List<Component> ReadComponents(int at, out int end)
     {
         var data = Data;
         int p = at + GlyphHeaderSize;
@@ -136,20 +138,21 @@ internal sealed partial class TrueTypeFont
         {
             int flags = _font.U16(p), gid = _font.U16(p + 2);
             p += 4;
-            double dx, dy;
+            int arg1, arg2;
             if ((flags & Arg1And2AreWords) != 0)
             {
-                dx = _font.S16(p);
-                dy = _font.S16(p + 2);
+                arg1 = (flags & ArgsAreXYValues) != 0 ? _font.S16(p) : _font.U16(p);
+                arg2 = (flags & ArgsAreXYValues) != 0 ? _font.S16(p + 2) : _font.U16(p + 2);
                 p += 4;
             }
             else
             {
-                dx = (sbyte)data[p];
-                dy = (sbyte)data[p + 1];
+                arg1 = (flags & ArgsAreXYValues) != 0 ? (sbyte)data[p] : data[p];
+                arg2 = (flags & ArgsAreXYValues) != 0 ? (sbyte)data[p + 1] : data[p + 1];
                 p += 2;
             }
-            if ((flags & ArgsAreXYValues) == 0) dx = dy = 0; // point matching: not supported, place at origin
+            // Point matching is placed at the origin here; only the hinted path of tricky fonts matches the points.
+            double dx = (flags & ArgsAreXYValues) != 0 ? arg1 : 0, dy = (flags & ArgsAreXYValues) != 0 ? arg2 : 0;
             double a = 1, b = 0, c = 0, d = 1;
             if ((flags & WeHaveAScale) != 0)
             {
@@ -170,22 +173,27 @@ internal sealed partial class TrueTypeFont
                 d = F2Dot14(p + 6);
                 p += 8;
             }
-            components.Add(new Component(gid, new Matrix(a, b, c, d, dx, dy)));
+            components.Add(new Component(gid, new Matrix(a, b, c, d, dx, dy), flags, arg1, arg2));
             if ((flags & MoreComponents) == 0 || components.Count > MaxComponents) break;
         }
+        end = p;
         return components;
     }
 
     private double F2Dot14(int at) => _font.S16(at) / F2Dot14One;
 
-    private SimpleGlyph ReadSimpleGlyph(int at, int contourCount)
+    private SimpleGlyph ReadSimpleGlyph(int at, int contourCount) => ReadSimpleGlyph(at, contourCount, out _, out _);
+
+    // Also gives where the glyph's instructions start and how long they are.
+    private SimpleGlyph ReadSimpleGlyph(int at, int contourCount, out int instructions, out int instructionLength)
     {
         var data = Data;
         var contourEnds = new int[contourCount];
         int p = at + GlyphHeaderSize;
         for (int i = 0; i < contourCount; i++, p += 2) contourEnds[i] = _font.U16(p);
         int pointCount = contourCount == 0 ? 0 : contourEnds[contourCount - 1] + 1;
-        int instructionLength = _font.U16(p);
+        instructionLength = _font.U16(p);
+        instructions = p + 2;
         p += 2 + instructionLength;
 
         var flags = new byte[pointCount];

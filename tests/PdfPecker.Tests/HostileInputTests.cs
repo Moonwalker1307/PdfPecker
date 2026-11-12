@@ -1828,6 +1828,21 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Tricky_font_programs_stop_within_their_budget()
+    {
+        // A glyph program that jumps back to itself forever, a function that calls itself, and 30,000 loop calls of
+        // IUP over 2,000 points: each stops at the interpreter's budget or call depth, and the glyph is still drawn.
+        var font = TrueTypeFont.Parse(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "TrickyHostile.ttf")))!;
+        Assert.True(font.IsTricky);
+        var cmap = font.GetCmap(3, 1)!;
+        foreach (char c in "ABC")
+        {
+            var glyph = Bounded(() => font.GetGlyph(cmap[c]));
+            Assert.False(glyph!.IsEmpty);
+        }
+    }
+
+    [Fact]
     public void Variation_sequence_tables_stop_at_their_limits()
     {
         // 240 selector records that all point at one table of 20,000 mappings and one of 20,000 ranges would be almost

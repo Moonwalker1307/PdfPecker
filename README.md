@@ -375,6 +375,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   renders a page straight into a buffer of yours as grey, RGB or RGBA pixels, sized by `GetPixelSize`, for OCR and image
   processing. Comments that carry no appearance of their own (notes, highlights, underlines, strike-outs, squiggly
   lines, shapes, lines with their arrowheads, ink and free text) are drawn from their properties, as viewers draw them.
+  Older Taiwanese and Japanese fonts that build their characters with TrueType instructions (MingLiU, PMingLiU, DFKai-SB
+  and other DynaLab fonts) run those instructions, as FreeType does, so their characters come out whole.
   [More](https://pdfpecker.net/docs/pdf-to-image/)
 - **Image decoding**: `ImageToPixels.Convert(image)` reads a PNG, JPEG, GIF, WebP, BMP or TIFF file (any page of a
   multi-page TIFF) straight to grey, RGB or RGBA pixels, with the same colour conversions, EXIF orientation and size

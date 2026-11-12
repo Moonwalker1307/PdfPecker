@@ -507,6 +507,23 @@ internal static class Targets
             Font("font-woff2", ".woff2", c => c.FontFiles(".woff2")),
             Font("font-variable", ".font", c => c.FontFiles(".ttf", ".otf").Where(f => f.Name.Contains("Variable") || f.Name.Contains("RobotoFlex") || f.Name.Contains("VarTest"))),
             Font("font-color", ".ttf", c => c.FontFiles(".ttf").Where(f => IsColorFont(f.Name)), ColorFontPage),
+            new()
+            {
+                // The renderer's TrueType instruction interpreter, which runs only for the tricky fonts: every input is
+                // treated as one, and its first glyphs are drawn.
+                Name = "truetype-hinting", Extension = ".ttf", MaxSize = 256 * 1024,
+                Seeds = c => c.Files("tests/PdfPecker.Tests/Fixtures/fonts", 1_000_000, ".ttf").Where(f => Path.GetFileName(f.Name).StartsWith("Tricky", StringComparison.Ordinal)),
+                Run = (d, ct) =>
+                {
+                    if (PdfPecker.Rendering.Fonts.TrueTypeFont.Parse(d) is not { HasGlyf: true } font) return;
+                    font.CheckTrickyName("MingLiU");
+                    for (int gid = 0; gid < Math.Min(font.GlyphCount, 64); gid++)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        font.GetGlyph(gid);
+                    }
+                },
+            },
         };
         return list;
     }
