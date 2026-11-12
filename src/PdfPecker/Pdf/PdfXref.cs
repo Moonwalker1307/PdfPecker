@@ -7,6 +7,10 @@ namespace PdfPecker.Pdf;
 internal sealed class PdfXref
 {
     private readonly List<long> _offsets = new() { 0 }; // by object id; 0 = not written
+    private readonly Dictionary<int, (int Stream, int Index)> _packed = new();
+
+    /// <summary>True when some objects are in object streams, so the file needs a cross-reference stream.</summary>
+    public bool HasPacked => _packed.Count > 0;
 
     /// <summary>One more than the highest object id begun so far.</summary>
     public int Count => _offsets.Count;
@@ -22,11 +26,33 @@ internal sealed class PdfXref
         return b.Int(id).Ascii(" 0 obj\n");
     }
 
+    /// <summary>Records that object <paramref name="id"/>, written elsewhere, begins at <paramref name="position"/>.</summary>
+    public void Record(int id, long position)
+    {
+        while (_offsets.Count <= id) _offsets.Add(0);
+        _offsets[id] = position;
+    }
+
+    /// <summary>Records that object <paramref name="id"/> is the object at <paramref name="index"/> of object stream <paramref name="stream"/>.</summary>
+    public void Pack(int id, int stream, int index)
+    {
+        while (_offsets.Count <= id) _offsets.Add(0);
+        _packed[id] = (stream, index);
+    }
+
+    /// <summary>The cross-reference stream row of object <paramref name="id"/>: packed, at an offset, or free.</summary>
+    public (int Type, long Field, int Index) Entry(int id)
+    {
+        if (_packed.TryGetValue(id, out var packed)) return (2, packed.Stream, packed.Index);
+        long offset = id < _offsets.Count ? _offsets[id] : 0;
+        return offset > 0 ? (1, offset, 0) : (0, 0, 0);
+    }
+
     /// <summary>The first id from 1 to <paramref name="count"/> - 1 that was never begun, or -1 when every id was written.</summary>
     public int FirstMissing(int count)
     {
         for (int i = 1; i < count; i++)
-            if (i >= _offsets.Count || _offsets[i] <= 0) return i;
+            if ((i >= _offsets.Count || _offsets[i] <= 0) && !_packed.ContainsKey(i)) return i;
         return -1;
     }
 

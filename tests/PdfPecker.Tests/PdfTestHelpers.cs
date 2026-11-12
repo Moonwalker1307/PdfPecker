@@ -40,7 +40,11 @@ internal static class PdfTestHelpers
         var startxref = Regex.Match(text, @"startxref\n(\d+)\n%%EOF\n$");
         Assert.True(startxref.Success, "Missing startxref");
         int xref = int.Parse(startxref.Groups[1].Value);
-        Assert.Equal("xref", text.Substring(xref, 4));
+        if (!text.AsSpan(xref).StartsWith("xref", StringComparison.Ordinal))
+        {
+            AssertXrefStreamValid(pdf, text, xref);
+            return;
+        }
         var header = Regex.Match(text.Substring(xref), @"^xref\n0 (\d+)\n");
         int count = int.Parse(header.Groups[1].Value);
         int pos = xref + header.Length + 20; // skip the free entry
@@ -49,6 +53,67 @@ internal static class PdfTestHelpers
             int offset = int.Parse(text.Substring(pos, 10));
             Assert.StartsWith(obj + " 0 obj", text.Substring(offset, 20));
         }
+    }
+
+    /// <summary>
+    /// Checks a cross-reference stream: every object in use starts at its offset, and every object in an object stream
+    /// is listed, at its index, in the header of an object stream that the cross-reference stream lists itself.
+    /// </summary>
+    private static void AssertXrefStreamValid(byte[] pdf, string text, int xref)
+    {
+        var dict = Regex.Match(text.Substring(xref), @"^(\d+) 0 obj\n<<(.*?)>>stream\n", RegexOptions.Singleline);
+        Assert.True(dict.Success, "startxref points at neither a table nor a stream");
+        string entries = dict.Groups[2].Value;
+        Assert.Contains("/Type/XRef", entries);
+        int size = int.Parse(Regex.Match(entries, @"/Size (\d+)").Groups[1].Value);
+        var w = Regex.Match(entries, @"/W\[(\d+) (\d+) (\d+)\]");
+        int[] widths = [int.Parse(w.Groups[1].Value), int.Parse(w.Groups[2].Value), int.Parse(w.Groups[3].Value)];
+        int columns = int.Parse(Regex.Match(entries, @"/Columns (\d+)").Groups[1].Value);
+        Assert.Equal(widths.Sum(), columns);
+        int length = int.Parse(Regex.Match(entries, @"/Length (\d+)").Groups[1].Value);
+        var rows = Inflate(pdf.AsSpan(xref + dict.Length, length).ToArray());
+        Assert.Equal(size * (columns + 1), rows.Length);
+        var previous = new byte[columns];
+        var streams = new Dictionary<int, string>();
+        var packed = new List<(int Obj, int Stream, int Index)>();
+        for (int obj = 0; obj < size; obj++)
+        {
+            int at = obj * (columns + 1);
+            Assert.Equal(2, rows[at]); // the PNG Up predictor
+            var row = new byte[columns];
+            for (int i = 0; i < columns; i++) row[i] = (byte)(rows[at + 1 + i] + previous[i]);
+            previous = row;
+            long Field(int start, int width) { long v = 0; for (int i = 0; i < width; i++) v = v << 8 | row[start + i]; return v; }
+            long type = Field(0, widths[0]), second = Field(widths[0], widths[1]), third = Field(widths[0] + widths[1], widths[2]);
+            if (obj == 0 || type == 0) continue;
+            if (type == 1)
+            {
+                Assert.StartsWith(obj + " 0 obj", text.Substring((int)second, 20));
+                var objStm = Regex.Match(text.Substring((int)second), @"^\d+ 0 obj\n<</Type/ObjStm/N (\d+)/First (\d+)/Filter/FlateDecode/Length (\d+)>>stream\n");
+                if (objStm.Success)
+                {
+                    var content = Inflate(pdf.AsSpan((int)second + objStm.Length, int.Parse(objStm.Groups[3].Value)).ToArray());
+                    streams[obj] = Encoding.Latin1.GetString(content, 0, int.Parse(objStm.Groups[2].Value));
+                }
+                continue;
+            }
+            Assert.Equal(2, type);
+            packed.Add((obj, (int)second, (int)third));
+        }
+        foreach (var (obj, stream, index) in packed)
+        {
+            Assert.True(streams.TryGetValue(stream, out var header), $"Object {obj} is in {stream}, which is not an object stream");
+            var numbers = header.Split(' ', '\n').Where(t => t.Length > 0).ToArray();
+            Assert.Equal(obj.ToString(System.Globalization.CultureInfo.InvariantCulture), numbers[index * 2]);
+        }
+    }
+
+    private static byte[] Inflate(byte[] data)
+    {
+        using var z = new ZLibStream(new MemoryStream(data), CompressionMode.Decompress);
+        using var ms = new MemoryStream();
+        z.CopyTo(ms);
+        return ms.ToArray();
     }
 
     /// <summary>All page content streams, decompressed, concatenated.</summary>

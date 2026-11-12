@@ -96,6 +96,7 @@ internal sealed partial class PdfDocumentWriter
     private readonly CompressionLevel _level;
     private readonly ByteBuffer _out = ByteBuffer.Rent(64 * 1024);
     private readonly PdfXref _xref = new();
+    private PdfObjectStreams? _packed;
 
     // Content-stream graphics state while writing one page.
     private uint _fill;
@@ -467,6 +468,9 @@ internal sealed partial class PdfDocumentWriter
         PrepareWatermark(doc);
         if (IsPdfA) ConvertCmykImages(doc);
         if (Security != null) _crypt = new PdfEncryptor(Security);
+        // The structure tree goes into object streams, whose strings an encrypted file would have to leave unencrypted
+        // inside an encrypted stream; an encrypted file keeps every object on its own.
+        _packed = Tagged && _crypt == null && _compress ? new PdfObjectStreams() : null;
         _imageList = doc.Images;
 
         // Every object gets its number before the first is written, except those that only writing the pages

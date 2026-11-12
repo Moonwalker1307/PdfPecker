@@ -327,7 +327,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. ARIA roles tag what HTML has no element
   for: `role="math"` (with `aria-label`) a formula, `role="doc-toc"` a table of contents whose list items are its
   entries, and `role="doc-index"` an index. `data-pdf-list-label` marks a list item's own label, such as a number in a
-  flex row, when the item has no list marker.
+  flex row, when the item has no list marker. The structure tree goes into compressed object streams: a 244-page
+  table is 1.9 MB tagged, where it used to be 7.9 MB (0.9 MB untagged).
   [More](https://pdfpecker.net/docs/accessibility/)
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. Check boxes
   and radio buttons take `accent-color`, and `appearance: none` leaves them to the page's own CSS (`:checked`,
