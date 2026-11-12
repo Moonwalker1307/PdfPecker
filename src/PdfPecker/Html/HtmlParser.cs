@@ -134,6 +134,30 @@ internal sealed class HtmlParser
     }
 #endif
 
+    // The short texts and attribute values seen last, each at the place its hash gives it. A document repeats many of
+    // them, such as the class of every cell of a column, the white space between tags or a cell's "0.00", and those
+    // share one string. A table of a fixed size, where a string replaces the one that was at its place, costs a document
+    // without repeats next to nothing, which a set of all its strings would not; its size follows the source's length.
+    private string?[]? _recent;
+
+    // A piece of text or an attribute value longer than this gets a string of its own: long ones seldom repeat.
+    private const int MaxSharedLength = 32;
+
+    /// <summary>The part of the source as a string, which a short part shares with an equal one seen shortly before.</summary>
+    private string Source(int start, int length)
+    {
+        if (length == 0) return "";
+        if (length > MaxSharedLength) return _src.Substring(start, length);
+        var written = _src.AsSpan(start, length);
+        _recent ??= new string?[Math.Clamp((int)System.Numerics.BitOperations.RoundUpToPowerOf2((uint)_src.Length >> 6), 16, 1024)];
+        // The hash is FNV-1a over the characters, not the runtime's, whose seed differs from process to process.
+        uint hash = 2166136261;
+        foreach (char c in written) hash = (hash ^ c) * 16777619;
+        ref var slot = ref _recent[hash & (uint)(_recent.Length - 1)];
+        if (slot == null || !written.SequenceEqual(slot)) slot = written.ToString();
+        return slot;
+    }
+
     // Which of the names the conversion asks about the document has used, as a tag or attribute name. Each new name
     // is checked once, when it is first seen.
     private NamesUsed _used;
@@ -276,7 +300,7 @@ internal sealed class HtmlParser
             char n = s[lt + 1];
             if (n == '!' || n == '?' || n == '/' || IsAsciiLetter(n))
             {
-                if (lt > textStart) AddText(s.Substring(textStart, lt - textStart));
+                if (lt > textStart) AddText(Source(textStart, lt - textStart));
                 _pos = lt;
                 ParseMarkup();
                 textStart = _pos;
@@ -286,7 +310,7 @@ internal sealed class HtmlParser
                 _pos = lt + 1; // a lone '<' is text
             }
         }
-        if (s.Length > textStart) AddText(s.Substring(textStart));
+        if (s.Length > textStart) AddText(Source(textStart, s.Length - textStart));
     }
 
     private static bool IsAsciiLetter(char c) => (uint)((c | 0x20) - 'a') <= 'z' - 'a';
@@ -469,14 +493,14 @@ internal sealed class HtmlParser
                     char q = s[p++];
                     int end = s.IndexOf(q, p);
                     if (end < 0) end = s.Length;
-                    value = HtmlEntities.DecodeAttribute(s.Substring(p, end - p));
+                    value = HtmlEntities.DecodeAttribute(Source(p, end - p));
                     p = Math.Min(end + 1, s.Length);
                 }
                 else
                 {
                     int vs = p;
                     while (p < s.Length && s[p] > ' ' && s[p] != '>') p++;
-                    value = HtmlEntities.DecodeAttribute(s.Substring(vs, p - vs));
+                    value = HtmlEntities.DecodeAttribute(Source(vs, p - vs));
                 }
             }
             if (attrName.Length > 0 && el.GetAttribute(attrName) == null)
