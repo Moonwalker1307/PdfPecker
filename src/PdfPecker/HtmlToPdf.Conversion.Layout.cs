@@ -200,9 +200,20 @@ public static partial class HtmlToPdf
             // The logical structure of a tagged PDF follows the HTML in document order, whatever the layout does.
             _structure = _options.Accessibility != PdfAccessibility.None || _settings.IsPdfALevelA ? StructureTree.Build(_doc) : null;
             _headings?.Clear();
+            ReleaseRuns(); // an earlier layout, which this one replaces
             _runs = _styles.UsedPageNames ? SplitByPageName(_doc) : new List<PageRun> { new() };
             int documentPage = 0;
             for (int i = 0; i < _runs.Count; i++) documentPage += LayOutRun(_runs[i], i, documentPage);
+        }
+
+        /// <summary>
+        /// Empties the lists of draw operations of the laid-out runs. The lists of a long document are large enough to
+        /// stay until a full collection; emptied, they no longer keep the draw operations alive until then.
+        /// </summary>
+        private void ReleaseRuns()
+        {
+            if (_runs == null) return;
+            foreach (var run in _runs) run.Engine?.ReleaseOps();
         }
 
         /// <summary>

@@ -1214,6 +1214,7 @@ internal sealed partial class LayoutEngine
     private float LayoutRow(TableModel m, int r, float rowTop, float[] colX, float[] widths, float hs, float vs, bool collapse, bool allowMove,
         TableColumns[]? pageColumns = null, float keepWith = 0)
     {
+        RoomForOps();
         var row = m.Rows[r];
         int n = m.ColCount;
         int rowStartOps = _ops.Count;

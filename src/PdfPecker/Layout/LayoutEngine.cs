@@ -47,6 +47,36 @@ internal sealed partial class LayoutEngine
 
     public List<DrawOp> Ops => _ops;
 
+    /// <summary>The smallest list of draw operations whose array is on the large object heap (85,000 bytes of references).</summary>
+    private const int LargeOps = 10_625;
+
+    /// <summary>
+    /// Makes room in a large list of draw operations before the list grows by itself, and empties the array it leaves.
+    /// An array that large is on the large object heap, where it stays until a full collection, and every collection
+    /// before that treats what it refers to as alive: the outgrown arrays of finished conversions kept their draw
+    /// operations, and those were copied from generation to generation. Called once per block box and table row, which
+    /// add far fewer operations than the room kept here; a list that grows in between only misses the saving.
+    /// </summary>
+    private void RoomForOps()
+    {
+        var ops = _ops;
+        if (ops.Capacity < LargeOps || ops.Capacity - ops.Count >= 1024) return;
+        var outgrown = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(ops);
+        ops.Capacity *= 2;
+        outgrown.Clear();
+    }
+
+    /// <summary>
+    /// Empties the lists of draw operations once nothing reads them any more: after the document is written, or when
+    /// it is laid out again. Their arrays may be on the large object heap (see <see cref="RoomForOps"/>).
+    /// </summary>
+    public void ReleaseOps()
+    {
+        _ops.Clear();
+        FixedOps.Clear();
+        FootnoteOps.Clear();
+    }
+
     /// <summary>The root element (html), whose border box positions the page canvas background.</summary>
     public Element? CanvasRoot { get; init; }
 
@@ -1150,6 +1180,7 @@ internal sealed partial class LayoutEngine
     private float LayoutBlockBox(Element e, float x, float y, float availW, bool shrinkToFit)
     {
         Cancellation.ThrowIfCancellationRequested();
+        RoomForOps();
         CheckPageLimit(y);
         if (OrthogonalTurn(e) is int turn and not 0) return LayoutOrthogonal(e, x, y, availW, turn);
         var s = e.Style;

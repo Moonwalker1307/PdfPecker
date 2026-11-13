@@ -86,10 +86,17 @@ public static partial class HtmlToPdf
             ResolveStyles();
             PrepareBands();
             PreparePageSetups();
-            LayOut();
-            ShrinkToFit();
-            FitPageHeights();
-            return Write(BuildSections());
+            try
+            {
+                LayOut();
+                ShrinkToFit();
+                FitPageHeights();
+                return Write(BuildSections());
+            }
+            finally
+            {
+                ReleaseRuns();
+            }
         }
 
         private void Parse()
