@@ -22,7 +22,18 @@ internal sealed class Element : Node
 
     /// <summary>The attributes in source order; add them with <see cref="AddAttribute"/>.</summary>
     public List<KeyValuePair<string, string>> Attributes => _attributes ?? NoAttributes;
-    public readonly List<Node> Children = new();
+    public List<Node> Children { get; private set; } = new();
+
+    /// <summary>
+    /// Puts another list in the place of the child list and returns the one it replaces. Only the parser calls it, to
+    /// collect the children of an open element in a list it reuses, and it moves the children between the lists itself.
+    /// </summary>
+    public List<Node> SwapChildren(List<Node> children)
+    {
+        var previous = Children;
+        Children = children;
+        return previous;
+    }
 
     // Filled in before styling.
     public string? Id;
@@ -219,6 +230,9 @@ internal sealed class Element : Node
 
     public void AddAttribute(string name, string value) => (_attributes ??= new(2)).Add(new KeyValuePair<string, string>(name, value));
 
+    /// <summary>Gives an element without attributes a copy of the list, which takes no more room than they need.</summary>
+    public void SetAttributes(List<KeyValuePair<string, string>> attributes) => _attributes = new(attributes);
+
     public void AppendChild(Node node)
     {
         node.Parent = this;
@@ -228,6 +242,10 @@ internal sealed class Element : Node
     /// <summary>Concatenated text of all descendant text nodes.</summary>
     public string InnerText()
     {
+        // A style or title element, and most elements whose text is asked for, hold one piece of text: that string
+        // is the answer, without a copy of it.
+        if (Children.Count == 0) return "";
+        if (Children.Count == 1 && Children[0] is TextNode only) return only.Text;
         var sb = new System.Text.StringBuilder();
         AppendText(this, sb);
         return sb.ToString();

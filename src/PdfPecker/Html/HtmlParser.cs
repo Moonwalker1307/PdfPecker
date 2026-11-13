@@ -35,6 +35,62 @@ internal sealed class HtmlParser
     private int _pos;
     private readonly List<Element> _stack = new();
 
+    // An open element collects its children in a list the parser reuses, and gets a list of exactly their number when
+    // it is closed: most elements have one child or a few, for which a list of their own that grows as they are added
+    // allocates two to three times as much. An element's own, empty list waits here, at the element's index in the
+    // stack, and the lists that no open element uses wait in _spareLists.
+    private readonly List<List<Node>> _ownLists = new();
+    private readonly List<List<Node>> _spareLists = new();
+
+    // An element with more children than this keeps the list they were collected in, since a copy of that size costs
+    // more than the unused end of the list.
+    private const int MaxCopiedChildren = 1024;
+
+    private void Push(Element el)
+    {
+        _stack.Add(el);
+        // A head that is opened again with more children than are copied keeps its list, as PopTo leaves it there:
+        // moving them each time would make a document of many such tags take time with the square of their number.
+        if (el.Children.Count > MaxCopiedChildren)
+        {
+            _ownLists.Add(el.Children);
+            return;
+        }
+        List<Node> shared;
+        if (_spareLists.Count > 0)
+        {
+            shared = _spareLists[_spareLists.Count - 1];
+            _spareLists.RemoveAt(_spareLists.Count - 1);
+        }
+        else shared = new List<Node>();
+        var own = el.SwapChildren(shared);
+        // Only a head that is opened a second time has children already.
+        if (own.Count > 0)
+        {
+            shared.AddRange(own);
+            own.Clear();
+        }
+        _ownLists.Add(own);
+    }
+
+    /// <summary>Closes the open elements from the one at <paramref name="index"/> in the stack to the innermost.</summary>
+    private void PopTo(int index)
+    {
+        for (int i = _stack.Count - 1; i >= index; i--)
+        {
+            var shared = _stack[i].Children;
+            if (shared.Count > MaxCopiedChildren) continue;
+            var own = _ownLists[i];
+            _stack[i].SwapChildren(own);
+            if (own.Capacity < shared.Count) own.Capacity = shared.Count;
+            own.AddRange(shared);
+            shared.Clear();
+            _spareLists.Add(shared);
+        }
+        _stack.RemoveRange(index, _stack.Count - index);
+        _ownLists.RemoveRange(index, _ownLists.Count - index);
+    }
+
     // Whether the parser makes the html, head and body elements a document leaves out, as browsers do. The first one
     // of each is kept here; a second html or body tag only adds the attributes the first one lacks.
     private readonly bool _implied;
@@ -85,6 +141,30 @@ internal sealed class HtmlParser
     }
 #endif
 
+    // The short texts and attribute values seen last, each at the place its hash gives it. A document repeats many of
+    // them, such as the class of every cell of a column, the white space between tags or a cell's "0.00", and those
+    // share one string. A table of a fixed size, where a string replaces the one that was at its place, costs a document
+    // without repeats next to nothing, which a set of all its strings would not; its size follows the source's length.
+    private string?[]? _recent;
+
+    // A piece of text or an attribute value longer than this gets a string of its own: long ones seldom repeat.
+    private const int MaxSharedLength = 32;
+
+    /// <summary>The part of the source as a string, which a short part shares with an equal one seen shortly before.</summary>
+    private string Source(int start, int length)
+    {
+        if (length == 0) return "";
+        if (length > MaxSharedLength) return _src.Substring(start, length);
+        var written = _src.AsSpan(start, length);
+        _recent ??= new string?[Math.Clamp((int)System.Numerics.BitOperations.RoundUpToPowerOf2((uint)_src.Length >> 6), 16, 1024)];
+        // The hash is FNV-1a over the characters, not the runtime's, whose seed differs from process to process.
+        uint hash = 2166136261;
+        foreach (char c in written) hash = (hash ^ c) * 16777619;
+        ref var slot = ref _recent[hash & (uint)(_recent.Length - 1)];
+        if (slot == null || !written.SequenceEqual(slot)) slot = written.ToString();
+        return slot;
+    }
+
     // Which of the names the conversion asks about the document has used, as a tag or attribute name. Each new name
     // is checked once, when it is first seen.
     private NamesUsed _used;
@@ -111,11 +191,12 @@ internal sealed class HtmlParser
     {
         var p = new HtmlParser(html, impliedStructure);
         var doc = new Element("#document");
-        p._stack.Add(doc);
+        p.Push(doc);
         p.Run();
         // A document with markup but no content still has a body.
         if (p._html != null && p._body == null) p.StartBody();
         p.FlushMerge();
+        p.PopTo(0);
         used = p._used;
         return doc;
     }
@@ -125,13 +206,13 @@ internal sealed class HtmlParser
         if (_html != null) return;
         _html = new Element("html");
         _stack[0].AppendChild(_html);
-        _stack.Add(_html);
+        Push(_html);
     }
 
     private void PopHead()
     {
         int i = _head == null ? -1 : _stack.LastIndexOf(_head);
-        if (i > 0) _stack.RemoveRange(i, _stack.Count - i);
+        if (i > 0) PopTo(i);
     }
 
     private void StartBody(Element? written = null)
@@ -145,7 +226,7 @@ internal sealed class HtmlParser
         }
         _body = written ?? new Element("body") { ImpliedBody = true };
         _html!.AppendChild(_body);
-        _stack.Add(_body);
+        Push(_body);
     }
 
     // Each merged attribute is looked up among the target's, so a document of thousands of body tags with attributes of
@@ -175,7 +256,7 @@ internal sealed class HtmlParser
                 {
                     _html = el;
                     _stack[0].AppendChild(el);
-                    _stack.Add(el);
+                    Push(el);
                 }
                 return true;
             case "head":
@@ -183,7 +264,7 @@ internal sealed class HtmlParser
                 EnsureHtml();
                 _head = el;
                 _html!.AppendChild(el);
-                _stack.Add(el);
+                Push(el);
                 return true;
             case "body":
                 if (_body != null)
@@ -208,7 +289,7 @@ internal sealed class HtmlParser
             _head = new Element("head");
             _html!.AppendChild(_head);
         }
-        if (!_stack.Contains(_head)) _stack.Add(_head);
+        if (!_stack.Contains(_head)) Push(_head);
         return false;
     }
 
@@ -226,7 +307,7 @@ internal sealed class HtmlParser
             char n = s[lt + 1];
             if (n == '!' || n == '?' || n == '/' || IsAsciiLetter(n))
             {
-                if (lt > textStart) AddText(s.Substring(textStart, lt - textStart));
+                if (lt > textStart) AddText(Source(textStart, lt - textStart));
                 _pos = lt;
                 ParseMarkup();
                 textStart = _pos;
@@ -236,7 +317,7 @@ internal sealed class HtmlParser
                 _pos = lt + 1; // a lone '<' is text
             }
         }
-        if (s.Length > textStart) AddText(s.Substring(textStart));
+        if (s.Length > textStart) AddText(Source(textStart, s.Length - textStart));
     }
 
     private static bool IsAsciiLetter(char c) => (uint)((c | 0x20) - 'a') <= 'z' - 'a';
@@ -345,7 +426,7 @@ internal sealed class HtmlParser
                 // As in browsers, rows directly inside a table get an implied <tbody>.
                 var tbody = new Element("tbody");
                 Current.AppendChild(tbody);
-                _stack.Add(tbody);
+                Push(tbody);
             }
             bool inTable = IsTableContext(Current.Name) && !IsTableStructure(name);
             if (inTable && name == "form")
@@ -375,7 +456,7 @@ internal sealed class HtmlParser
                 return;
             }
             // Deeply nested documents are flattened instead of risking a stack overflow in the recursive stages.
-            if (_stack.Count < MaxDepth) _stack.Add(el);
+            if (_stack.Count < MaxDepth) Push(el);
         }
     }
 
@@ -397,11 +478,12 @@ internal sealed class HtmlParser
     {
         string s = _src;
         bool selfClosing = false;
+        var attributes = _attributes;
         while (p < s.Length)
         {
             char c = s[p];
             if (c <= ' ') { p++; continue; }
-            if (c == '>') { p++; return selfClosing; }
+            if (c == '>') { p++; break; }
             if (c == '/') { selfClosing = true; p++; continue; }
             selfClosing = false;
 
@@ -419,21 +501,36 @@ internal sealed class HtmlParser
                     char q = s[p++];
                     int end = s.IndexOf(q, p);
                     if (end < 0) end = s.Length;
-                    value = HtmlEntities.DecodeAttribute(s.Substring(p, end - p));
+                    value = HtmlEntities.DecodeAttribute(Source(p, end - p));
                     p = Math.Min(end + 1, s.Length);
                 }
                 else
                 {
                     int vs = p;
                     while (p < s.Length && s[p] > ' ' && s[p] != '>') p++;
-                    value = HtmlEntities.DecodeAttribute(s.Substring(vs, p - vs));
+                    value = HtmlEntities.DecodeAttribute(Source(vs, p - vs));
                 }
             }
-            if (attrName.Length > 0 && el.GetAttribute(attrName) == null)
-                el.AddAttribute(attrName, value);
+            if (attrName.Length > 0 && !Has(attributes, attrName))
+                attributes.Add(new KeyValuePair<string, string>(attrName, value));
+        }
+        if (attributes.Count > 0)
+        {
+            el.SetAttributes(attributes);
+            attributes.Clear();
         }
         return selfClosing;
+
+        static bool Has(List<KeyValuePair<string, string>> attributes, string name)
+        {
+            foreach (var a in attributes)
+                if (a.Key == name) return true;
+            return false;
+        }
     }
+
+    // The attributes of the tag being read: the element gets a list of exactly their number once the tag ends.
+    private readonly List<KeyValuePair<string, string>> _attributes = new();
 
     private void ImplicitlyClose(string name)
     {
@@ -483,7 +580,7 @@ internal sealed class HtmlParser
             string n = _stack[i].Name;
             if (n == name)
             {
-                _stack.RemoveRange(i, _stack.Count - i);
+                PopTo(i);
                 return;
             }
             if (n == boundary1 || n == boundary2 || n == boundary3) return;
@@ -533,7 +630,7 @@ internal sealed class HtmlParser
             string n = _stack[i].Name;
             if (n is "td" or "th" or "caption") return;
             if (!IsTableContext(n)) continue;
-            if (i + 1 < _stack.Count && _stack[i + 1].Parent != _stack[i]) _stack.RemoveRange(i + 1, _stack.Count - i - 1);
+            if (i + 1 < _stack.Count && _stack[i + 1].Parent != _stack[i]) PopTo(i + 1);
             return;
         }
     }
@@ -551,7 +648,7 @@ internal sealed class HtmlParser
         for (int i = _stack.Count - 1; i > 0; i--)
         {
             string n = _stack[i].Name;
-            if (n == "select") { _stack.RemoveRange(i, _stack.Count - i); return; }
+            if (n == "select") { PopTo(i); return; }
             if (n is not ("option" or "optgroup")) return;
         }
     }
@@ -590,7 +687,7 @@ internal sealed class HtmlParser
         {
             if (_stack[i].Name == name)
             {
-                _stack.RemoveRange(i, _stack.Count - i);
+                PopTo(i);
                 return;
             }
             // Don't let a stray end tag escape a table cell or table.
