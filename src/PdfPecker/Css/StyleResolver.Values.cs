@@ -600,9 +600,10 @@ internal sealed partial class StyleResolver
         while (unitStart > 0 && (char.IsLetter(v[unitStart - 1]) || v[unitStart - 1] == '%')) unitStart--;
         if (unitStart == 0) return false;
         if (!float.TryParse(v.AsSpan(0, unitStart), NumberStyles.Float, CultureInfo.InvariantCulture, out float n)) return false;
+        // The unit is compared as a span: a string for it would be allocated for every length of every style.
         var unit = v.AsSpan(unitStart);
         float pt;
-        switch (unit.ToString())
+        switch (unit)
         {
             case "px": pt = n * 0.75f; break;
             case "pt": pt = n; break;

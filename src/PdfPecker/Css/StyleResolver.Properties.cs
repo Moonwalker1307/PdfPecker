@@ -86,10 +86,10 @@ internal sealed partial class StyleResolver
             case "shape-margin": ApplyShapeMargin(s, parent, in d); break;
             case "shape-image-threshold": ApplyShapeImageThreshold(s, parent, in d); break;
             case "position": ApplyPosition(s, parent, in d); break;
-            case "top": SetLength(ref s.Top, d.Lower, d.Em, d.Inherit ? parent.Top : null); break;
-            case "right": SetLength(ref s.Right, d.Lower, d.Em, d.Inherit ? parent.Right : null); break;
-            case "bottom": SetLength(ref s.Bottom, d.Lower, d.Em, d.Inherit ? parent.Bottom : null); break;
-            case "left": SetLength(ref s.Left, d.Lower, d.Em, d.Inherit ? parent.Left : null); break;
+            case "top": { var inset = s.Top; if (SetLength(ref inset, d.Lower, d.Em, d.Inherit ? parent.Top : null)) s.Top = inset; break; }
+            case "right": { var inset = s.Right; if (SetLength(ref inset, d.Lower, d.Em, d.Inherit ? parent.Right : null)) s.Right = inset; break; }
+            case "bottom": { var inset = s.Bottom; if (SetLength(ref inset, d.Lower, d.Em, d.Inherit ? parent.Bottom : null)) s.Bottom = inset; break; }
+            case "left": { var inset = s.Left; if (SetLength(ref inset, d.Lower, d.Em, d.Inherit ? parent.Left : null)) s.Left = inset; break; }
             case "z-index": ApplyZIndex(s, parent, in d); break;
             case "overflow-clip-margin": ApplyOverflowClipMargin(s, parent, in d); break;
             case "overflow":
@@ -152,10 +152,10 @@ internal sealed partial class StyleResolver
             case "max-block-size": Apply(s, parent, "max-height", raw); break;
             case "width": ApplyWidth(s, parent, in d); break;
             case "height": ApplySize(ref s.Height, s, parent, in d, StretchSizes.Height, d.Inherit ? parent.Height : null); break;
-            case "min-width": ApplySize(ref s.MinWidth, s, parent, in d, StretchSizes.MinWidth, null); break;
-            case "min-height": ApplySize(ref s.MinHeight, s, parent, in d, StretchSizes.MinHeight, null); break;
-            case "max-width": ApplySize(ref s.MaxWidth, s, parent, in d, StretchSizes.MaxWidth, null); break;
-            case "max-height": ApplySize(ref s.MaxHeight, s, parent, in d, StretchSizes.MaxHeight, null); break;
+            case "min-width": { var limit = s.MinWidth; ApplySize(ref limit, s, parent, in d, StretchSizes.MinWidth, null); s.MinWidth = limit; break; }
+            case "min-height": { var limit = s.MinHeight; ApplySize(ref limit, s, parent, in d, StretchSizes.MinHeight, null); s.MinHeight = limit; break; }
+            case "max-width": { var limit = s.MaxWidth; ApplySize(ref limit, s, parent, in d, StretchSizes.MaxWidth, null); s.MaxWidth = limit; break; }
+            case "max-height": { var limit = s.MaxHeight; ApplySize(ref limit, s, parent, in d, StretchSizes.MaxHeight, null); s.MaxHeight = limit; break; }
             case "aspect-ratio": ApplyAspectRatio(s, parent, in d); break;
             case "object-fit": ApplyObjectFit(s, parent, in d); break;
             case "object-position": ApplyObjectPosition(s, parent, in d); break;

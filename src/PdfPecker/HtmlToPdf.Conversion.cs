@@ -185,22 +185,7 @@ public static partial class HtmlToPdf
             if (BundledFonts.BeyondStandard(_options.HeaderText) || BundledFonts.BeyondStandard(_options.FooterText)
                 || BundledFonts.BeyondStandard(_options.Watermark?.Text))
                 return true;
-            var stack = new Stack<Node>();
-            stack.Push(_doc);
-            while (stack.Count > 0)
-            {
-                switch (stack.Pop())
-                {
-                    case TextNode t when BundledFonts.BeyondStandard(t.Text):
-                        return true;
-                    case Element e:
-                        foreach (var a in e.Attributes)
-                            if (BundledFonts.BeyondStandard(a.Value) || (a.Key == "style" && (CssEscapesBeyondStandard(a.Value)
-                                || a.Value.Contains("emphasis", StringComparison.OrdinalIgnoreCase)))) return true;
-                        foreach (var child in e.Children) stack.Push(child);
-                        break;
-                }
-            }
+            if (TextBeyondStandard(_doc)) return true;
             foreach (var rule in _sheet.Rules)
                 foreach (var d in rule.Declarations)
                     if (BundledFonts.BeyondStandard(d.Value) || CssEscapesBeyondStandard(d.Value) || DrawsEmphasisMarks(d.Property, d.Value)) return true;
@@ -208,6 +193,20 @@ public static partial class HtmlToPdf
                 foreach (var box in page.MarginBoxes.Values)
                     foreach (var d in box)
                         if (BundledFonts.BeyondStandard(d.Value) || CssEscapesBeyondStandard(d.Value)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Whether the text or an attribute of an element or of its descendants needs the fallback fonts. The parser's
+        /// depth limit bounds the recursion.
+        /// </summary>
+        private static bool TextBeyondStandard(Element e)
+        {
+            foreach (var a in e.Attributes)
+                if (BundledFonts.BeyondStandard(a.Value) || (a.Key == "style" && (CssEscapesBeyondStandard(a.Value)
+                    || a.Value.Contains("emphasis", StringComparison.OrdinalIgnoreCase)))) return true;
+            foreach (var child in e.Children)
+                if (child is TextNode t ? BundledFonts.BeyondStandard(t.Text) : child is Element c && TextBeyondStandard(c)) return true;
             return false;
         }
 
