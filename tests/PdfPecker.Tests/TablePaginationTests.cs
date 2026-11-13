@@ -12,6 +12,31 @@ public class TablePaginationTests
 
     private static IReadOnlyList<PdfTextPage> Pages(string body) => PdfText.ExtractPages(HtmlToPdf.Convert(Style + body));
 
+    [Fact]
+    public void Rows_kept_together_under_a_cell_spanning_rows_stay_on_the_page_they_fit_on()
+    {
+        // Nine rows of 30pt fit the 300pt page. The row kept with the last one sits under a cell that starts a row above:
+        // measuring the kept rows must not count that cell, whose place is from the real layout further down the page.
+        var pages = Pages("<style>td { height: 30pt }</style><table>"
+                          + string.Concat(Enumerable.Range(1, 6).Select(i => $"<tr><td>Row {i}</td><td>x</td></tr>"))
+                          + "<tr><td rowspan='3'>Span</td><td>a</td></tr><tr style='break-after: avoid'><td>b</td></tr><tr><td>c</td></tr></table>");
+        Assert.Single(pages);
+    }
+
+    [Theory]
+    [InlineData("<tr style='break-after: avoid'><td rowspan='2' style='border: 1px solid'>a</td><td>b</td></tr><tr><td>c</td></tr>")]
+    [InlineData("<tr><td>x</td><td>y</td></tr><tfoot><tr><td rowspan='2' style='border: 1px solid'>a</td><td>b</td></tr><tr><td>c</td></tr></tfoot>")]
+    public void A_bordered_cell_spanning_rows_that_are_kept_together_is_drawn_once(string rows)
+    {
+        // The kept rows are measured before the cell's own row is laid out; finishing the cell there threw a
+        // NullReferenceException with collapsed borders, and drew the borders of a cell from a row above twice.
+        foreach (var collapse in new[] { "collapse", "separate" })
+        {
+            var pdf = HtmlToPdf.Convert(Style + $"<table style='border-collapse: {collapse}'>{rows}</table>");
+            Assert.Single(PdfText.ExtractPages(pdf));
+        }
+    }
+
     [Theory]
     [InlineData("block")]
     [InlineData("flex")]

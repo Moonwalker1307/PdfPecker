@@ -79,6 +79,9 @@ internal sealed partial class LayoutEngine
         public float FootReserve; // per layout pass: room the footer repeated at the bottom of each page takes, or 0
         public bool MayMoveTable; // per layout pass: the whole table may start on the next page instead of its first row
         public int TopPage;       // per layout pass: the page (or column) the table's border box starts on
+        // While the rows kept with a row are measured (see KeptRunHeight): the first row of them. A cell that starts
+        // above it and ends among them has not been laid out in this measuring, so it is neither counted nor finished.
+        public int MeasuredFrom;
         public float? TableMove;  // set when it should: how far the first row missed fitting on the page
         public bool Rtl;      // direction: rtl, so the first column is on the right
         public float[] ColMin = Array.Empty<float>(), ColMax = Array.Empty<float>();
@@ -1187,9 +1190,11 @@ internal sealed partial class LayoutEngine
         var run = Capture(() =>
         {
             _measuringRows++;
+            m.MeasuredFrom = r + 1;
             float y = 0;
             for (int k = r + 1; k < m.Rows.Count && KeepsWithNext(m, k - 1) && y <= limit; k++)
                 y = LayoutRow(m, k, y + vs, colX, widths, hs, vs, collapse, allowMove: false);
+            m.MeasuredFrom = 0;
             _measuringRows--;
             return y;
         });
@@ -1300,7 +1305,7 @@ internal sealed partial class LayoutEngine
                 if (rowBottom > contentBottom + Eps) rowBottom = Math.Max(contentBottom, PastSplitRowRoom(rowTop, rowBottom));
             }
             foreach (var cell in row.Ending)
-                rowBottom = Math.Max(rowBottom, cell.Top + cell.NeededH);
+                if (cell.Row >= m.MeasuredFrom) rowBottom = Math.Max(rowBottom, cell.Top + cell.NeededH);
 
             // As in Chrome, the header goes on the table's first page whole: a header row that would break there, or that
             // starts on the next page with only the table's top edge and spacing before it, moves the whole table to the
@@ -1414,6 +1419,7 @@ internal sealed partial class LayoutEngine
 
         foreach (var cell in row.Ending)
         {
+            if (cell.Row < m.MeasuredFrom) continue;
             if (cell.RowSpan > 1) LayOutSpanningCellAgain(m, cell, rowBottom, colX, widths, hs, collapse);
             FinishCell(m, cell, rowBottom, collapse);
         }
