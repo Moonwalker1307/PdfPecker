@@ -14,6 +14,9 @@
 #
 # TrickyHostile.ttf is for HostileInputTests: "A" jumps back to itself forever, "B" calls a function that calls itself,
 # and "C" loops over IUP of a glyph with 2,000 points 30,000 times. All three must stop within the interpreter's budget.
+#
+# TrickyMany.ttf has 3,000 glyphs whose programs all jump back to themselves forever. Each one stops at its own budget,
+# and together they must stop at the font's budget, or drawing them all takes over half a minute.
 import array
 import os
 from fontTools.fontBuilder import FontBuilder
@@ -119,3 +122,8 @@ build("TrickyHostile.ttf",
        "B": composite([("stroke", 0, 0, False)], ["PUSHB[ ] 0", "CALL[ ]"]),
        "C": composite([("many", 0, 0, False)], ["PUSHW[ ] 30000", "PUSHB[ ] 1", "LOOPCALL[ ]"])},
       {0x41: "A", 0x42: "B", 0x43: "C"}, recursion)
+
+# Glyphs g0 to g2999 map to U+4E00 onwards.
+many = {"stroke": square()}
+many.update({"g%d" % i: composite([("stroke", 0, 0, False)], ["PUSHW[ ] -3", "JMPR[ ]"]) for i in range(3000)})
+build("TrickyMany.ttf", many, {0x4E00 + i: "g%d" % i for i in range(3000)}, [])
