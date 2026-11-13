@@ -1855,6 +1855,21 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Glyph_programs_of_one_font_share_a_budget()
+    {
+        // 3,000 glyphs whose programs all loop forever: each run stops at its own budget, but without a budget for the
+        // whole font drawing them all took about 12 ms a glyph, so a small PDF could keep one page busy for minutes.
+        var font = TrueTypeFont.Parse(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "TrickyMany.ttf")))!;
+        Assert.True(font.IsTricky);
+        var cmap = font.GetCmap(3, 1)!;
+        Bounded(() =>
+        {
+            for (int c = 0x4E00; c < 0x4E00 + 3000; c++) Assert.False(font.GetGlyph(cmap[c])!.IsEmpty);
+            return 0;
+        });
+    }
+
+    [Fact]
     public void Variation_sequence_tables_stop_at_their_limits()
     {
         // 240 selector records that all point at one table of 20,000 mappings and one of 20,000 ranges would be almost

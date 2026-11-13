@@ -1,3 +1,5 @@
+using PdfPecker.Rendering.Parsing;
+
 namespace PdfPecker.Rendering.Fonts;
 
 /// <summary>
@@ -11,12 +13,21 @@ namespace PdfPecker.Rendering.Fonts;
 /// Every run is bounded: a budget of instructions (counting the points that loops over a contour or a zone touch),
 /// a stack, call depth and storage sized from maxp but capped, and a failure stops the program and leaves the points
 /// where they are, as FreeType does. A failure in the font or control value program turns hinting off for the font.
+/// The glyph programs of one font also share a budget, so a font of thousands of glyphs that each run to their own
+/// budget costs no more than a few of them; once it is spent, the remaining glyphs are drawn without instructions.
 /// </para>
 /// </summary>
 internal sealed class TrueTypeInterpreter
 {
     /// <summary>Instructions (and loop iterations over points) one program may run.</summary>
     private const long InstructionBudget = 2_000_000;
+
+    /// <summary>
+    /// Instructions all the glyph programs of one font may run together: as much as 25 glyphs that each run to their
+    /// own budget. The glyph programs of the real fonts are short calls into their font programs, which leaves room for
+    /// thousands of instructions per glyph across all of a large CJK font.
+    /// </summary>
+    private const long FontInstructionBudget = 50_000_000;
     private const int MaxCallDepth = 64;
     private const int MaxStack = 65_536, StackSlack = 32, MinStack = 256;
     private const int MaxStorage = 65_536, MaxTwilightPoints = 65_536, MaxFunctions = 65_536;
@@ -32,6 +43,7 @@ internal sealed class TrueTypeInterpreter
     private readonly Dictionary<int, Function> _instructionDefinitions = new();
     private readonly int _maxFunctions;
     private GraphicsState _defaultState = GraphicsState.Default;
+    private long _glyphBudget = FontInstructionBudget;
 
     private readonly record struct Function(byte[] Code, int Start);
 
@@ -125,11 +137,13 @@ internal sealed class TrueTypeInterpreter
     /// <summary>
     /// Runs a glyph program on <paramref name="zone"/>. Each run starts from the state the control value program
     /// left, with its own copy of the control values, storage and twilight points, so glyphs never affect each other
-    /// and may be hinted on several threads at once.
+    /// and may be hinted on several threads at once. Once the font's budget is spent the program does not run, and a
+    /// cancelled render stops before the next program.
     /// </summary>
     public void RunGlyph(byte[] program, Zone zone)
     {
-        if (program.Length == 0 || GlyphProgramsDisabled) return;
+        if (program.Length == 0 || GlyphProgramsDisabled || Volatile.Read(ref _glyphBudget) <= 0) return;
+        PdfFile.CheckCancel();
         var state = (_defaultState.InstructControl & 2) != 0 ? GraphicsState.Default : _defaultState;
         // As FreeType: each glyph starts in the glyph zone with the vectors on the x axis.
         state.Gep0 = state.Gep1 = state.Gep2 = 1;
@@ -139,6 +153,7 @@ internal sealed class TrueTypeInterpreter
         state.Loop = 1;
         var run = new Execution(this, zone, CodeRange.Glyph, (int[])_cvt.Clone(), (int[])_storage.Clone(), state);
         run.Execute(program);
+        Interlocked.Add(ref _glyphBudget, -run.Spent);
     }
 
     private enum CodeRange { Font, ControlValue, Glyph }
@@ -166,6 +181,9 @@ internal sealed class TrueTypeInterpreter
         private readonly record struct Frame(byte[] CallerCode, int ReturnIp, Function Function, int Count);
 
         public GraphicsState State => _gs;
+
+        /// <summary>The instructions this run used, including the one that went over the budget.</summary>
+        public long Spent => InstructionBudget - _budget;
 
         public Execution(TrueTypeInterpreter font, Zone glyph, CodeRange range, int[] cvt, int[] storage, GraphicsState state)
         {
