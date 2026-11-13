@@ -33,8 +33,10 @@ internal sealed partial class LayoutEngine
     {
         public Element Tr = null!;
         public Element? Group; // the thead, tbody or tfoot the row is in
-        public readonly List<CellModel> Cells = new();     // cells starting in this row
-        public readonly List<CellModel> Ending = new();    // cells (any start row) ending in this row
+        public List<CellModel> Cells = null!;  // cells starting in this row
+        // Cells (any start row) ending in this row. In a table where no cell spans rows these are the row's own cells,
+        // and it is the same list.
+        public List<CellModel> Ending = null!;
     }
 
     /// <summary>
@@ -209,7 +211,7 @@ internal sealed partial class LayoutEngine
         var old = m.Rows.ToArray();
         m.Rows.Clear();
         foreach (var row in old)
-            if (!row.Tr.Style.Collapsed) m.Rows.Add(new RowModel { Tr = row.Tr, Group = row.Group });
+            if (!row.Tr.Style.Collapsed) m.Rows.Add(new RowModel { Tr = row.Tr, Group = row.Group, Cells = new(), Ending = new() });
         foreach (var row in old)
             foreach (var cell in row.Cells)
             {
@@ -270,22 +272,34 @@ internal sealed partial class LayoutEngine
         trs.AddRange(body);
         trs.AddRange(foot);
 
-        var occupied = new List<List<bool>>();
-        bool IsOccupied(int r, int c) => r < occupied.Count && c < occupied[r].Count && occupied[r][c];
+        // The places that cells spanning rows take in the rows below their first, which is all a row asks about: its own
+        // cells lie left of the place it looks at. A table without such cells keeps no record at all.
+        List<List<bool>>? occupied = null;
+        bool IsOccupied(int r, int c) => occupied != null && r < occupied.Count && c < occupied[r].Count && occupied[r][c];
         void Occupy(int r, int c)
         {
+            occupied ??= new List<List<bool>>();
             while (occupied.Count <= r) occupied.Add(new List<bool>());
             var row = occupied[r];
             while (row.Count <= c) row.Add(false);
             row[c] = true;
         }
 
+        m.Rows.Capacity = trs.Count;
         for (int r = 0; r < trs.Count; r++)
+        {
+            // A row's list is made as long as the row has cells, as it grew in steps that were thrown away.
+            int cells = 0;
+            foreach (var child in trs[r].Children)
+                if (child is Element { Style.Display: Display.TableCell }) cells++;
             m.Rows.Add(new RowModel
             {
                 Tr = trs[r],
                 Group = trs[r].Parent is { Style.Display: Display.TableRowGroup or Display.TableHeaderGroup or Display.TableFooterGroup } g ? g : null,
+                Cells = new List<CellModel>(cells),
             });
+        }
+        bool rowSpans = false;
         for (int r = 0; r < trs.Count; r++)
         {
             int col = 0;
@@ -302,14 +316,19 @@ internal sealed partial class LayoutEngine
                 int rowspan = ParseInt(td.GetAttribute("rowspan"), 1);
                 if (rowspan <= 0 || r + rowspan > groupEnd) rowspan = groupEnd - r;
                 var cell = new CellModel { Td = td, Row = r, Col = col, ColSpan = colspan, RowSpan = Math.Max(1, rowspan) };
-                for (int rr = r; rr < r + cell.RowSpan; rr++)
+                for (int rr = r + 1; rr < r + cell.RowSpan; rr++)
                     for (int cc = col; cc < col + colspan; cc++) Occupy(rr, cc);
                 m.Rows[r].Cells.Add(cell);
-                m.Rows[r + cell.RowSpan - 1].Ending.Add(cell);
+                rowSpans |= cell.RowSpan > 1;
                 col += colspan;
                 if (col > m.ColCount) m.ColCount = col;
             }
         }
+        // The cells ending in each row, in the order of their first rows.
+        foreach (var row in m.Rows) row.Ending = rowSpans ? new List<CellModel>() : row.Cells;
+        if (rowSpans)
+            foreach (var row in m.Rows)
+                foreach (var cell in row.Cells) m.Rows[cell.Row + cell.RowSpan - 1].Ending.Add(cell);
 
         if (RemoveCollapsed(m, cols, columns: !keepColumns) is { } kept)
         {
@@ -1428,14 +1447,14 @@ internal sealed partial class LayoutEngine
         // Under the cells, from the bottom up (CSS 2.1 §17.5.1): column groups, columns, the row group and the row.
         if (row.Cells.Count + row.Ending.Count > 0)
         {
-            var under = collapse ? BordersUnder(m, r, rowTop) : null;
+            EarlierBorders? under = collapse ? BordersUnder(m, r, rowTop) : null;
             if (m.ColGroupBackground != null) PaintColumns(m, m.ColGroupBackground, r, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
             if (m.ColBackground != null) PaintColumns(m, m.ColBackground, r, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
             if (row.Group?.Style is { } gs && CssColor.IsVisible(gs.BackgroundColor))
-                PaintRowBackground(m, gs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
+                PaintRowBackground(m, r, gs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
             var rs = row.Tr.Style;
             if (CssColor.IsVisible(rs.BackgroundColor))
-                PaintRowBackground(m, rs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
+                PaintRowBackground(m, r, rs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
         }
         return rowBottom;
     }
@@ -1454,11 +1473,18 @@ internal sealed partial class LayoutEngine
             foreach (var cell in m.Rows[k].Cells)
                 end = Math.Max(end, k + cell.RowSpan - 1);
         end = Math.Min(end, m.Rows.Count - 1);
-        int rows = m.Rows.Count;
-        m.SpanShared ??= new bool[rows];
+        m.SpanShared ??= new bool[m.Rows.Count];
         for (int k = r; k <= end; k++) m.SpanShared[k] = true;
-        if (end == r) return;
+        if (end > r) ShareSpanHeights(m, r, end, colX, widths, hs, vs, collapse);
+    }
 
+    /// <summary>
+    /// Shares the height out over rows <paramref name="r"/> to <paramref name="end"/>. It is a method of its own because
+    /// measuring the rows captures its arguments, which would otherwise cost every row of every table an allocation.
+    /// </summary>
+    private void ShareSpanHeights(TableModel m, int r, int end, float[] colX, float[] widths, float hs, float vs, bool collapse)
+    {
+        int rows = m.Rows.Count;
         var heights = new float[end - r + 1];
         var spans = new List<(CellModel Cell, float Needed)>();
         var outerExtra = m.SpanExtra;
@@ -1728,11 +1754,11 @@ internal sealed partial class LayoutEngine
     /// The background of a row or row group across the table. With collapsed borders it stops where the borders already
     /// drawn round the row end (see <see cref="BordersUnder"/>), cell by cell.
     /// </summary>
-    private static void PaintRowBackground(TableModel m, uint color, GroupOp into, float top, float bottom, float[] colX, float[] widths, float hs,
-        EarlierBorders? under)
+    private static void PaintRowBackground(TableModel m, int r, uint color, GroupOp into, float top, float bottom, float[] colX, float[] widths,
+        float hs, EarlierBorders? earlier)
     {
         int n = m.ColCount;
-        if (under == null)
+        if (earlier is not { } under)
         {
             into.Ops.Add(new RectOp(colX[0], top, colX[n] - hs - colX[0], bottom - top, color));
             return;
@@ -1742,19 +1768,44 @@ internal sealed partial class LayoutEngine
         // band.
         float left = colX[0] + under.Left, right = colX[n] - hs - under.Right, b = bottom - under.Bottom;
         float runX = left, runInset = 0;
-        var tops = under.Tops;
-        for (int i = 0; i < tops.Count; i++)
+        // The row's cells whose top border was drawn before, which a row has in the order of their columns.
+        var cells = m.Rows[r].Cells;
+        int count = under.Tops ? cells.Count : 0;
+        // Only where removing collapsed rows and columns left two overlapping cells in one column are the cells sorted
+        // again, as they were when they were listed for each row: that sort keeps no order among equal columns, and
+        // the bands must stay where they were.
+        for (int i = 1; i < count; i++)
         {
-            var (col, span, inset) = tops[m.Rtl ? tops.Count - 1 - i : i];
+            if (cells[i].Col != cells[i - 1].Col) continue;
+            var sorted = new List<CellModel>();
+            foreach (var cell in cells)
+                if (TopInset(m, cell) > 0) sorted.Add(cell);
+            sorted.Sort(static (x, y) => x.Col.CompareTo(y.Col));
+            cells = sorted;
+            count = sorted.Count;
+            break;
+        }
+        for (int i = NextTop(0); i < count;)
+        {
+            var cell = cells[m.Rtl ? count - 1 - i : i];
+            int col = cell.Col, span = cell.ColSpan;
+            float inset = TopInset(m, cell);
             float x0 = m.Rtl ? ColumnX(m, col + span - 1, colX, widths, hs) : colX[col];
             float x1 = m.Rtl ? col > 0 ? ColumnX(m, col - 1, colX, widths, hs) : colX[n] - hs : col + span < n ? colX[col + span] : colX[n] - hs;
             Switch(Math.Max(x0, left), inset);
-            int next = i + 1;
-            if (next < tops.Count && tops[m.Rtl ? tops.Count - 1 - next : next] is var (nc, ns, ni) && ni == inset
-                && (m.Rtl ? nc + ns == col : nc == col + span)) continue;
+            i = NextTop(i + 1);
+            if (i < count && cells[m.Rtl ? count - 1 - i : i] is var after && TopInset(m, after) == inset
+                && (m.Rtl ? after.Col + after.ColSpan == col : after.Col == col + span)) continue;
             Switch(Math.Min(x1, right), 0);
         }
         if (right > runX) into.Ops.Add(new RectOp(runX, top + runInset, right - runX, b - top - runInset, color));
+
+        // The first of the row's cells from the i-th on, counted from the left, that has such a border.
+        int NextTop(int i)
+        {
+            while (i < count && !(TopInset(m, cells[m.Rtl ? count - 1 - i : i]) > 0)) i++;
+            return i;
+        }
 
         // Ends the band so far at x and starts one with another inset there.
         void Switch(float x, float inset)
@@ -1771,13 +1822,13 @@ internal sealed partial class LayoutEngine
     /// borders it stops where the borders already drawn round the row end (see <see cref="BordersUnder"/>).
     /// </summary>
     private void PaintColumns(TableModel m, uint[] colors, int r, GroupOp into, float top, float bottom, float[] colX, float[] widths, float hs,
-        EarlierBorders? under)
+        EarlierBorders? earlier)
     {
         for (int c = 0; c < m.ColCount; c++)
         {
             if (!CssColor.IsVisible(colors[c]) || m.Grid[r, c] is not { } cell) continue;
             float x = ColumnX(m, c, colX, widths, hs), w = widths[c], t = top, b = bottom;
-            if (under != null)
+            if (earlier is { } under)
             {
                 bool leftEdge = m.Rtl ? c == m.ColCount - 1 : c == 0, rightEdge = m.Rtl ? c == 0 : c == m.ColCount - 1;
                 if (leftEdge) { x += under.Left; w -= under.Left; }
