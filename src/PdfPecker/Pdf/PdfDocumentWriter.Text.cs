@@ -312,11 +312,11 @@ internal sealed partial class PdfDocumentWriter
         {
             int k = font.KernUnits(text[i - 1], text[i]);
             if (k == 0) continue;
-            WriteTextBytes(b, text.Substring(runStart, i - runStart));
+            WriteTextBytes(b, text.AsSpan(runStart, i - runStart));
             b.Int(-k);
             runStart = i;
         }
-        WriteTextBytes(b, text.Substring(runStart));
+        WriteTextBytes(b, text.AsSpan(runStart));
         b.Ascii("] TJ");
     }
 
@@ -704,7 +704,7 @@ internal sealed partial class PdfDocumentWriter
         var font = subset.Program;
         // Subset fonts are marked with a tag in their name.
         string baseFont = subset.Tag() + "+" + font.PostScriptName;
-        var used = subset.Used().ToList();
+        var used = subset.Used();
 
         Begin(id).Ascii("<< /Type /Font /Subtype /Type0 /BaseFont /").Ascii(baseFont).Ascii(" /Encoding /Identity-H /DescendantFonts [")
             .Int(id + 1).Ascii(" 0 R] /ToUnicode ").Int(id + 4).Ascii(" 0 R >>");
@@ -741,48 +741,52 @@ internal sealed partial class PdfDocumentWriter
         var file = EmbeddedFontFiles.Get(subset, _level);
         WriteStreamObject(id + 3, file.Body, file.Deflated, font.IsCff ? "/Subtype /OpenType" : "/Length1 " + file.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
-        WriteToUnicode(id + 4, used.Select(u => (u.Cid, u.CodePoint, u.Text)).ToList(), oneByte: false);
+        WriteToUnicode(id + 4, used, 0, used.Count, oneByte: false);
     }
 
     /// <summary>
-    /// Writes a ToUnicode CMap for the codes of a font: two-byte CIDs, or the one-byte codes of a Type 3 font. Every drawn
+    /// Writes a ToUnicode CMap for <paramref name="count"/> of a font's used glyphs from <paramref name="first"/> on:
+    /// their two-byte CIDs, or the one-byte codes of a Type 3 font, which count from its first glyph. Every drawn
     /// glyph but .notdef gets an entry, as PDF/A level U and PDF/UA require; the extra glyphs of a shaped cluster map to
     /// an empty string, so extracted text holds the cluster's characters once.
     /// </summary>
-    private void WriteToUnicode(int id, List<(int Code, int CodePoint, string? Text)> used, bool oneByte)
+    private void WriteToUnicode(int id, List<(int Cid, int Gid, int CodePoint, string? Text)> used, int first, int count, bool oneByte)
     {
-        var cmap = new ByteBuffer(256 + used.Count * 16);
+        int end = first + count, mapped = 0;
+        for (int k = first; k < end; k++)
+            if (used[k].CodePoint > 0 || used[k].Text != null) mapped++;
+        // The map is written once and compressed, so its buffer comes from the pool, sized for the lines around the
+        // entries and an entry of one character each.
+        var cmap = ByteBuffer.Rent(512 + mapped * 16);
         cmap.Ascii("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n")
             .Ascii("/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n")
             .Ascii(oneByte ? "<00> <FF>" : "<0000> <FFFF>").Ascii("\nendcodespacerange\n");
-        var mapped = used.Where(u => u.CodePoint > 0 || u.Text != null).ToList();
-        for (int i = 0; i < mapped.Count; i += 100)
+        // A section holds at most 100 entries.
+        for (int k = first, written = 0; written < mapped; k++)
         {
-            int n = Math.Min(100, mapped.Count - i);
-            cmap.Int(n).Ascii(" beginbfchar\n");
-            for (int k = i; k < i + n; k++)
+            int cp = used[k].CodePoint;
+            if (cp <= 0 && used[k].Text == null) continue;
+            if (written % 100 == 0) cmap.Int(Math.Min(100, mapped - written)).Ascii(" beginbfchar\n");
+            cmap.Byte((byte)'<');
+            int code = oneByte ? used[k].Cid - first : used[k].Cid;
+            if (oneByte) cmap.Byte(HexDigits[(code >> 4) & 15]).Byte(HexDigits[code & 15]);
+            else Hex4(cmap, code);
+            cmap.Ascii("> <");
+            if (used[k].Text is { } chars)
+                foreach (char c in chars) Hex4(cmap, c);
+            else if (cp >= 0x10000)
             {
-                cmap.Byte((byte)'<');
-                int code = mapped[k].Code;
-                if (oneByte) cmap.Byte(HexDigits[(code >> 4) & 15]).Byte(HexDigits[code & 15]);
-                else Hex4(cmap, code);
-                cmap.Ascii("> <");
-                int cp = mapped[k].CodePoint;
-                if (mapped[k].Text is { } chars)
-                    foreach (char c in chars) Hex4(cmap, c);
-                else if (cp >= 0x10000)
-                {
-                    cp -= 0x10000;
-                    Hex4(cmap, 0xD800 + (cp >> 10));
-                    Hex4(cmap, 0xDC00 + (cp & 0x3FF));
-                }
-                else Hex4(cmap, cp);
-                cmap.Ascii(">\n");
+                cp -= 0x10000;
+                Hex4(cmap, 0xD800 + (cp >> 10));
+                Hex4(cmap, 0xDC00 + (cp & 0x3FF));
             }
-            cmap.Ascii("endbfchar\n");
+            else Hex4(cmap, cp);
+            cmap.Ascii(">\n");
+            if (++written % 100 == 0 || written == mapped) cmap.Ascii("endbfchar\n");
         }
         cmap.Ascii("endcmap\nCMapName currentdict /CMapResource defineresource pop\nend\nend\n");
         WriteStream(id, cmap.Span, _compress, extraDict: null);
+        cmap.Return();
     }
 
     private const float MarginTextSize = 9f;
@@ -805,7 +809,7 @@ internal sealed partial class PdfDocumentWriter
         b.Ascii("ET\n");
     }
 
-    private static void WriteTextBytes(ByteBuffer b, string text)
+    private static void WriteTextBytes(ByteBuffer b, ReadOnlySpan<char> text)
     {
         b.Byte((byte)'(');
         foreach (char ch in text)

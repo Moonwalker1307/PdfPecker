@@ -161,12 +161,12 @@ internal sealed class GlyphSubset
     /// (CID, original glyph id, code point, characters of a shaped glyph) for every glyph used, in CID order. The code
     /// point is 0 for a shaped glyph, whose characters are empty when it is an extra glyph of its cluster.
     /// </summary>
-    public IEnumerable<(int Cid, int Gid, int CodePoint, string? Text)> Used()
+    public List<(int Cid, int Gid, int CodePoint, string? Text)> Used()
     {
-        var list = new List<(int, int, int, string?)>(Glyphs.Count);
+        var list = new List<(int Cid, int Gid, int CodePoint, string? Text)>(Glyphs.Count);
         for (int i = 0; i < Glyphs.Count; i++)
             list.Add((_keepGids ? Glyphs[i] : i, Glyphs[i], Unicode[i], Unicode[i] == 0 && _texts != null && _texts.TryGetValue(i, out var t) ? t : null));
-        list.Sort((a, b) => a.Item1.CompareTo(b.Item1));
+        list.Sort((a, b) => a.Cid.CompareTo(b.Cid));
         return list;
     }
 

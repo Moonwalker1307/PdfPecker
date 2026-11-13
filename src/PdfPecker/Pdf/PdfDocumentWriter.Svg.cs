@@ -250,7 +250,7 @@ internal sealed partial class PdfDocumentWriter
                 float advance = font.MeasureUnits(text, i, 1) * size / 1000f;
                 if (PlaceOnPath(b, shape, pen + advance / 2, -advance / 2, 0))
                 {
-                    WriteTextBytes(b, text.Substring(i, 1));
+                    WriteTextBytes(b, text.AsSpan(i, 1));
                     b.Ascii(" Tj\n");
                 }
                 pen += advance + shape.CharSpacing;

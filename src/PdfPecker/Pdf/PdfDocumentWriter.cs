@@ -283,13 +283,20 @@ internal sealed partial class PdfDocumentWriter
 
     private readonly struct Placed
     {
-        public readonly DrawOp Op;
+        // A page of a table holds hundreds of these, so the mark for ink overflow, which few ops have, is kept out of
+        // the struct: such an op is held inside an InkMark. That keeps the struct at 16 bytes instead of 24.
+        private readonly DrawOp _op;
         public readonly float Y0, Y1; // clipped vertical extent for split rectangles and lines (flow coordinates)
-        public readonly bool Ink;     // only ink overflow, such as a box shadow, which never keeps a page of its own
-        public Placed(DrawOp op, float y0, float y1, bool ink = false) { Op = op; Y0 = y0; Y1 = y1; Ink = ink; }
+        public Placed(DrawOp op, float y0, float y1, bool ink = false) { _op = ink ? new InkMark(op) : op; Y0 = y0; Y1 = y1; }
+
+        /// <summary>The op to draw.</summary>
+        public DrawOp Op => _op is InkMark mark ? mark.Op : _op;
+
+        /// <summary>Only ink overflow, such as a box shadow, which never keeps a page of its own.</summary>
+        public bool Ink => _op is InkMark;
 
         /// <summary>The same placement, marked as ink overflow.</summary>
-        public Placed AsInk() => new(Op, Y0, Y1, ink: true);
+        public Placed AsInk() => Ink ? this : new(_op, Y0, Y1, ink: true);
 
         /// <summary>True when the items hold something and all of it is ink overflow.</summary>
         public static bool AllInk(List<Placed> items)
@@ -297,6 +304,14 @@ internal sealed partial class PdfDocumentWriter
             foreach (var item in items) if (!item.Ink) return false;
             return items.Count > 0;
         }
+    }
+
+    /// <summary>Holds the op of a <see cref="Placed"/> that is only ink overflow.</summary>
+    private sealed class InkMark : DrawOp
+    {
+        public readonly DrawOp Op;
+        public InkMark(DrawOp op) => Op = op;
+        public override void Offset(float dx, float dy) => throw new NotSupportedException();
     }
 
     /// <summary>The part of a transformed or translucent layer that falls on one page, drawn with the layer's transform and opacity.</summary>
@@ -516,6 +531,7 @@ internal sealed partial class PdfDocumentWriter
 
         var pdf = _out.Span.ToArray();
         _out.Return();
+        _deflated?.Return();
         // The linearized file is written from the finished one, encrypted again with the same keys.
         if (Linearize) pdf = PdfLinearizer.LinearizeOwn(pdf, _crypt, Security?.OwnerPassword ?? Security?.UserPassword, Cancellation);
         _crypt?.Dispose();
