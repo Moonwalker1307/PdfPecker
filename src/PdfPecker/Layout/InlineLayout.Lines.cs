@@ -28,13 +28,15 @@ internal sealed partial class InlineLayout
     private const float MaxLeaderLength = 14400;
     private const int MaxLeaderCopies = 1 << 16;
 
-    private readonly StringBuilder _runText = new(256);
+    // The two builders are made when first used: the layout of a page header, a footer or a table of short cells needs
+    // neither, and a document has one layout per such band.
+    private StringBuilder? _runText;
     private float[] _xs = new float[64];
     private float[] _lineA = new float[32], _lineD = new float[32];
     private float[] _kern = new float[16];
     // The line's last run of text and the chunk that may join it, which line breaking measures shaped (see ContextOf).
     private readonly List<Item> _contextItems = new();
-    private readonly StringBuilder _contextText = new(256);
+    private StringBuilder? _contextText;
     // The extents of the inline boxes aligned to the top or bottom of the line being drawn (see AlignedSubtrees).
     private Dictionary<ComputedStyle, (float A, float D)>? _alignedSubtrees;
 
@@ -731,11 +733,6 @@ internal sealed partial class InlineLayout
         // Right-to-left words are drawn as one run in logical order, which the writer lays out from the right; the
         // visual order of the items is the reverse.
         bool rtlRun = (first.Level & 1) != 0;
-        var sb = _runText.Clear();
-        if (rtlRun)
-            for (int k = end - 1; k >= start; k--) sb.Append(items[k].Source, items[k].Start, items[k].Length);
-        else
-            for (int k = start; k < end; k++) sb.Append(items[k].Source, items[k].Start, items[k].Length);
         float rx = first.RelX;
         float runX = xs[start] + rx, runEnd = xs[end] + rx;
         // An opening bracket trimmed on its left is drawn that much further left, into the space it gave up.
@@ -743,7 +740,7 @@ internal sealed partial class InlineLayout
         if (style.Visible)
         {
             float bl = baseline + TextShift(style, baseline - lineTop, descent) + first.RelY;
-            string text = sb.ToString();
+            string text = RunText(items, start, end, rtlRun);
             float wordSpacing = style.WordSpacing + spaceExtra - letterExtra, letterSpacing = style.LetterSpacing + letterExtra;
             uint color = CssColor.Fade(style.TextFillColor ?? style.Color, style.InlineFade);
             TextOp? op = null;
@@ -760,6 +757,46 @@ internal sealed partial class InlineLayout
             if (style.EmphasisShape != EmphasisShape.None && style.EmphasisMark is { } mark) DrawEmphasisMarks(items, start, end, xs, rx, bl, lineTop, style, mark);
         }
         return end;
+    }
+
+    /// <summary>
+    /// The text of the items from <paramref name="start"/> to <paramref name="end"/>, in logical order. Words and the
+    /// single spaces between them are usually one stretch of the text they were cut from, and a run that is all of that
+    /// text, as most table cells and short paragraphs are, takes it as it is instead of a copy.
+    /// </summary>
+    private string RunText(List<Item> items, int start, int end, bool rtlRun)
+    {
+        // The stretch is found from the first word: spaces are slices of a string of their own.
+        string? source = null;
+        int from = 0, length = 0;
+        for (int n = 0; n < end - start; n++)
+        {
+            var it = items[rtlRun ? end - 1 - n : start + n];
+            if (source == null && it.Kind == ItemKind.Text)
+            {
+                source = it.Source;
+                from = it.Start - length;
+            }
+            length += it.Length;
+        }
+        if (source != null && from == 0 && length == source.Length)
+        {
+            int at = 0;
+            bool same = true;
+            for (int n = 0; n < end - start && same; n++)
+            {
+                var it = items[rtlRun ? end - 1 - n : start + n];
+                same = ReferenceEquals(it.Source, source) ? it.Start == at : source.AsSpan(at, it.Length).SequenceEqual(it.Source.AsSpan(it.Start, it.Length));
+                at += it.Length;
+            }
+            if (same) return source;
+        }
+        var sb = (_runText ??= new StringBuilder(256)).Clear();
+        if (rtlRun)
+            for (int k = end - 1; k >= start; k--) sb.Append(items[k].Source, items[k].Start, items[k].Length);
+        else
+            for (int k = start; k < end; k++) sb.Append(items[k].Source, items[k].Start, items[k].Length);
+        return sb.ToString();
     }
 
     /// <summary>

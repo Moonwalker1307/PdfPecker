@@ -9,7 +9,8 @@ namespace PdfPecker.Layout;
 /// <summary>A slot reserved before an element's content, filled with its background and borders once its size is known.</summary>
 internal class GroupOp : DrawOp
 {
-    private List<DrawOp> _ops = new(2);
+    // The list starts without an array: many groups, such as those of cells and boxes that paint nothing, stay empty.
+    private List<DrawOp> _ops = new();
     private float _laterX, _laterY;
     private bool _later;
 
