@@ -127,18 +127,30 @@ internal sealed class TextOp : DrawOp
     public float WordSpacing, CharSpacing;
     /// <summary>The text is in logical order and drawn right to left (its glyphs reversed).</summary>
     public bool Rtl;
-    /// <summary>The outline (-webkit-text-stroke) in points and 0xAARRGGBB; none when the width is 0.</summary>
-    public float StrokeWidth;
-    public uint StrokeColor;
-    /// <summary>paint-order: stroke, the fill is drawn over the stroke.</summary>
-    public bool StrokeFirst;
     /// <summary>
     /// Drawn upside down about its baseline: a copy, for background-clip: text, of text in a line that a vertical-lr box
     /// flips back.
     /// </summary>
     public bool UpsideDown;
+    // The outline and the font palette, which almost no text has: a document makes an op for every run of text, so
+    // they share one reference here instead of taking room in each op. Copies of the op share it; it is never changed.
+    private Paint? _paint;
+
+    /// <summary>The outline (-webkit-text-stroke) in points and 0xAARRGGBB; none when the width is 0.</summary>
+    public float StrokeWidth => _paint?.StrokeWidth ?? 0;
+    public uint StrokeColor => _paint?.StrokeColor ?? 0;
+    /// <summary>paint-order: stroke, the fill is drawn over the stroke.</summary>
+    public bool StrokeFirst => _paint?.StrokeFirst ?? false;
     /// <summary>font-palette: the palette colour fonts draw the text in; null for each font's own.</summary>
-    public FontPalette? Palette;
+    public FontPalette? Palette => _paint?.Palette;
+
+    private sealed class Paint
+    {
+        public float StrokeWidth;
+        public uint StrokeColor;
+        public bool StrokeFirst;
+        public FontPalette? Palette;
+    }
 
     public TextOp(float x, float baseline, float lineTop, TextFont font, float size, uint color, string text, float wordSpacing, float charSpacing)
     {
@@ -150,11 +162,17 @@ internal sealed class TextOp : DrawOp
     /// <summary>Takes the text outline and the font palette from <paramref name="style"/>.</summary>
     public TextOp WithStroke(ComputedStyle style)
     {
-        Palette = style.FontPalette;
-        if (!(style.TextStrokeWidth > 0)) return this;
-        StrokeWidth = style.TextStrokeWidth;
-        StrokeColor = CssColor.Fade(style.TextStrokeColor ?? style.Color, style.InlineFade);
-        StrokeFirst = style.PaintStrokeFirst;
+        var palette = style.FontPalette;
+        bool stroke = style.TextStrokeWidth > 0;
+        if (palette == null && !stroke) return this;
+        var paint = new Paint { Palette = palette };
+        if (stroke)
+        {
+            paint.StrokeWidth = style.TextStrokeWidth;
+            paint.StrokeColor = CssColor.Fade(style.TextStrokeColor ?? style.Color, style.InlineFade);
+            paint.StrokeFirst = style.PaintStrokeFirst;
+        }
+        _paint = paint;
         return this;
     }
 
