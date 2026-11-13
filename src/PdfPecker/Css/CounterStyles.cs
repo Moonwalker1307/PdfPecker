@@ -311,12 +311,18 @@ internal sealed class CounterStyle
 /// </summary>
 internal sealed class CounterStyles
 {
-    private readonly Dictionary<string, CounterStyle> _styles;
+    // Built on first use, so that a document without list markers or counters does not pay for the predefined table.
+    private static readonly Lazy<Dictionary<string, CounterStyle>> PredefinedStyles = new(BuildPredefined);
 
-    private CounterStyles(Dictionary<string, CounterStyle> styles) => _styles = styles;
+    // Null in the predefined set, which reads the shared table.
+    private readonly Dictionary<string, CounterStyle>? _own;
+
+    private CounterStyles(Dictionary<string, CounterStyle>? styles) => _own = styles;
+
+    private Dictionary<string, CounterStyle> Styles => _own ?? PredefinedStyles.Value;
 
     /// <summary>The predefined styles alone.</summary>
-    public static readonly CounterStyles Predefined = new(BuildPredefined());
+    public static readonly CounterStyles Predefined = new(null);
 
     /// <summary>The predefined styles and the document's rules; rules are given in source order, so a later one with a name wins.</summary>
     public static CounterStyles From(IReadOnlyList<CounterStyleRule> rules)
@@ -324,7 +330,7 @@ internal sealed class CounterStyles
         if (rules.Count == 0) return Predefined;
         var byName = new Dictionary<string, CounterStyleRule>(StringComparer.Ordinal);
         foreach (var r in rules) byName[r.Name] = r;
-        var set = new CounterStyles(new Dictionary<string, CounterStyle>(Predefined._styles, StringComparer.Ordinal));
+        var set = new CounterStyles(new Dictionary<string, CounterStyle>(Predefined.Styles, StringComparer.Ordinal));
         var built = new Dictionary<string, CounterStyle?>(StringComparer.Ordinal);
         foreach (var name in byName.Keys) set.Define(name, byName, built);
         return set;
@@ -350,7 +356,7 @@ internal sealed class CounterStyles
         if (style == null) return null;
         style.Name = name;
         style.Owner = this;
-        _styles[name] = style;
+        Styles[name] = style;
         return style;
     }
 
@@ -369,18 +375,18 @@ internal sealed class CounterStyles
     }
 
     private CounterStyle? FindStyle(string name)
-        => _styles.TryGetValue(name, out var s) ? s : _styles.TryGetValue(name.ToLowerInvariant(), out s) && IsPredefinedName(name) ? s : null;
+        => Styles.TryGetValue(name, out var s) ? s : Styles.TryGetValue(name.ToLowerInvariant(), out s) && IsPredefinedName(name) ? s : null;
 
-    private static bool IsPredefinedName(string name) => Predefined._styles.ContainsKey(name.ToLowerInvariant());
+    private static bool IsPredefinedName(string name) => Predefined.Styles.ContainsKey(name.ToLowerInvariant());
 
     /// <summary>Whether this set has a style of exactly this name.</summary>
-    public bool IsDefined(string name) => _styles.ContainsKey(name);
+    public bool IsDefined(string name) => Styles.ContainsKey(name);
 
     /// <summary>The style with this name; decimal when there is none, as the spec says for an unknown name.</summary>
     public CounterStyle Get(string name)
     {
         if (TryGet(name, out var style)) return style;
-        return _styles["decimal"];
+        return Styles["decimal"];
     }
 
     /// <summary>
@@ -399,7 +405,7 @@ internal sealed class CounterStyles
             return true;
         }
         if (!IsIdent(v)) return false;
-        style = FindStyle(v) ?? _styles["decimal"];
+        style = FindStyle(v) ?? Styles["decimal"];
         return true;
     }
 
