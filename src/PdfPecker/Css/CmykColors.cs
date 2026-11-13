@@ -45,7 +45,9 @@ internal sealed class CmykColors
 
     [ThreadStatic] private static CmykColors? t_current;
 
-    private static readonly HashSet<uint> NamedValues = new(CssColor.NamedValues);
+    // Built for the first device-cmyk() colour of the process, not when the type is first touched: every conversion
+    // makes a registry, and few documents have a CMYK colour.
+    private static readonly Lazy<HashSet<uint>> NamedValues = new(() => new HashSet<uint>(CssColor.NamedValues));
 
     private readonly Dictionary<uint, Cmyk> _byFallback = new();
     private readonly Dictionary<Cmyk, uint> _byColor = new();
@@ -109,7 +111,7 @@ internal sealed class CmykColors
                         int r = r0 + dr, g = g0 + dg, b = b0 + db;
                         if ((uint)r > 255 || (uint)g > 255 || (uint)b > 255) continue;
                         uint candidate = (uint)(r << 16 | g << 8 | b);
-                        if (_byFallback.ContainsKey(candidate) || NamedValues.Contains(candidate)) continue;
+                        if (_byFallback.ContainsKey(candidate) || NamedValues.Value.Contains(candidate)) continue;
                         free = candidate;
                         return true;
                     }
