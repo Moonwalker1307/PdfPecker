@@ -111,6 +111,17 @@ renderer.RenderPage(0, new ImageOptions { Dpi = 150 }).Save("page1.png");
 
 The conversion methods are static and thread-safe, so you can convert many documents in parallel. The few instance types are `FontCollection` and `PdfRenderer`, which can be shared by parallel work, and `StreamingPdfMerger`, which is not thread-safe: it builds one output and is used from one thread at a time.
 
+Two settings in the calling project matter more than anything in the library:
+
+- **Server garbage collection for conversions on many threads.** A conversion allocates a few hundred kilobytes to a
+  few megabytes, so on many cores the garbage collector sets the pace. ASP.NET Core apps use the server collector
+  already; a console app or worker service gets the workstation collector unless its project file has
+  `<ServerGarbageCollector>true</ServerGarbageCollector>`. On an 18-core machine that gave nine times the documents
+  per second.
+- **ReadyToRun for processes that make one PDF and exit.** Nearly all of the first conversion in a process is the
+  runtime compiling the library's code. Publishing the app with `<PublishReadyToRun>true</PublishReadyToRun>` compiles
+  it ahead of time, and the first PDF is ready about two and a half times sooner. Later conversions are unaffected.
+
 ## Fluent API
 
 [PdfPecker.Fluent](https://www.nuget.org/packages/PdfPecker.Fluent) builds the same PDFs from C# code instead of HTML,
