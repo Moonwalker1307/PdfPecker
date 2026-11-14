@@ -33,6 +33,17 @@ public class SvgForeignObjectTests
     }
 
     [Fact]
+    public void An_inline_svg_with_blocks_in_a_foreign_object_stays_in_its_line()
+    {
+        // The div is the SVG's drawing, not a block of the paragraph: the svg stays beside the text before it, and the
+        // line does not break around it, as in Chrome.
+        var pdf = HtmlToPdf.Convert("<p style='margin:0;font:20px sans-serif'>Text <svg width='100' height='40'><foreignObject width='100' height='40'>" +
+                                    "<div style='height:40px;background:#f00'></div></foreignObject></svg> after</p>", NoMargins);
+        Color(255, 0, 0, At(pdf, 100, 20));
+        Assert.Single(PdfText.Extract(pdf).Trim().Split('\n'));
+    }
+
+    [Fact]
     public void Content_is_clipped_to_the_foreign_object()
     {
         var pdf = Svg("<foreignObject x='0' y='0' width='100' height='100'><div style='width:300px;height:300px;background:#00f'></div></foreignObject>");

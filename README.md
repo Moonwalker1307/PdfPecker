@@ -234,7 +234,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 ## Features
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables (collapsed borders also from `col` and `colgroup`; rows and
-  columns with `visibility: collapse` leave), floats with `shape-outside`, `clip-path` shapes (also `rect()`,
+  columns with `visibility: collapse` leave), floats with `shape-outside` (and `float` and `clear` with `inline-start` and `inline-end`, on the right in
+  right-to-left text, as in Chrome), `clip-path` shapes (also `rect()`,
   `xywh()` and `shape()`, whose lines, curves and arcs take percentages of the box, also in `shape-outside`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for heights and
   their limits), percentage heights inside flex items resolved as in Chrome (stretched items, and items flexed from a
   length basis in a column whose container has only a `min-height`, as card and label layouts use), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders, backgrounds,
@@ -244,7 +245,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   `column-wrap` for rows of columns down the page, each row kept whole on one page as Chrome prints it), gap decorations (`column-rule` and
   `row-rule` in grid and flex containers too, with lists and `repeat()`, `rule-break`, `rule-inset`,
   `rule-visibility-items` and `rule-overlap`, cut where a grid or flex container breaks across pages),
-  positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
+  CSS painting order (a block's background goes under the text of the blocks before it that reaches into it, such as a
+  line pulled up by a negative margin or one taller than its box, as in Chrome), positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers; translucent stops blend premultiplied, as in Chrome), `contrast-color()` (black or white text, whichever reads better on a brand colour, as in Chrome), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
   media and container queries, `@scope` (scope roots, limits and proximity, as in Chrome), logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
@@ -258,7 +260,7 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
   text, as in Chrome), images and gradients in `::before` and `::after` content, alternative text after `/` in `content`
   (`content: "★" / "Favourite"`, read in place of the content in tagged PDFs, and empty for decoration), inline SVG (with
-  percentage coordinates and sizes, as in Bootstrap's placeholder images, `cx`, `cy`, `r`, `rx`, `ry`, `x`, `y`, `width`, `height`, `d: path()` and `stop-color` set from style sheets, HTML in `<foreignObject>`, text placed character by character with lists of `x`, `y`, `dx`, `dy` and `rotate`, and icons drawn
+  percentage coordinates and sizes, as in Bootstrap's placeholder images, `cx`, `cy`, `r`, `rx`, `ry`, `x`, `y`, `width`, `height`, `d: path()` and `stop-color` set from style sheets, HTML in `<foreignObject>` (also blocks such as a `div`, in an svg that stays in its line of text), text placed character by character with lists of `x`, `y`, `dx`, `dy` and `rotate`, and icons drawn
   with `<use>` from a sprite of symbols that is itself hidden, in the `currentColor` where they are used, as in Bootstrap's icon sprites; lengths in mm, cm, in, pt and em; nested `<svg>` and `<symbol>` viewports with `preserveAspectRatio` and clipping; also CSS `transform` with `transform-box` and
   `transform-origin` on SVG elements, such as a gauge needle turning about its own centre, and `vector-effect: non-scaling-stroke`
   for hairlines in a scaled chart, though markers still scale) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
