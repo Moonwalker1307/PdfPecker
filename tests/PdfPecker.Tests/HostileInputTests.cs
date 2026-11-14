@@ -2579,6 +2579,21 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Rendering_a_form_with_very_many_fields_to_draw_stays_bounded()
+    {
+        // The renderer lays out every field the form asks it to draw, at some tens of microseconds each, so a small file
+        // with the most fields the form reader takes would spend seconds on them before the first page.
+        var widgets = Enumerable.Range(0, 60_000)
+            .Select(i => $"<< /Type /Annot /Subtype /Widget /Parent 4 0 R /Rect [{i % 500} {i % 700} {i % 500 + 100} {i % 700 + 20}] >>").ToList();
+        var kids = string.Concat(Enumerable.Range(6, widgets.Count).Select(i => i + " 0 R "));
+        var pdf = FormPdf($"<< /FT /Tx /T (t) /Ff 4096 /DA (/Helv 0 Tf 0 g) /V (a value that wraps over lines) /Kids [{kids}] >>", widgets);
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Single(Bounded(() => PdfToImage.Convert(pdf, new ImageOptions { Width = 100 })));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"{watch.Elapsed}");
+    }
+
+    [Fact]
     public void Long_field_names_repeated_over_many_kids_stay_bounded()
     {
         // Each kid's fully qualified name repeats its parent's, so a two-megabyte name over a thousand kids made two

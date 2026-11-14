@@ -25,6 +25,12 @@ internal sealed partial class PdfFormEditor
     private const int MaxFields = 100_000;
     private const int MaxDepth = 32;
 
+    /// <summary>
+    /// The most widgets the renderer draws appearances for. Real forms have a few hundred; each takes some tens of
+    /// microseconds to lay out, so a hostile file with the full <see cref="MaxFields"/> would take seconds per document.
+    /// </summary>
+    private const int MaxViewerWidgets = 20_000;
+
     // Each field's name repeats its parents' names, so a long name over many kids grows with depth times breadth; past
     // this many characters in all, the rest of the fields are left out.
     private const int MaxFieldNameChars = 8 * 1024 * 1024;
@@ -44,6 +50,7 @@ internal sealed partial class PdfFormEditor
     private readonly List<PdfRef> _pages = new();
     private readonly Dictionary<int, int> _widgetPage = new(); // widget object number -> page index
     private readonly CancellationToken _cancel;
+    private bool _forViewer;
 
     private PdfFormEditor(PdfFile file, CancellationToken cancel)
     {
@@ -96,6 +103,107 @@ internal sealed partial class PdfFormEditor
             // An unsigned, unencrypted file is written out again so that earlier values do not stay in its old revision.
             var rewritten = PdfRewriter.Write(Open(updated, null), null, options.CreationDate);
             return rewritten.Span.ToArray();
+        }
+    }
+
+    /// <summary>
+    /// The appearances a viewer draws for form fields that have none of their own, or for every text and choice field
+    /// when the form asks viewers to draw them (/NeedAppearances), as fill tools that set only the values do. The key is
+    /// the widget's object number. The objects an appearance refers to that exist only in the overlay are made direct,
+    /// so the renderer can draw it from the unchanged file. Null when the document has no form or nothing to draw.
+    /// </summary>
+    internal static Dictionary<int, PdfStream>? ViewerAppearances(PdfFile file, CancellationToken cancel)
+    {
+        if (file.GetDict(file.Catalog, "AcroForm") is not { } acroForm || file.GetArray(acroForm, "Fields") is not { Count: > 0 }) return null;
+        try
+        {
+            var editor = new PdfFormEditor(file, cancel);
+            return editor.DrawForViewer();
+        }
+        catch (Exception ex) when (ex is InvalidDataException or InvalidCastException or IndexOutOfRangeException or ArgumentException
+            or InvalidOperationException or NullReferenceException or PdfFormatException)
+        {
+            // A damaged form leaves the widgets as they are, which draws what the file itself stores.
+            SwallowedErrors.Record(ex);
+            return null;
+        }
+    }
+
+    private Dictionary<int, PdfStream>? DrawForViewer()
+    {
+        _forViewer = true;
+        bool needAll = R(AcroForm?["NeedAppearances"]) is PdfBool { Value: true };
+        var drawnWidgets = new List<PdfRef>();
+        _fallback = null;
+        _fallbackData = null;
+        foreach (var f in _fields)
+        {
+            _cancel.ThrowIfCancellationRequested();
+            // Past the limit a field keeps what the file stores, as all fields did before the renderer drew any.
+            if (drawnWidgets.Count + f.Widgets.Count > MaxViewerWidgets) continue;
+            var kind = Kind(f);
+            if (kind is PdfFormFieldType.Text or PdfFormFieldType.ComboBox or PdfFormFieldType.ListBox)
+            {
+                if (!needAll && f.Widgets.All(w => R(D(R(w) as PdfDict, "AP")?["N"]) is PdfStream)) continue;
+                DrawField(f, null);
+                drawnWidgets.AddRange(f.Widgets);
+            }
+            else if (kind == PdfFormFieldType.CheckBox)
+            {
+                // A check box that is on but has no appearance at all shows a check mark, as viewers draw it.
+                string? value = (Inherited(f.Ref, "V") as PdfName)?.Value;
+                foreach (var w in f.Widgets)
+                {
+                    if (R(w) is not PdfDict wd || R(wd["AP"]) != null) continue;
+                    string? state = Nm(wd, "AS") ?? value;
+                    if (state == null || state == "Off") continue;
+                    AddCheckAppearance(Edit(w), state);
+                    drawnWidgets.Add(w);
+                }
+            }
+        }
+        _fallback?.Finish(this);
+        if (drawnWidgets.Count == 0) return null;
+
+        var result = new Dictionary<int, PdfStream>();
+        foreach (var w in drawnWidgets)
+        {
+            if (!_changed.TryGetValue(w.Num, out var c) || c.Obj is not PdfDict wd) continue;
+            var normal = R(D(wd, "AP")?["N"]);
+            if (normal is PdfDict states and not PdfStream)
+            {
+                string? state = Nm(wd, "AS");
+                normal = state != null ? R(states[state]) : null;
+            }
+            if (normal is PdfStream stream && Direct(stream, 0) is PdfStream direct) result[w.Num] = direct;
+        }
+        return result.Count > 0 ? result : null;
+    }
+
+    /// <summary>A copy of <paramref name="o"/> with every reference to an overlay object replaced by that object.</summary>
+    private PdfObject Direct(PdfObject o, int depth)
+    {
+        if (depth > MaxDepth) return PdfNull.Instance;
+        switch (o)
+        {
+            case PdfRef r when _changed.TryGetValue(r.Num, out var c):
+                return Direct(c.Obj, depth + 1);
+            case PdfStream s:
+            {
+                var entries = new Dictionary<string, PdfObject>(StringComparer.Ordinal);
+                foreach (var (k, v) in s.Entries) entries[k] = Direct(v, depth + 1);
+                return new PdfStream(entries, s.RawData);
+            }
+            case PdfDict d:
+            {
+                var copy = new PdfDict(new Dictionary<string, PdfObject>(StringComparer.Ordinal));
+                foreach (var (k, v) in d.Entries) copy.Entries[k] = Direct(v, depth + 1);
+                return copy;
+            }
+            case PdfArray a:
+                return new PdfArray(a.Items.Select(i => Direct(i, depth + 1)).ToList());
+            default:
+                return o;
         }
     }
 
@@ -152,8 +260,10 @@ internal sealed partial class PdfFormEditor
 
     private void Put(PdfRef r, PdfObject o) => _changed[r.Num] = (r.Gen, o);
 
-    private static PdfStream FlateStream(Dictionary<string, PdfObject> entries, ReadOnlySpan<byte> data)
+    private PdfStream FlateStream(Dictionary<string, PdfObject> entries, ReadOnlySpan<byte> data)
     {
+        // Appearances made only for the renderer are drawn at once and never written, so compressing them is wasted.
+        if (_forViewer) return new PdfStream(entries, data.ToArray());
         using var ms = new MemoryStream();
         using (var z = new ZLibStream(ms, CompressionLevel.Optimal, leaveOpen: true)) z.Write(data);
         entries["Filter"] = PdfName.Get("FlateDecode");

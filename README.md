@@ -397,6 +397,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   renders a page straight into a buffer of yours as grey, RGB or RGBA pixels, sized by `GetPixelSize`, for OCR and image
   processing. Comments that carry no appearance of their own (notes, highlights, underlines, strike-outs, squiggly
   lines, shapes, lines with their arrowheads, ink and free text) are drawn from their properties, as viewers draw them.
+  Filled-in form fields show their values when the form asks the viewer to draw them (`NeedAppearances`, as LibreOffice
+  and many fill tools write) or when they have no appearance at all, in images, PDF to HTML and extracted text.
   Older Taiwanese and Japanese fonts that build their characters with TrueType instructions (MingLiU, PMingLiU, DFKai-SB
   and other DynaLab fonts) run those instructions, as FreeType does, so their characters come out whole.
   [More](https://pdfpecker.net/docs/pdf-to-image/)
