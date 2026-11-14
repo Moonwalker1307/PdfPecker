@@ -454,6 +454,8 @@ internal sealed partial class ComputedStyle
     public uint? ColumnRuleColor { get => _containers.ColumnRuleColor; set { if (_containers.ColumnRuleColor != value) Containers.ColumnRuleColor = value; } }
     public bool ColumnSpanAll { get => _containers.ColumnSpanAll; set { if (_containers.ColumnSpanAll != value) Containers.ColumnSpanAll = value; } }
     public bool ColumnFillAuto { get => _containers.ColumnFillAuto; set { if (_containers.ColumnFillAuto != value) Containers.ColumnFillAuto = value; } }
+    public Length? ColumnHeight { get => _containers.ColumnHeight; set => Containers.ColumnHeight = value; }
+    public ColumnWrap ColumnWrap { get => _containers.ColumnWrap; set { if (_containers.ColumnWrap != value) Containers.ColumnWrap = value; } }
     public int LineClamp { get => _containers.LineClamp; set { if (_containers.LineClamp != value) Containers.LineClamp = value; } }
     public bool LegacyBox { get => _containers.LegacyBox; set { if (_containers.LegacyBox != value) Containers.LegacyBox = value; } }
     public bool BoxVertical { get => _containers.BoxVertical; set { if (_containers.BoxVertical != value) Containers.BoxVertical = value; } }
@@ -491,6 +493,8 @@ internal sealed partial class ComputedStyle
         public uint? ColumnRuleColor;        // null = currentColor
         public bool ColumnSpanAll;           // column-span: all
         public bool ColumnFillAuto;          // column-fill: auto (fill each column in turn) rather than balance
+        public Length? ColumnHeight;         // column-height; null = auto
+        public ColumnWrap ColumnWrap;
         public int LineClamp;                // -webkit-line-clamp / line-clamp: lines shown, then an ellipsis; 0 = none
         // The legacy flexible box (display: -webkit-box) and its -webkit-box- properties, which Chrome lays out as a flex
         // container in place of the flex properties. -webkit-box-direction is inherited, the others are not.

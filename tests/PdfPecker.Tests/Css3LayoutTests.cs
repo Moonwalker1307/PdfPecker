@@ -328,6 +328,65 @@ public class Css3LayoutTests
         Near(375, Box(ops, "#000003").X); Near(0, Box(ops, "#000003").Y);
     }
 
+    // Eight 9pt blocks in rows of two columns, each 18pt tall and 6pt apart: four blocks in each row, as in Chrome.
+    [Theory]
+    [InlineData("columns: 2; column-height: 18pt", 42)]
+    [InlineData("columns: 2 / 18pt", 42)]
+    [InlineData("columns: 2; column-height: 18pt; column-wrap: wrap", 42)]
+    [InlineData("columns: 2; height: 18pt; column-wrap: wrap", 18)] // the box keeps its height; the rows overflow it
+    public void Column_height_wraps_columns_into_rows(string style, float after)
+    {
+        var ops = Layout($"<div style='{style}; column-gap: 0; row-gap: 6pt'>" + Blocks(8) + "</div><p style='margin: 0; font: 8pt/10pt sans-serif'>after</p>");
+        Near(250, Box(ops, "#000002").X); Near(0, Box(ops, "#000002").Y);
+        Near(0, Box(ops, "#000004").X); Near(24, Box(ops, "#000004").Y);
+        Near(0, Box(ops, "#000005").X); Near(33, Box(ops, "#000005").Y);
+        Near(250, Box(ops, "#000006").X); Near(24, Box(ops, "#000006").Y);
+        Near(after, Text(ops, "after").LineTop);
+    }
+
+    [Fact]
+    public void Column_wrap_nowrap_overflows_beside_one_row_as_tall_as_column_height()
+    {
+        var ops = Layout("<div style='columns: 2; column-gap: 0; column-height: 18pt; column-wrap: nowrap'>" + Blocks(7) + "</div>"
+                         + "<p style='margin: 0; font: 8pt/10pt sans-serif'>after</p>");
+        Near(500, Box(ops, "#000004").X); Near(0, Box(ops, "#000004").Y);
+        Near(18, Text(ops, "after").LineTop);
+    }
+
+    [Fact]
+    public void A_box_with_column_height_is_as_tall_as_its_rows_when_its_content_is_short()
+    {
+        var ops = Layout("<div style='columns: 2; column-gap: 0; column-height: 36pt'>" + Blocks(2) + "</div>"
+                         + "<p style='margin: 0; font: 8pt/10pt sans-serif'>after</p>");
+        Near(250, Box(ops, "#000001").X); Near(0, Box(ops, "#000001").Y);
+        Near(36, Text(ops, "after").LineTop);
+    }
+
+    [Fact]
+    public void A_row_of_columns_that_does_not_fit_the_page_starts_the_next()
+    {
+        // The second row would start at 24pt and end at 42pt, past the 30pt page: Chrome moves it whole to the next page.
+        var ops = Layout("<div style='columns: 2; column-gap: 0; column-height: 18pt; row-gap: 6pt'>" + Blocks(8) + "</div>", pageHeight: 30);
+        Near(0, Box(ops, "#000004").X); Near(30, Box(ops, "#000004").Y);
+        Near(250, Box(ops, "#000006").X); Near(30, Box(ops, "#000006").Y);
+    }
+
+    [Fact]
+    public void Column_height_and_column_wrap_parse_as_in_chrome()
+    {
+        Assert.True(CssSupports.Evaluate("(column-height: 100px)"));
+        Assert.True(CssSupports.Evaluate("(column-wrap: wrap)"));
+        var doc = HtmlParser.Parse("<div id=a style='column-height: 10px; column-height: 10%'></div><div id=b style='column-height: 10px; columns: 3'></div>"
+                                   + "<div id=c style='columns: 3 2em / calc(10px + 1em); column-wrap: nowrap'></div>");
+        new StyleResolver(new Stylesheet(), Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var divs = Find(doc, "div").ToList();
+        Near(7.5f, divs[0].Style.ColumnHeight!.Value.Value);  // a percentage is invalid
+        Assert.Null(divs[1].Style.ColumnHeight);              // the shorthand resets it
+        Near(19.5f, divs[2].Style.ColumnHeight!.Value.Value); // 10px + 16px
+        Assert.Equal(3, divs[2].Style.ColumnCount);
+        Assert.Equal(ColumnWrap.NoWrap, divs[2].Style.ColumnWrap);
+    }
+
     // ---- grid ----
 
     [Fact]

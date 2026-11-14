@@ -538,6 +538,10 @@ internal static partial class CssParser
 
     private static void ExpandColumns(string value, LonghandWriter longhands)
     {
+        // columns: <width> || <count> [/ <column-height>]? sets the column height too, back to auto when it is left out.
+        int slash = value.IndexOf('/', StringComparison.Ordinal);
+        longhands.Add("column-height", slash >= 0 ? value[(slash + 1)..].Trim() : "auto");
+        if (slash >= 0) value = value[..slash];
         foreach (var token in Tokens(value.ToLowerInvariant()))
         {
             if (Invariant.TryParseInt(token, out _)) longhands.Add("column-count", token);

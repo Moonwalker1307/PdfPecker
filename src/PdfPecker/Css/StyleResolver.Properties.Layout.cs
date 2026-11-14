@@ -160,4 +160,12 @@ internal sealed partial class StyleResolver
         SetLength(ref width, d.Lower, d.Em, null);
         s.ColumnWidth = width.IsPercent ? Length.Auto : width;
     }
+
+    /// <summary>column-height: auto or a length that is not negative; Chrome takes no percentage.</summary>
+    private void ApplyColumnHeight(ComputedStyle s, in DeclaredValue d)
+    {
+        if (d.Lower == "auto") { s.ColumnHeight = null; return; }
+        var height = Length.Auto;
+        if (SetLength(ref height, d.Lower, d.Em, null, noAuto: true) && !height.IsPercent && height.Value >= 0) s.ColumnHeight = height;
+    }
 }
