@@ -406,6 +406,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   Fonts a PDF names without embedding them are drawn with built-in faces for Latin, Greek and Cyrillic; for other
   characters, such as Chinese, Japanese and Korean, pass fonts of your own in `ImageOptions.Fonts` (a `FontCollection`,
   for example with PdfPecker.Fonts.Cjk).
+  ICC colour profiles (`ICCBased` gray, RGB and CMYK, with matrix or lookup-table profiles such as FOGRA39 or GRACoL)
+  are applied with black point compensation, so press CMYK shows as Acrobat and Chrome show it.
   Older Taiwanese and Japanese fonts that build their characters with TrueType instructions (MingLiU, PMingLiU, DFKai-SB
   and other DynaLab fonts) run those instructions, as FreeType does, so their characters come out whole.
   [More](https://pdfpecker.net/docs/pdf-to-image/)
