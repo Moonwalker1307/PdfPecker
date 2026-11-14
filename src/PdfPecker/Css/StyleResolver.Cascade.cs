@@ -67,6 +67,7 @@ internal sealed partial class StyleResolver
         c.Display = Display.InlineBlock;
         c.Width = c.Height = Length.Auto;
         c.WidthKeyword = SizeKeyword.None;
+        c.WidthCalcSize = c.HeightCalcSize = null;
         c.Stretched = StretchSizes.None;
         return c;
     }

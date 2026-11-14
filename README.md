@@ -269,7 +269,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   property, as in Chrome: `width: attr(data-pct %)`, `color: attr(data-color type(<color>), gray)` or
   `calc(attr(data-v number) * 1mm)` draw bar charts and badges from data attributes, with fallbacks, `::before` reading
   its element's attributes, and no attribute value ever reaching a `url()`. `sibling-index()` and `sibling-count()`
-  work as in Chrome too, for staggered widths, colours that step through a list and tabs that share a row evenly. `if()`
+  work as in Chrome too, for staggered widths, colours that step through a list and tabs that share a row evenly. Math
+  functions go beyond `calc()` as in Chrome: `progress()`, a length or angle divided by another (`calc(1in / 1px)` is
+  96), and `calc-size()`, as in `width: calc-size(fit-content, size + 2em)`. `if()`
   chooses a value from `style()` of a custom property, `media()` or `supports()`, such as
   `border-color: if(style(--status: overdue): red; else: green)`, as in Chrome (whose `media()` in `if()` still asks
   about the screen when it prints). Custom functions defined with `@function` work as in Chrome:

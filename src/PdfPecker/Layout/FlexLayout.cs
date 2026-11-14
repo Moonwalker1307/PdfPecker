@@ -653,8 +653,9 @@ internal sealed partial class LayoutEngine
             else if (it.El != null && !st.Width.IsAuto && !it.IsReplaced) borderW = st.Width.Resolve(w) + (st.BorderBox ? 0 : HorizontalFrame(st, w));
             else
             {
-                var (mn, mx) = ItemIntrinsic(it);
+                var (mn, mx) = it.El != null ? OwnIntrinsic(it.El) : ItemIntrinsic(it);
                 borderW = st.WidthKeyword == SizeKeyword.MaxContent ? mx : Math.Min(mx, Math.Max(mn, w - it.Ml - it.Mr));
+                if (it.El != null && !it.IsReplaced && st.WidthCalcSize is { } calcSize) borderW = CalcSizedBorder(calcSize, borderW, HorizontalFrame(st, w), st.BorderBox, w);
             }
             it.Hypo = borderW + it.Ml + it.Mr;
             float h = Measure(it, e, it.Hypo, stretch: false, percentW).Height;
@@ -714,8 +715,13 @@ internal sealed partial class LayoutEngine
             float borderW;
             if (it.El != null && !st.Width.IsAuto && !it.IsReplaced && st.Width.IsPercent) borderW = (percentW[i] = PercentBorderWidth(st, w)).Value;
             else if (it.El != null && !st.Width.IsAuto && !it.IsReplaced) borderW = st.Width.Resolve(w) + (st.BorderBox ? 0 : HorizontalFrame(st, w));
-            else if (st.WidthKeyword == SizeKeyword.MaxContent) borderW = ItemIntrinsic(it).Max;
-            else borderW = Math.Min(ItemIntrinsic(it).Max, Math.Max(ItemIntrinsic(it).Min, w - it.Ml - it.Mr));
+            else
+            {
+                var (mn, mx) = it.El != null ? OwnIntrinsic(it.El) : ItemIntrinsic(it);
+                borderW = st.WidthKeyword == SizeKeyword.MaxContent ? mx : Math.Min(mx, Math.Max(mn, w - it.Ml - it.Mr));
+            }
+            if (it.El != null && st.Width.IsAuto && !it.IsReplaced && st.WidthCalcSize is { } calcSize)
+                borderW = CalcSizedBorder(calcSize, borderW, HorizontalFrame(st, w), st.BorderBox, w);
             float outer = borderW + it.Ml + it.Mr;
             outerW[i] = outer;
             float free = w - outer;
