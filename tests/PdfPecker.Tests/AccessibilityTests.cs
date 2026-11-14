@@ -296,6 +296,15 @@ public class AccessibilityTests
     }
 
     [Fact]
+    public void A_math_element_is_a_formula_with_its_alttext()
+    {
+        var pdf = Tagged("<title>T</title><p>Area: <math alttext='pi r squared'><mi>π</mi><msup><mi>r</mi><mn>2</mn></msup></math></p>",
+            PdfAccessibility.PdfUA1);
+        Assert.Matches(@"/S /Formula /P \d+ 0 R /Alt \(pi r squared\)", pdf);
+        AssertAllContentMarked(Content(pdf));
+    }
+
+    [Fact]
     public void A_table_of_contents_tags_its_list_items_as_entries()
     {
         var pdf = Tagged("""

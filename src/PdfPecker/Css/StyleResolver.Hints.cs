@@ -21,6 +21,12 @@ internal sealed partial class StyleResolver
             for (int i = 0; i < _scratch.Count; i++) Push(TierHint, 0, 0, i, _scratch[i]);
             return;
         }
+        if (Layout.MathElements.IsMathName(e.Name))
+        {
+            MathHints(e);
+            for (int i = 0; i < _scratch.Count; i++) Push(TierHint, 0, 0, i, _scratch[i]);
+            return;
+        }
         switch (e.Name)
         {
             case "video" when !e.EmbedsPicture:
@@ -513,5 +519,27 @@ internal sealed partial class StyleResolver
         else if (v.StartsWith('-') && Invariant.TryParseInt(v.AsSpan(1), out int minus)) size = 3 - minus;
         else if (!Invariant.TryParseInt(v, out size)) size = 3;
         return Math.Clamp(size, 1, 7) switch { 1 => "x-small", 2 => "small", 3 => "medium", 4 => "large", 5 => "x-large", 6 => "xx-large", _ => "48px" };
+    }
+
+    /// <summary>
+    /// MathML's presentational attributes (MathML Core §2.1.3): mathcolor, mathbackground and mathsize, and the
+    /// mathvariant values that are only a font style or weight. The other variants map letters to the Unicode math
+    /// alphabets, which a font rarely has; they are shown as the letters themselves.
+    /// </summary>
+    private void MathHints(Element e)
+    {
+        string? v;
+        if ((v = e.GetAttribute("mathcolor")) != null) Hint("color", v);
+        if ((v = e.GetAttribute("mathbackground")) != null) Hint("background-color", v);
+        if ((v = e.GetAttribute("mathsize")) != null)
+            Hint("font-size", v.Trim() switch { "small" => "80%", "normal" => "100%", "big" => "125%", var size => size });
+        if ((v = e.GetAttribute("mathvariant")) != null)
+        {
+            string variant = v.Trim().ToLowerInvariant();
+            if (variant.Contains("bold", StringComparison.Ordinal)) Hint("font-weight", "bold");
+            if (variant.Contains("italic", StringComparison.Ordinal)) Hint("font-style", "italic");
+            if (variant.Contains("sans-serif", StringComparison.Ordinal)) Hint("font-family", "sans-serif");
+            if (variant == "monospace") Hint("font-family", "monospace");
+        }
     }
 }

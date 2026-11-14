@@ -175,6 +175,7 @@ internal sealed class HtmlParser
         else if (name == "img") _used |= NamesUsed.Img;
         else if (name is "embed" or "object" or "video" or "iframe") _used |= NamesUsed.Embed;
         else if (name == "title") _used |= NamesUsed.Title;
+        else if (name == "math") _used |= NamesUsed.Math;
     }
 
     /// <summary>
@@ -729,4 +730,6 @@ internal enum NamesUsed : byte
     Embed = 8,
     /// <summary>A doctype that puts the document in standards mode rather than quirks mode, such as &lt;!DOCTYPE html&gt;.</summary>
     StandardsMode = 16,
+    /// <summary>math.</summary>
+    Math = 32,
 }

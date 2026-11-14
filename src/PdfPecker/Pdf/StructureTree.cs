@@ -363,6 +363,7 @@ internal sealed class StructureTree
             case "doc-index": return "Index";
             case "doc-toc": return "TOC";
         }
+        if (e.Name == "math") return "Formula";
         if (parent.Type is "TOC" or "TOCI")
         {
             // A list in a table of contents is its entries: a nested list is a table of contents of its own.
@@ -418,6 +419,7 @@ internal sealed class StructureTree
     private static string? AltText(Element e)
     {
         if (e.GetAttribute("alt") is { } alt) return alt; // alt="" marks a decorative image
+        if (e.Name == "math" && e.GetAttribute("alttext") is { } altText) return altText;
         if (e.GetAttribute("aria-label") is { } label) return label;
         if (e.Name == "svg")
             foreach (var c in e.Children)

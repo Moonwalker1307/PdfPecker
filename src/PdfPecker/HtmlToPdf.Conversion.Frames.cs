@@ -24,6 +24,7 @@ public static partial class HtmlToPdf
             _frameDocuments ??= new();
             if (_frameDocuments.TryGetValue((frame, w, h), out var known)) return known;
             var doc = HtmlParser.Parse(html, out var used);
+            if ((used & NamesUsed.Math) != 0) MathElements.Prepare(doc);
             // A frame's body keeps its margin when the srcdoc leaves its tags out, as every browser document's does; only
             // the outer document, a template, lays out a fragment without one.
             if (doc.FindFirst("body") is { } implied) implied.ImpliedBody = false;
