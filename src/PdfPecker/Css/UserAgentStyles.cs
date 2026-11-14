@@ -63,6 +63,9 @@ nobr { white-space: nowrap; }
 bdi, output { unicode-bidi: isolate; }
 bdo { unicode-bidi: isolate-override; }
 img { display: inline; }
+/* A video shows its poster whole; an iframe is a box of 300 by 150 pixels by default, its srcdoc drawn inside. */
+video { object-fit: contain; }
+iframe { display: inline-block; width: 300px; height: 150px; border: 2px inset rgb(238, 238, 238); overflow: hidden; }
 fieldset { margin: 0 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove #c0c0c0; }
 legend { padding: 0 2px; }
 /* Form controls, drawn as Chrome prints them; their values are laid out in pdf-field-value children. */

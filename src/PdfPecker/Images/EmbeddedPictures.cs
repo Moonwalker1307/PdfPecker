@@ -6,7 +6,8 @@ namespace PdfPecker.Images;
 /// Shows the picture an embed or object element points at, as Chrome prints it: an embed's src or an object's data
 /// that loads as a PNG, JPEG, SVG or other picture makes the element an img of that picture, and an object that shows
 /// one no longer shows its fallback content. Other resources (a PDF, a plugin) are not loaded: an embed of one stays
-/// empty and an object of one shows its fallback content.
+/// empty and an object of one shows its fallback content. A video shows its poster image, never its fallback content,
+/// and an iframe's own content is text a browser does not show.
 /// </summary>
 internal static class EmbeddedPictures
 {
@@ -16,6 +17,16 @@ internal static class EmbeddedPictures
         foreach (var c in root.Children)
         {
             if (c is not Element e) continue;
+            if (e.Name is "video" or "iframe")
+            {
+                e.Children.Clear();
+                if (e.Name == "video" && e.GetAttribute("poster") is { } poster && !string.IsNullOrWhiteSpace(poster) && images.LoadAny(poster) != null)
+                {
+                    e.EmbedsPicture = true;
+                    images.Chosen[e] = (poster, 1);
+                }
+                continue;
+            }
             if (e.Name is "embed" or "object" && Picture(e, images) is { } url)
             {
                 e.EmbedsPicture = true;

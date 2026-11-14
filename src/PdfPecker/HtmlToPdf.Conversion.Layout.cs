@@ -243,6 +243,7 @@ public static partial class HtmlToPdf
                 {
                     Context = _context, MaxPages = Math.Max(1, _options.MaxPages), FixedAreaHeight = run.Page.ContentHeight,
                     CanvasRoot = _htmlElement, Tags = _structure, Headings = _headings,
+                    FrameDocument = (_namesUsed & NamesUsed.Embed) != 0 ? FrameDocument : null,
                     Footnotes = _styles.Footnotes.Count == 0 ? null : new FootnoteSetup(_styles.Footnotes.ToArray(), FootnoteArea(run.Name)),
                 };
                 run.Height = run.Engine.Layout(_doc, run.Width);

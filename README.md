@@ -265,7 +265,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   `transform-origin` on SVG elements, such as a gauge needle turning about its own centre, and `vector-effect: non-scaling-stroke`
   for hairlines in a scaled chart, though markers still scale) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
   `image-set()`,
-  shown by `<embed>` and `<object>`, photos turned upright by their EXIF orientation, and `image-rendering: pixelated`
+  shown by `<embed>` and `<object>`, a `<video>`'s poster (a video without one is a black box, as Chrome prints it),
+  an `<iframe srcdoc>` drawn in the frame in its own styles, as its own document (a frame's `src` is not fetched, its
+  web fonts are not loaded, and its text is not tagged in an accessible PDF), photos turned upright by their EXIF orientation, and `image-rendering: pixelated`
   or `crisp-edges` writing enlarged images, such as QR codes and pixel art, with hard pixel edges in every PDF viewer,
   and `object-view-box` cropping a raster image in CSS, as Chrome does), and CSS-only charts such as
   Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Typed `attr()` works in any
