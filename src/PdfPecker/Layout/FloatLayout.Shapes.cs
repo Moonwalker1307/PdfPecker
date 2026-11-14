@@ -85,7 +85,7 @@ internal sealed partial class LayoutEngine
                 var key = (e, w, h, cbW);
                 if (!_shapeRows.TryGetValue(key, out var rows))
                 {
-                    rows = PathRows(shape.PathData!, out int width);
+                    rows = PathRows(shape.PathIn(rw, rh)!, out int width);
                     if (rows != null) rows = rows.WithMargin(Math.Min(MarginPixels(margin), (int)(Math.Max(rows.Count, width) * MathF.Sqrt(2))));
                     _shapeRows[key] = rows;
                 }

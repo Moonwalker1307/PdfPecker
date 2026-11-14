@@ -150,6 +150,30 @@ public class CssEffectTests
     }
 
     [Fact]
+    public void Shape_function_draws_lines_curves_and_arcs()
+    {
+        // shape() of CSS Shapes 2: positions and lengths in the reference box, as Chrome draws them.
+        var curve = Render(Pdf("<div style='width:200px;height:100px;background:teal;clip-path:shape(from 0% 0%, line to 100% 0%, curve to 100% 100% with 50% 50%, line to 0% 100%, close)'></div>"));
+        Near(0, 128, 128, At(curve, 20, 50));
+        White(At(curve, 190, 50));   // the curve bends in towards the middle
+        var arc = Render(Pdf("<div style='width:200px;height:100px;background:teal;clip-path:shape(from 0 0, hline to right, vline by 50px, arc to 0 50px of 100px 50px cw, close)'></div>"));
+        Near(0, 128, 128, At(arc, 100, 90));  // the bottom of the half ellipse
+        White(At(arc, 10, 90));
+        var hole = Render(Pdf("<div style='width:200px;height:100px;background:teal;clip-path:shape(evenodd from 0 0, hline to right, vline to bottom, hline to left, close, move to 50px 25px, hline by 100px, vline by 50px, hline by -100px, close)'></div>"));
+        White(At(hole, 100, 50));
+        Near(0, 128, 128, At(hole, 20, 50));
+    }
+
+    [Theory]
+    [InlineData("shape(from 0 0)")]
+    [InlineData("shape(line to 0 0, close)")]
+    [InlineData("shape(from 0 0, curve to 1px 1px)")]
+    [InlineData("shape(from 0 0, arc to 1px 1px of -1px)")]
+    [InlineData("shape(from 0 0, line by 50%)")]
+    public void Invalid_shape_functions_are_ignored(string value)
+        => Assert.Null(PdfPecker.Css.ClipShape.Parse(value, 12, 12, 6, 8));
+
+    [Fact]
     public void Inset_with_round_corners()
     {
         var img = Render(Pdf("<div style='width:200px;height:100px;background:green;clip-path:inset(10px 20px round 30px)'></div>"));
