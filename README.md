@@ -272,7 +272,10 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   work as in Chrome too, for staggered widths, colours that step through a list and tabs that share a row evenly. `if()`
   chooses a value from `style()` of a custom property, `media()` or `supports()`, such as
   `border-color: if(style(--status: overdue): red; else: green)`, as in Chrome (whose `media()` in `if()` still asks
-  about the screen when it prints). Older CSS works too: the
+  about the screen when it prints). Custom functions defined with `@function` work as in Chrome:
+  `@function --space(--n: 1) { result: calc(var(--n) * 4px) }` then `padding: --space(2) --space(6)`, with default
+  arguments, local custom properties, `{a, b}` list arguments, functions calling functions, `if()` on a parameter and
+  `@media` and `@supports` blocks in the body (parameter and result types are not checked). Older CSS works too: the
   `-webkit-` property names Chrome still takes (`-webkit-transform`, `-webkit-flex`, ...), the legacy
   `display: -webkit-box` and its `-webkit-box-` properties, and the `-webkit-gradient()` and prefixed gradient
   syntaxes. As in browsers, a length without a unit (`width: 200`) counts as pixels only in a page without a doctype;
