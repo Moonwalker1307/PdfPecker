@@ -240,7 +240,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   length basis in a column whose container has only a `min-height`, as card and label layouts use), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders, backgrounds,
   shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
   computes it, for templates that shrink a page to fit), multi-column layout (with `column-span: all` also inside
-  sections and other blocks of the columns, which are split around it as in Chrome), gap decorations (`column-rule` and
+  sections and other blocks of the columns, which are split around it as in Chrome, and `column-height` with
+  `column-wrap` for rows of columns down the page, each row kept whole on one page as Chrome prints it), gap decorations (`column-rule` and
   `row-rule` in grid and flex containers too, with lists and `repeat()`, `rule-break`, `rule-inset`,
   `rule-visibility-items` and `rule-overlap`, cut where a grid or flex container breaks across pages),
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as

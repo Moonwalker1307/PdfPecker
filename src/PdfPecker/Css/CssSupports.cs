@@ -34,7 +34,7 @@ internal static class CssSupports
         "grid-row-gap", "grid-column-gap", "grid", "grid-template", "grid-template-columns", "grid-template-rows",
         "grid-template-areas", "grid-auto-columns", "grid-auto-rows", "grid-auto-flow", "grid-area", "grid-row",
         "grid-column", "grid-column-start", "grid-column-end", "grid-row-start", "grid-row-end", "columns", "column-count",
-        "column-width", "column-rule", "column-rule-width", "column-rule-style", "column-rule-color", "column-span", "column-fill",
+        "column-width", "column-rule", "column-rule-width", "column-rule-style", "column-rule-color", "column-span", "column-fill", "column-height", "column-wrap",
         "row-rule", "row-rule-width", "row-rule-style", "row-rule-color", "rule", "rule-width", "rule-style", "rule-color",
         "column-rule-break", "row-rule-break", "rule-break", "column-rule-visibility-items", "row-rule-visibility-items",
         "rule-visibility-items", "rule-overlap", "rule-inset", "rule-inset-cap", "rule-inset-junction", "rule-inset-start",

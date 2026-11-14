@@ -329,6 +329,10 @@ internal sealed partial class StyleResolver
                 break;
             case "column-span": s.ColumnSpanAll = d.Lower == "all"; break;
             case "column-fill": s.ColumnFillAuto = d.Lower == "auto"; break;
+            case "column-height": ApplyColumnHeight(s, in d); break;
+            case "column-wrap":
+                if (d.Lower is "auto" or "nowrap" or "wrap") s.ColumnWrap = d.Lower switch { "nowrap" => ColumnWrap.NoWrap, "wrap" => ColumnWrap.Wrap, _ => ColumnWrap.Auto };
+                break;
 
             // ---- gap decorations (Properties.Gaps.cs)
             case "row-rule-style":
