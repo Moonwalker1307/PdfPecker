@@ -29,6 +29,10 @@ internal sealed class CMap
     private readonly List<CodespaceRange> _codespace = new();
     private readonly Dictionary<uint, int> _single = new();
     private readonly List<CidRange> _ranges = new();
+    // The ranges sorted by their first code, when there are many and none overlap, for a binary search.
+    private CidRange[]? _sortedRanges;
+    // The CMap this one is built on (usecmap): codes this one does not map are looked up there.
+    private CMap? _parent;
     private readonly Dictionary<uint, string> _unicode = new();
     private int _unicodeEntries, _unicodeChars;
 
@@ -38,12 +42,14 @@ internal sealed class CMap
 
     public bool IsIdentity { get; private set; }
     public bool Vertical { get; private set; }
+    private bool _wmodeSet;
 
     public static CMap Identity(bool vertical) => new() { IsIdentity = true, Vertical = vertical };
 
     /// <summary>Reads the next code from <paramref name="s"/>.</summary>
     public uint NextCode(ReadOnlySpan<byte> s, ref int pos, out int length)
     {
+        if (_codespace.Count == 0 && _parent != null) return _parent.NextCode(s, ref pos, out length);
         if (_codespace.Count == 0)
         {
             length = Math.Min(DefaultCodeBytes, s.Length - pos);
@@ -84,28 +90,75 @@ internal sealed class CMap
     public int ToCid(uint code)
     {
         if (_single.TryGetValue(code, out int cid)) return cid;
-        foreach (var range in _ranges)
+        if (_sortedRanges != null)
         {
-            if (code >= range.Low && code <= range.High) return range.FirstCid + (int)(code - range.Low);
+            int lo = 0, hi = _sortedRanges.Length - 1;
+            while (lo <= hi)
+            {
+                int mid = (lo + hi) >>> 1;
+                var range = _sortedRanges[mid];
+                if (code < range.Low) hi = mid - 1;
+                else if (code > range.High) lo = mid + 1;
+                else return range.FirstCid + (int)(code - range.Low);
+            }
         }
+        else
+        {
+            foreach (var range in _ranges)
+            {
+                if (code >= range.Low && code <= range.High) return range.FirstCid + (int)(code - range.Low);
+            }
+        }
+        if (_parent != null) return _parent.ToCid(code);
         return IsIdentity ? (int)code : 0;
     }
 
-    public string? ToUnicode(uint code) => _unicode.TryGetValue(code, out var s) ? s : null;
+    public string? ToUnicode(uint code) => _unicode.TryGetValue(code, out var s) ? s : _parent?.ToUnicode(code);
 
-    public static CMap? Parse(byte[] data, PdfFile? file = null, int depth = 0)
+    /// <summary>
+    /// Reads a CMap. A usecmap of a predefined CMap builds on that one; <paramref name="parents"/> finds it, by default
+    /// among the library's predefined CMaps.
+    /// </summary>
+    public static CMap? Parse(byte[] data, Func<string, CMap?>? parents = null)
     {
         var map = new CMap();
         try
         {
-            map.ParseInto(data);
+            map.ParseInto(data, parents ?? PredefinedCMaps.Get);
         }
         catch (Exception ex) when (ex is PdfFormatException or IndexOutOfRangeException or ArgumentException)
         {
             // A damaged CMap keeps the mappings read so far.
             SwallowedErrors.Record(ex);
         }
+        map.IndexRanges();
         return map;
+    }
+
+    /// <summary>A CMap that maps nothing itself and builds on <paramref name="parent"/>, for an embedded CMap's /UseCMap.</summary>
+    public static CMap Over(CMap parent, byte[]? data)
+    {
+        var map = data != null ? Parse(data) ?? new CMap() : new CMap();
+        if (map._parent == null && !map.IsIdentity)
+        {
+            map._parent = parent;
+            if (!map._wmodeSet) map.Vertical = parent.Vertical;
+        }
+        return map;
+    }
+
+    // Predefined CMaps have thousands of ranges, which a linear search per glyph would walk; they never overlap, so a
+    // binary search finds the same range. A CMap whose ranges overlap keeps the first match, as before.
+    private const int MinRangesToIndex = 16;
+
+    private void IndexRanges()
+    {
+        if (_ranges.Count < MinRangesToIndex) return;
+        var sorted = _ranges.ToArray();
+        Array.Sort(sorted, (a, b) => a.Low.CompareTo(b.Low));
+        for (int i = 1; i < sorted.Length; i++)
+            if (sorted[i].Low <= sorted[i - 1].High) return;
+        _sortedRanges = sorted;
     }
 
     // The operands before an operator; only the last two are ever looked at (for "/WMode 1 def" and "/Name usecmap").
@@ -129,7 +182,7 @@ internal sealed class CMap
         public void Clear() => this = default;
     }
 
-    private void ParseInto(byte[] data)
+    private void ParseInto(byte[] data, Func<string, CMap?> parents)
     {
         var lexer = new PdfLexer(data);
         var operands = new OperandWindow();
@@ -154,7 +207,7 @@ internal sealed class CMap
                     operands.Push(OperandKind.Other);
                     break;
                 case TokenKind.Keyword:
-                    Keyword(lexer, in operands);
+                    Keyword(lexer, in operands, parents);
                     operands.Clear();
                     break;
             }
@@ -168,7 +221,7 @@ internal sealed class CMap
         }
     }
 
-    private void Keyword(PdfLexer lexer, in OperandWindow operands)
+    private void Keyword(PdfLexer lexer, in OperandWindow operands, Func<string, CMap?> parents)
     {
         if (lexer.KeywordIs("begincodespacerange")) ReadCodespace(lexer);
         else if (lexer.KeywordIs("begincidrange")) ReadCidRange(lexer);
@@ -177,17 +230,26 @@ internal sealed class CMap
         else if (lexer.KeywordIs("beginbfrange")) ReadBfRange(lexer);
         else if (lexer.KeywordIs("usecmap"))
         {
-            // Only the Identity parents are known; a CMap built on one maps unlisted codes to themselves.
+            // A CMap built on Identity maps unlisted codes to themselves; one built on another predefined CMap looks them
+            // up there.
             if (operands.LastKind == OperandKind.Name && operands.LastName!.StartsWith("Identity", StringComparison.Ordinal))
             {
                 IsIdentity = true;
-                Vertical = operands.LastName.EndsWith("-V", StringComparison.Ordinal);
+                if (!_wmodeSet) Vertical = operands.LastName.EndsWith("-V", StringComparison.Ordinal);
+            }
+            else if (operands.LastKind == OperandKind.Name && _parent == null && parents(operands.LastName!) is { } parent)
+            {
+                _parent = parent;
+                if (!_wmodeSet) Vertical = parent.Vertical;
             }
         }
         else if (lexer.KeywordIs("def"))
         {
             if (operands.PreviousKind == OperandKind.Name && operands.PreviousName == "WMode" && operands.LastKind == OperandKind.Integer)
+            {
                 Vertical = operands.LastInteger == 1;
+                _wmodeSet = true;
+            }
         }
     }
 
