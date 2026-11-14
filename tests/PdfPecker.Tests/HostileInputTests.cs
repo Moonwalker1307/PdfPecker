@@ -5086,6 +5086,19 @@ public class PatternTileCacheTests
         FixturePdf.AssertAt(img, Patterns - 5, Patterns - 5, 0, 128, 0);
         Assert.True(peak < 256L << 20, $"the renderer retained {peak >> 20} MB");
     }
+
+    [Theory]
+    [InlineData("min=-1e308 max=1e308 step=1e-300")]
+    [InlineData("min=1e308 max=-1e308 value=Infinity step=NaN")]
+    [InlineData("min=0 max=1 step=1e-320 value=0.3")]
+    [InlineData("min=-1.7976931348623157e308 max=1.7976931348623157e308 value=-1e308 step=1e308")]
+    public void Slider_attributes_at_the_ends_of_the_double_range_draw_a_slider(string attributes)
+    {
+        // A slider's fraction and step come from the page's attributes; huge, tiny or non-finite ones must neither
+        // throw nor write a number the CSS parser cannot read.
+        var pdf = HtmlToPdf.Convert($"<input type=range {attributes}><input type=color value='#12345g'>");
+        Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(pdf, 0, 5));
+    }
 }
 
 [CollectionDefinition(Name, DisableParallelization = true)]

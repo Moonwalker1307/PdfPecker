@@ -1412,7 +1412,7 @@ internal sealed partial class LayoutEngine
         if (contentW < 0) contentW = 0;
 
         float used = contentW + frame;
-        ml = UsedMarginLeft(e, availW, used, ml, mr, shrinkToFit || hasWOverride || s.WidthKeyword != SizeKeyword.None || s.WidthCalcSize != null);
+        ml = UsedMarginLeft(e, availW, used, ml, mr, shrinkToFit || ShrinksAsBlock(e) || hasWOverride || s.WidthKeyword != SizeKeyword.None || s.WidthCalcSize != null);
         float bx = x + ml;
 
         int opsStart = _ops.Count;
@@ -1722,6 +1722,7 @@ internal sealed partial class LayoutEngine
     private float FlowContentWidth(Element e, float availW, float ml, float mr, float frame, float frameV, bool shrinkToFit, float? cbH)
     {
         var s = e.Style;
+        shrinkToFit |= ShrinksAsBlock(e);
         float contentW;
         if (!s.Width.IsAuto)
         {
@@ -1777,6 +1778,13 @@ internal sealed partial class LayoutEngine
         }
         return contentW;
     }
+
+    /// <summary>
+    /// Whether a block-level box with an auto width takes the width of its content rather than its containing block's:
+    /// a drop-down, a list box or a button, which Chrome sizes by its content whatever its display, as it does a
+    /// text field by its size attribute.
+    /// </summary>
+    private static bool ShrinksAsBlock(Element e) => e.Control is { Kind: ControlKind.Combo or ControlKind.List or ControlKind.Button };
 
     /// <summary>
     /// A content size put through calc-size(): <c>size</c> is the size in the box-sizing box, as in Chrome, so that
