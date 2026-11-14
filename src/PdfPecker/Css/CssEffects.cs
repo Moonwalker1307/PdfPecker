@@ -7,8 +7,8 @@ namespace PdfPecker.Css;
 internal enum ShapeBox : byte { BorderBox, PaddingBox, ContentBox, MarginBox }
 
 /// <summary>
-/// A clip-path basic shape on an HTML element: inset(), rect(), xywh(), circle(), ellipse(), polygon() or path(), or only
-/// a reference box. Lengths stay unresolved until the reference box is known.
+/// A clip-path basic shape on an HTML element: inset(), rect(), xywh(), circle(), ellipse(), polygon(), path() or shape(),
+/// or only a reference box. Lengths stay unresolved until the reference box is known.
 /// </summary>
 internal sealed class ClipShape
 {
@@ -31,6 +31,7 @@ internal sealed class ClipShape
     private Length[]? _round;                         // inset(... round ...): 8 radii as border-radius stores them
     private InsetForm _form;                          // inset(), rect() or xywh(), which all resolve to an inset
     private PathBuilder? _path;                       // path(): CSS pixels from the reference box's top-left corner
+    private ShapeCommand[]? _commands;                // shape(): the start and the commands, resolved once the box is known
 
     /// <summary>
     /// Parses a clip-path value other than none and url(), or a shape-outside shape, whose reference box defaults to the
@@ -62,6 +63,7 @@ internal sealed class ClipShape
                 "ellipse" => ParseRound(args.ToLowerInvariant(), em, rem, vw, vh, ellipse: true),
                 "polygon" => ParsePolygon(args.ToLowerInvariant(), em, rem, vw, vh),
                 "path" => ParsePath(args),
+                "shape" => ParseShape(args.ToLowerInvariant(), em, rem, vw, vh),
                 _ => null,
             };
             if (shape == null) return null;
@@ -287,7 +289,7 @@ internal sealed class ClipShape
             case ShapeKind.Path:
             {
                 // Path data is in CSS pixels from the box's top-left corner.
-                var src = _path!;
+                var src = PathIn(w, h)!;
                 p.Verbs.AddRange(src.Verbs);
                 for (int i = 0; i + 1 < src.Points.Count; i += 2)
                 {
@@ -369,11 +371,274 @@ internal sealed class ClipShape
         return points;
     }
 
-    /// <summary>The data of a path() shape, in CSS pixels from the reference box's top-left corner.</summary>
-    public PathBuilder? PathData => _path;
+    /// <summary>
+    /// The data of a path() or shape() shape in a w × h point reference box, in CSS pixels from the box's top-left
+    /// corner.
+    /// </summary>
+    public PathBuilder? PathIn(float w, float h)
+    {
+        if (_commands == null) return _path;
+        var p = new PathBuilder();
+        BuildShape(p, _commands, w, h);
+        return p;
+    }
 
     // The control point distance of a quarter circle as a cubic Bézier curve.
     private const float Kappa = 0.5523f;
+
+    // ------------------------------------------------------------------ shape() (CSS Shapes 2 §3.1)
+
+    private enum Command : byte { From, Move, Line, HLine, VLine, Curve, Smooth, Arc, Close }
+
+    // Where a control point is measured from: the default (the reference box for "to", the command's start for "by"),
+    // or the start, the end or the reference box's origin, as "from" says.
+    private enum Anchor : byte { Default, Start, End, Origin }
+
+    /// <summary>One command of a shape(): its end point and, by kind, its control points or its arc.</summary>
+    private sealed class ShapeCommand
+    {
+        public Command Kind;
+        public bool By;
+        // The end point; hline and vline use only the coordinate of their axis.
+        public Length X, Y;
+        public Length[] Controls = Array.Empty<Length>();
+        public Anchor[] Anchors = Array.Empty<Anchor>();
+        public Length Rx, Ry;
+        // One arc radius given: the other is the same, and a percentage is of the box's diagonal over the root of two.
+        public bool OneRadius;
+        public bool Clockwise, Large;
+        public float Rotate;
+    }
+
+    private static ClipShape? ParseShape(string args, float em, float rem, float vw, float vh)
+    {
+        var parts = CssParser.SplitTopLevel(args, ',');
+        if (parts.Count < 2) return null;
+        var shape = new ClipShape { Kind = ShapeKind.Path };
+        var head = CssParser.Tokens(parts[0].Trim());
+        if (head.Count > 0 && head[0] is "evenodd" or "nonzero")
+        {
+            shape.EvenOdd = head[0] == "evenodd";
+            head.RemoveAt(0);
+        }
+        if (head.Count < 2 || head[0] != "from" || !ParsePosition(head.GetRange(1, head.Count - 1), em, rem, vw, vh, out var fx, out var fy))
+            return null;
+        var commands = new ShapeCommand[parts.Count];
+        commands[0] = new ShapeCommand { Kind = Command.From, X = fx, Y = fy };
+        for (int i = 1; i < parts.Count; i++)
+            if ((commands[i] = ParseCommand(CssParser.Tokens(parts[i].Trim()), em, rem, vw, vh)!) == null) return null;
+        shape._commands = commands;
+        return shape;
+    }
+
+    private static ShapeCommand? ParseCommand(List<string> t, float em, float rem, float vw, float vh)
+    {
+        if (t is ["close"]) return new ShapeCommand { Kind = Command.Close };
+        if (t.Count < 3 || t[1] is not ("to" or "by")) return null;
+        var c = new ShapeCommand { By = t[1] == "by" };
+        c.Kind = t[0] switch
+        {
+            "move" => Command.Move, "line" => Command.Line, "hline" => Command.HLine, "vline" => Command.VLine,
+            "curve" => Command.Curve, "smooth" => Command.Smooth, "arc" => Command.Arc,
+            _ => Command.Close,
+        };
+        if (c.Kind == Command.Close) return null;
+        if (c.Kind is Command.HLine or Command.VLine)
+        {
+            if (t.Count != 3) return null;
+            bool h = c.Kind == Command.HLine;
+            float? keyword = c.By ? null : t[2] switch
+            {
+                "center" => 50,
+                "left" or "x-start" when h => 0, "right" or "x-end" when h => 100,
+                "top" or "y-start" when !h => 0, "bottom" or "y-end" when !h => 100,
+                _ => null,
+            };
+            Length v;
+            if (keyword is { } k) v = new Length(k, LengthUnit.Percent);
+            else if (!Len(t[2], em, rem, vw, vh, out v)) return null;
+            if (h) c.X = v;
+            else c.Y = v;
+            return c;
+        }
+        // The end point runs up to "with" (curves) or "of" (arcs).
+        int end = 2;
+        while (end < t.Count && t[end] is not ("with" or "of")) end++;
+        if (!Point(t.GetRange(2, end - 2), c.By, em, rem, vw, vh, out c.X, out c.Y)) return null;
+        var rest = t.GetRange(end, t.Count - end);
+        switch (c.Kind)
+        {
+            case Command.Move or Command.Line:
+                return rest.Count == 0 ? c : null;
+            case Command.Curve or Command.Smooth:
+            {
+                if (rest.Count == 0) return c.Kind == Command.Smooth ? c : null;
+                if (rest[0] != "with") return null;
+                var halves = string.Join(" ", rest.Skip(1)).Split('/');
+                if (halves.Length > (c.Kind == Command.Curve ? 2 : 1)) return null;
+                var controls = new List<Length>(4);
+                var anchors = new List<Anchor>(2);
+                foreach (var half in halves)
+                {
+                    var ct = CssParser.Tokens(half.Trim());
+                    var anchor = Anchor.Default;
+                    if (ct.Count >= 4 && ct[^2] == "from")
+                    {
+                        anchor = ct[^1] switch { "start" => Anchor.Start, "end" => Anchor.End, "origin" => Anchor.Origin, _ => Anchor.Default };
+                        if (anchor == Anchor.Default || ct.Count != 4) return null;
+                        ct.RemoveRange(2, 2);
+                    }
+                    Length x, y;
+                    if (anchor != Anchor.Default)
+                    {
+                        if (!Len(ct[0], em, rem, vw, vh, out x) || !Len(ct[1], em, rem, vw, vh, out y)) return null;
+                    }
+                    // Without "from", a control point of "to" is a position in the box, and of "by" a pair from the start.
+                    else if (!Point(ct, c.By, em, rem, vw, vh, out x, out y)) return null;
+                    controls.Add(x);
+                    controls.Add(y);
+                    anchors.Add(anchor);
+                }
+                c.Controls = controls.ToArray();
+                c.Anchors = anchors.ToArray();
+                return c;
+            }
+            default:
+            {
+                if (rest.Count < 2 || rest[0] != "of") return null;
+                int i = 1;
+                if (!Len(rest[i++], em, rem, vw, vh, out c.Rx) || c.Rx.Value < 0) return null;
+                if (i < rest.Count && Len(rest[i], em, rem, vw, vh, out var ry))
+                {
+                    if (ry.Value < 0) return null;
+                    c.Ry = ry;
+                    i++;
+                }
+                else (c.Ry, c.OneRadius) = (c.Rx, true);
+                bool sweep = false, size = false, rotate = false;
+                for (; i < rest.Count; i++)
+                {
+                    switch (rest[i])
+                    {
+                        case "cw" or "ccw" when !sweep: (c.Clockwise, sweep) = (rest[i] == "cw", true); break;
+                        case "large" or "small" when !size: (c.Large, size) = (rest[i] == "large", true); break;
+                        case "rotate" when !rotate && i + 1 < rest.Count && CssMath.TryParseAngle(rest[i + 1], out float a) && float.IsFinite(a):
+                            (c.Rotate, rotate) = (a, true);
+                            i++;
+                            break;
+                        default: return null;
+                    }
+                }
+                return c;
+            }
+        }
+    }
+
+    /// <summary>A point of a command: a position in the reference box for "to", a pair of lengths for "by".</summary>
+    private static bool Point(List<string> t, bool by, float em, float rem, float vw, float vh, out Length x, out Length y)
+    {
+        if (!by) return ParsePosition(t, em, rem, vw, vh, out x, out y);
+        x = y = Length.Zero;
+        return t.Count == 2 && Len(t[0], em, rem, vw, vh, out x) && Len(t[1], em, rem, vw, vh, out y);
+    }
+
+    /// <summary>Draws a shape() into <paramref name="p"/> in CSS pixels, for a w × h point reference box.</summary>
+    private static void BuildShape(PathBuilder p, ShapeCommand[] commands, float w, float h)
+    {
+        const float Px = 1 / 0.75f;
+        float diagonal = MathF.Sqrt((w * w + h * h) / 2);
+        float sx = 0, sy = 0, cx = 0, cy = 0;          // the subpath's start and the current point, in pixels
+        float lastX = 0, lastY = 0;                    // the last curve's second control point, for smooth
+        // What the last command was: 1 a cubic curve, 2 a quadratic one. As in SVG, a smooth cubic mirrors only a cubic's
+        // control point and a smooth quadratic only a quadratic's; otherwise the control point is the current point.
+        int last = 0;
+        foreach (var c in commands)
+        {
+            float ex = cx, ey = cy;
+            if (c.Kind != Command.Close)
+            {
+                float dx = c.X.Resolve(w) * Px, dy = c.Y.Resolve(h) * Px;
+                if (c.Kind == Command.HLine) ex = c.By ? cx + dx : dx;
+                else if (c.Kind == Command.VLine) ey = c.By ? cy + dy : dy;
+                else (ex, ey) = c.By ? (cx + dx, cy + dy) : (dx, dy);
+            }
+            (float X, float Y) Control(int i)
+            {
+                float x = c.Controls[2 * i].Resolve(w) * Px, y = c.Controls[2 * i + 1].Resolve(h) * Px;
+                return c.Anchors[i] switch
+                {
+                    Anchor.Start => (cx + x, cy + y),
+                    Anchor.End => (ex + x, ey + y),
+                    Anchor.Origin => (x, y),
+                    _ => c.By ? (cx + x, cy + y) : (x, y),
+                };
+            }
+            int curve = 0;
+            switch (c.Kind)
+            {
+                case Command.From or Command.Move:
+                    p.MoveTo(ex, ey);
+                    (sx, sy) = (ex, ey);
+                    break;
+                case Command.Line or Command.HLine or Command.VLine:
+                    p.LineTo(ex, ey);
+                    break;
+                case Command.Curve when c.Anchors.Length == 2:
+                {
+                    var (x1, y1) = Control(0);
+                    var (x2, y2) = Control(1);
+                    p.CurveTo(x1, y1, x2, y2, ex, ey);
+                    (lastX, lastY, curve) = (x2, y2, 1);
+                    break;
+                }
+                case Command.Curve:
+                {
+                    var (qx, qy) = Control(0);
+                    Quadratic(p, cx, cy, qx, qy, ex, ey);
+                    (lastX, lastY, curve) = (qx, qy, 2);
+                    break;
+                }
+                case Command.Smooth:
+                {
+                    // The first control point mirrors the last curve's second one about the current point.
+                    int kind = c.Anchors.Length == 1 ? 1 : 2;
+                    float rx = last == kind ? 2 * cx - lastX : cx, ry = last == kind ? 2 * cy - lastY : cy;
+                    curve = kind;
+                    if (kind == 1)
+                    {
+                        var (x2, y2) = Control(0);
+                        p.CurveTo(rx, ry, x2, y2, ex, ey);
+                        (lastX, lastY) = (x2, y2);
+                    }
+                    else
+                    {
+                        Quadratic(p, cx, cy, rx, ry, ex, ey);
+                        (lastX, lastY) = (rx, ry);
+                    }
+                    break;
+                }
+                case Command.Arc:
+                {
+                    float arx, ary;
+                    if (c.OneRadius) arx = ary = c.Rx.Resolve(diagonal) * Px;
+                    else (arx, ary) = (c.Rx.Resolve(w) * Px, c.Ry.Resolve(h) * Px);
+                    ArcConverter.Append(p, cx, cy, arx, ary, c.Rotate, c.Large, c.Clockwise, ex, ey);
+                    break;
+                }
+                case Command.Close:
+                    p.Close();
+                    (ex, ey) = (sx, sy);
+                    break;
+            }
+            (cx, cy, last) = (ex, ey, curve);
+        }
+    }
+
+    private static void Quadratic(PathBuilder p, float x0, float y0, float qx, float qy, float x, float y)
+    {
+        const float TwoThirds = 2f / 3;
+        p.CurveTo(x0 + TwoThirds * (qx - x0), y0 + TwoThirds * (qy - y0), x + TwoThirds * (qx - x), y + TwoThirds * (qy - y), x, y);
+    }
 
     private static void Ellipse(PathBuilder p, float cx, float cy, float rx, float ry)
     {
