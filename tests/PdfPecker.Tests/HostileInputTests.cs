@@ -86,6 +86,29 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_tag_of_many_thousands_of_attributes_parses_in_linear_time()
+    {
+        // Each attribute was checked against all the ones before it for a duplicate: 300,000 attributes on one tag, a
+        // 3 MB document, took minutes. The first of two attributes of the same name still counts.
+        string html = "<div a=first " + string.Join(" ", Enumerable.Range(0, 300_000).Select(i => $"a{i}=x")) + " a=second>x</div>";
+        var doc = Bounded(() => Html.HtmlParser.Parse(html));
+        var div = doc.FindFirst("div")!;
+        Assert.Equal(300_001, div.Attributes.Count);
+        Assert.Equal("first", div.GetAttribute("a"));
+        Assert.Equal("x", div.GetAttribute("a299999"));
+    }
+
+    [Fact]
+    public void Attribute_selectors_on_a_tag_of_many_attributes_take_linear_time()
+    {
+        // Every attribute selector looked the attribute up in the element's list: 40,000 selectors against a tag of
+        // 300,000 attributes took about half a minute and ignored cancellation, as one element's style is not cancelled.
+        string html = "<style>" + string.Concat(Enumerable.Range(0, 40_000).Select(i => $"[b{i}]{{color:red}}")) + "[a5]{color:#00f}</style>"
+            + "<p " + string.Join(" ", Enumerable.Range(0, 300_000).Select(i => $"a{i}=x")) + ">x</p>";
+        Assert.NotEmpty(Bounded(() => HtmlToPdf.Convert(html)));
+    }
+
+    [Fact]
     public void A_head_opened_again_and_again_stays_linear()
     {
         // Head content after </head> opens the head again; that must not move the children it already has each time.

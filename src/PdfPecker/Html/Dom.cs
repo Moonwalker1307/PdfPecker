@@ -85,6 +85,7 @@ internal sealed class Element : Node
         public int FootnoteIndex = -1;
         public Element? FootnoteBody;
         public Layout.FormControl? Control;
+        public Dictionary<string, string>? AttributeIndex;
         public string? AltText;
         public bool EmbedsPicture;
         public float GeneratedResolution = 1;
@@ -218,20 +219,43 @@ internal sealed class Element : Node
 
     public Element(string name) => Name = name;
 
+    // An element with more attributes than this finds them through an index: every selector that names an attribute
+    // looks it up, so a tag of many thousands of them, matched against a style sheet of many such selectors, would
+    // otherwise take time with the product of their numbers.
+    private const int ListedAttributes = 16;
+
     public string? GetAttribute(string name)
     {
         var attrs = Attributes;
+        if (attrs.Count > ListedAttributes) return AttributeIndex().GetValueOrDefault(name);
         for (int i = 0; i < attrs.Count; i++)
             if (attrs[i].Key == name) return attrs[i].Value;
         return null;
     }
 
+    // The first attribute of a name is the one that counts, as in the list.
+    private Dictionary<string, string> AttributeIndex()
+    {
+        if (Rare.AttributeIndex is { } index) return index;
+        index = new Dictionary<string, string>(_attributes!.Count, StringComparer.Ordinal);
+        foreach (var (key, value) in _attributes) index.TryAdd(key, value);
+        return Rare.AttributeIndex = index;
+    }
+
     public bool HasAttribute(string name) => GetAttribute(name) != null;
 
-    public void AddAttribute(string name, string value) => (_attributes ??= new(2)).Add(new KeyValuePair<string, string>(name, value));
+    public void AddAttribute(string name, string value)
+    {
+        (_attributes ??= new(2)).Add(new KeyValuePair<string, string>(name, value));
+        _rare?.AttributeIndex?.TryAdd(name, value);
+    }
 
     /// <summary>Gives an element without attributes a copy of the list, which takes no more room than they need.</summary>
-    public void SetAttributes(List<KeyValuePair<string, string>> attributes) => _attributes = new(attributes);
+    public void SetAttributes(List<KeyValuePair<string, string>> attributes)
+    {
+        _attributes = new(attributes);
+        if (_rare != null) _rare.AttributeIndex = null;
+    }
 
     public void AppendChild(Node node)
     {
