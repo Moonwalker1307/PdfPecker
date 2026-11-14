@@ -244,7 +244,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   `column-wrap` for rows of columns down the page, each row kept whole on one page as Chrome prints it), gap decorations (`column-rule` and
   `row-rule` in grid and flex containers too, with lists and `repeat()`, `rule-break`, `rule-inset`,
   `rule-visibility-items` and `rule-overlap`, cut where a grid or flex container breaks across pages),
-  positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
+  CSS painting order (a block's background goes under the text of the blocks before it that reaches into it, such as a
+  line pulled up by a negative margin or one taller than its box, as in Chrome), positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers; translucent stops blend premultiplied, as in Chrome), `contrast-color()` (black or white text, whichever reads better on a brand colour, as in Chrome), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
   media and container queries, `@scope` (scope roots, limits and proximity, as in Chrome), logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
