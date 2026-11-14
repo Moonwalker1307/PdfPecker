@@ -1168,6 +1168,16 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Iframes_nested_in_srcdoc_stay_bounded()
+    {
+        // Each level of srcdoc is a whole document, laid out again for every layout of the level around it: frames
+        // inside frames are drawn only a few levels deep.
+        string html = "<p>x</p>";
+        for (int i = 0; i < 8; i++) html = "<iframe srcdoc=\"" + System.Net.WebUtility.HtmlEncode(Repeat(html, 2)) + "\"></iframe>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Svg_path_numbers_after_a_closepath_end_the_path()
     {
         // A closepath reads no numbers, so numbers after it were taken as one more closepath that never moved past

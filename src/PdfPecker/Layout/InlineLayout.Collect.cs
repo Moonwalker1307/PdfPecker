@@ -77,7 +77,7 @@ internal sealed partial class InlineLayout
                 AddAtomicBreaks(st, e, before, at);
                 return;
             }
-            case "img" or "embed" or "object" when e.IsPicture:
+            case "img" or "embed" or "object" or "video" when e.IsPicture:
             {
                 int at = st.Items.Count;
                 AddInlineImage(st, e, s, href);
