@@ -68,7 +68,7 @@ internal static class Targets
         "background-image:image-set(url(a) 1e-30x, 'b' 1e30dpi type('image/png'), linear-gradient(red,blue) 2x)",
         "list-style-image:-webkit-image-set(url(a) 0.0001dppx, url(b) 1e9dpcm)", "content:image-set(url(a) 2x type(\"((\"))",
         ":valid", ":invalid", ":open", "<input pattern=\"(a+)+\\1(((\" value=aaaa required>", "<input type=number min=1e308 step=1e-308 value=-1e308>",
-        "<input type=week value=2026-W53 min=0001-W01><input type=time min=23:00 max=01:00 value=12:00:00.12>", "<input type=radio name=r required>", "field-sizing:content", "<textarea style=\"field-sizing:content;max-width:1px\" rows=999999>",
+        "<input type=week value=2026-W53 min=0001-W01><input type=time min=23:00 max=01:00 value=12:00:00.12>", "<input type=radio name=r required>", "field-sizing:content", "content:\"x\" / attr(a) \"y\"", "content:open-quote / open-quote", "<textarea style=\"field-sizing:content;max-width:1px\" rows=999999>",
         "<header data-sticky-pdf-header data-sticky-pdf-page=a>{page} of {total-pages}</header>", "<div data-sticky-pdf-first-footer data-sticky-pdf-page=\" a \">",
         "<section style=\"page:a\">", "<section style=\"page:b;break-before:page\">", "data-sticky-pdf-page=b",
         "{section-page:a}", "{section-page:%zz", "{section-page:}}", "<section id=a>",
@@ -109,7 +109,7 @@ internal static class Targets
 
     private static readonly string[] CssWords =
     {
-        "var(--a)", "calc(", "min(", "max(", "clamp(", "!important", "@media print {", "@media (min-width: 1px) {", "@supports (display:grid) {", "@page {", "@font-face {", "@keyframes a {",
+        "var(--a)", "calc(", "min(", "max(", "clamp(", "progress(", "calc-size(fit-content, size * 2 + 1px)", "calc-size(auto, ", "/ 1px", "!important", "@media print {", "@media (min-width: 1px) {", "@supports (display:grid) {", "@page {", "@font-face {", "@keyframes a {",
         "@import url(x);", "@container (min-width:1px) {", "@counter-style a {", "@font-feature-values a { @styleset { b: 1 2 20; } @character-variant { c: 99 9; } }", "font-variant-alternates:styleset(b) character-variant(c) historical-forms", "@font-palette-values --a { font-family: Fz; base-palette: 99; override-colors: 0 red, 65535 blue }", "font-palette:--a", "font-palette:dark", ":is(", ":not(", ":where(", ":has(", ":nth-child(2n+1 of p)", "::before", "::after", "::marker",
         "*", ">", "~", "+", "|", "[a=b i]", "url(data:,)", "linear-gradient(", "radial-gradient(", "conic-gradient(", "repeating-linear-gradient(", "-webkit-gradient(", "-webkit-", "rotate(", "matrix(",
         "attr(a)", "attr(data-x type(*), ", "attr(data-x px, ", "attr(class type(<length>+))", "attr(id raw-string)", "attr(title number)", "type(<color>)", "width:attr(data-x %)", "counter(a)", "counters(a, \".\")", "content:", "display:grid", "grid-template-columns: repeat(999999, 1fr)", "grid-column: 1 / span 99999", "flex: 1e9",
@@ -124,7 +124,7 @@ internal static class Targets
         "counter(page, lower-roman)", "white-space-collapse:", "box-decoration-break: clone", "hyphenate-limit-lines: 1",
         "bleed: 3mm", "bleed: -1e30px", "marks: crop cross", "marks: cross",
         "@page :nth(2n+1) {", "@page :nth(1 of chapter) {", ":nth(-n+3)",
-        "sibling-index()", "sibling-count()", "calc(sibling-index() * 1e9px)", "if(", "media(print): ", "supports(display: grid): ", "style(--a: 1): ",
+        "sibling-index()", "sibling-count()", "calc(sibling-index() * 1e9px)", "if(", "@function --f(--a, --b: 1px) { --l: var(--a); result: var(--l) var(--b); @media print { result: 2px } } ", "--f(", "--f({1px, 2px})", "media(print): ", "supports(display: grid): ", "style(--a: 1): ",
         "; else: ", "contrast-color(", "contrast-color(currentcolor)", "device-cmyk(", "device-cmyk(0 0 0 1)", "device-cmyk(0, 1, 1, 0)", "object-view-box: ", "inset(10% 1e9px)", "xywh(0 0 100% 100%)",
         "box-shadow: inset 0 0 9px red",
     };

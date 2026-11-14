@@ -2116,6 +2116,20 @@ internal sealed partial class LayoutEngine
 
     internal bool _measuring;
 
+    // The widths of boxes with calc-size() before the calculation, which sizes the box itself; Intrinsic gives what the
+    // box contributes to its container, after it.
+    private Dictionary<Element, (float Min, float Max)>? _calcSizeBases;
+
+    /// <summary>
+    /// The min-content and max-content widths that size the box itself: <see cref="Intrinsic"/>, except for a box with
+    /// a calc-size() width, whose calculation then applies to the size these give.
+    /// </summary>
+    private (float Min, float Max) OwnIntrinsic(Element e)
+    {
+        var result = Intrinsic(e);
+        return e.Style.WidthCalcSize != null && _calcSizeBases != null && _calcSizeBases.TryGetValue(e, out var basis) ? basis : result;
+    }
+
     /// <summary>Min-content and max-content border-box widths of a block-level element.</summary>
     internal (float Min, float Max) Intrinsic(Element e)
     {
@@ -2174,6 +2188,13 @@ internal sealed partial class LayoutEngine
             // A box as wide as its min-content (or max-content) width contributes that width for both.
             float w = s.WidthKeyword == SizeKeyword.MinContent ? result.Item1 : result.Item2;
             result = (w, w);
+        }
+        if (s.WidthCalcSize is { } calcSize && s.Width.IsAuto && !e.IsReplaced)
+        {
+            // calc-size() changes the width the keyword gives, so it changes what the box contributes; a percentage
+            // in it counts as zero here, as percentages of the containing block do in intrinsic sizes.
+            (_calcSizeBases ??= new())[e] = result;
+            result = (CalcSizedBorder(calcSize, result.Item1, frame, s.BorderBox, 0), CalcSizedBorder(calcSize, result.Item2, frame, s.BorderBox, 0));
         }
         else if (s.Width.IsAuto && s.AspectRatio > 0 && !e.IsReplaced)
         {

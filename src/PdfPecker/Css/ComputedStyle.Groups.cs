@@ -551,6 +551,8 @@ internal sealed partial class ComputedStyle
     public string[]? ContainerNames { get => _rare.ContainerNames; set { if (_rare.ContainerNames != value) Rare.ContainerNames = value; } }
     public Length ControlWidth { get => _rare.ControlWidth; set => Rare.ControlWidth = value; }
     public SizeKeyword WidthKeyword { get => _rare.WidthKeyword; set { if (_rare.WidthKeyword != value) Rare.WidthKeyword = value; } }
+    public CalcSizeAdjust? WidthCalcSize { get => _rare.WidthCalcSize; set { if (_rare.WidthCalcSize != value) Rare.WidthCalcSize = value; } }
+    public CalcSizeAdjust? HeightCalcSize { get => _rare.HeightCalcSize; set { if (_rare.HeightCalcSize != value) Rare.HeightCalcSize = value; } }
     public StretchSizes Stretched { get => _rare.Stretched; set { if (_rare.Stretched != value) Rare.Stretched = value; } }
     public bool ColumnBreakBefore { get => _rare.ColumnBreakBefore; set { if (_rare.ColumnBreakBefore != value) Rare.ColumnBreakBefore = value; } }
     public bool ColumnBreakAfter { get => _rare.ColumnBreakAfter; set { if (_rare.ColumnBreakAfter != value) Rare.ColumnBreakAfter = value; } }
@@ -618,6 +620,8 @@ internal sealed partial class ComputedStyle
         public Length ControlWidth = Length.Auto;   // a text field's own width, used while width is auto and not stretched
         public bool FieldSizingContent;             // field-sizing: content: a form control takes the size of its value
         public SizeKeyword WidthKeyword;            // width: min-content, max-content or fit-content; Width is then auto
+        public CalcSizeAdjust? WidthCalcSize;       // width: calc-size() of auto or a WidthKeyword: how it changes that size
+        public CalcSizeAdjust? HeightCalcSize;      // height: calc-size() of auto or fit-content: how it changes the content's height
         public StretchSizes Stretched;              // the sizes set to stretch, which become lengths once the box's margins are known
         public bool ColumnBreakBefore, ColumnBreakAfter; // break-before/after: column, which only breaks inside a multicol
         public bool AvoidColumnBreakBefore, AvoidColumnBreakAfter, AvoidColumnBreakInside; // avoid-column: only inside a multicol

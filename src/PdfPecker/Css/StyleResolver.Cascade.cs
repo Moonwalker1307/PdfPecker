@@ -67,6 +67,7 @@ internal sealed partial class StyleResolver
         c.Display = Display.InlineBlock;
         c.Width = c.Height = Length.Auto;
         c.WidthKeyword = SizeKeyword.None;
+        c.WidthCalcSize = c.HeightCalcSize = null;
         c.Stretched = StretchSizes.None;
         return c;
     }
@@ -342,7 +343,9 @@ internal sealed partial class StyleResolver
         var value = _attrUsed && d.UsesAttr
             ? CssVariables.Substitute(d.Value, s.CustomProperties, AttrContext(CssAttr.IsGeneratedTextProperty(d.Property)))
             : CssVariables.Substitute(d.Value, s.CustomProperties);
-        // if() goes last, so that its conditions and branches see the values var() and attr() put in.
+        // Custom functions come next, with var() replaced in their arguments, and if() goes last, so that its
+        // conditions and branches see the values var(), attr() and functions put in.
+        if (value != null && _functions != null) value = CssFunctions.Resolve(value, _functions, s.CustomProperties, _media);
         return value == null ? null : CssIf.Resolve(value, s.CustomProperties, _media);
     }
 

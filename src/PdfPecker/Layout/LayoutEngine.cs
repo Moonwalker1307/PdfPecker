@@ -1412,7 +1412,7 @@ internal sealed partial class LayoutEngine
         if (contentW < 0) contentW = 0;
 
         float used = contentW + frame;
-        ml = UsedMarginLeft(e, availW, used, ml, mr, shrinkToFit || ShrinksAsBlock(e) || hasWOverride || s.WidthKeyword != SizeKeyword.None);
+        ml = UsedMarginLeft(e, availW, used, ml, mr, shrinkToFit || ShrinksAsBlock(e) || hasWOverride || s.WidthKeyword != SizeKeyword.None || s.WidthCalcSize != null);
         float bx = x + ml;
 
         int opsStart = _ops.Count;
@@ -1591,6 +1591,9 @@ internal sealed partial class LayoutEngine
             contentH = textarea.Rows * s.LineHeight;
         }
         else if (e.Control is { Multiline: true }) contentH = Math.Max(contentH, s.LineHeight); // an empty one keeps a line
+        // calc-size() of auto: the content's height put through the calculation.
+        if (s.HeightCalcSize is { } calcHeight && s.Height.IsAuto && !hasHOverride && !isImage && !isSvg)
+            contentH = Math.Max(0, CalcSized(calcHeight, contentH, frameV, s.BorderBox, cbH ?? 0));
         // aspect-ratio with an auto height: at least the ratio's height; taller content still makes it grow, except in a
         // flex container, whose content overflows it as in Chrome.
         if (!isImage && !isSvg && RatioHeight(s, contentW, frame, frameV, hasHOverride, cbH) is float ratioH && (contentH < ratioH || s.IsFlex))
@@ -1730,7 +1733,7 @@ internal sealed partial class LayoutEngine
         {
             // min-content, max-content and fit-content size the box by its content, as a shrink-to-fit box is sized,
             // except that max-content may overflow the containing block and min-content wraps at every chance.
-            var (min, max) = Intrinsic(e);
+            var (min, max) = OwnIntrinsic(e);
             contentW = s.WidthKeyword switch
             {
                 SizeKeyword.MinContent => min,
@@ -1752,7 +1755,7 @@ internal sealed partial class LayoutEngine
             // longest word, even in a containing block of no width, such as an empty inline.
             if (shrinkToFit)
             {
-                var (min, max) = Intrinsic(e);
+                var (min, max) = OwnIntrinsic(e);
                 contentW = Math.Min(Math.Max(contentW, min - frame), max - frame);
             }
             // min-height and max-height carry over to the width through the ratio.
@@ -1762,6 +1765,7 @@ internal sealed partial class LayoutEngine
                 contentW = Math.Max(Math.Min(contentW, tmax), tmin);
             }
         }
+        if (s.WidthCalcSize is { } calcSize && s.Width.IsAuto) contentW = CalcSized(calcSize, contentW, frame, s.BorderBox, availW);
         if (!s.MaxWidth.IsAuto)
         {
             float mw = s.MaxWidth.Resolve(availW) - (s.BorderBox ? frame : 0);
@@ -1781,6 +1785,17 @@ internal sealed partial class LayoutEngine
     /// text field by its size attribute.
     /// </summary>
     private static bool ShrinksAsBlock(Element e) => e.Control is { Kind: ControlKind.Combo or ControlKind.List or ControlKind.Button };
+
+    /// <summary>
+    /// A content size put through calc-size(): <c>size</c> is the size in the box-sizing box, as in Chrome, so that
+    /// calc-size(fit-content, size + 10px) adds the same 10px whatever the box-sizing.
+    /// </summary>
+    internal static float CalcSized(CalcSizeAdjust adjust, float content, float frame, bool borderBox, float basis)
+        => borderBox ? adjust.Apply(content + frame, basis) - frame : adjust.Apply(content, basis);
+
+    /// <summary><see cref="CalcSized"/> of a border-box width.</summary>
+    private static float CalcSizedBorder(CalcSizeAdjust adjust, float border, float frame, bool borderBox, float basis)
+        => Math.Max(frame, CalcSized(adjust, border - frame, frame, borderBox, basis) + frame);
 
     /// <summary>
     /// The used left margin of a block box <paramref name="used"/> wide: auto margins share the free space, and in a
