@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using PdfPecker.Pdf;
 using PdfPecker.Rendering.Content;
 using PdfPecker.Rendering.Fonts;
 using PdfPecker.Rendering.Images;
@@ -45,6 +46,9 @@ internal sealed class RenderCache
     private readonly Dictionary<PdfObject, Entry<PdfFunction?>> _functions = new(ReferenceEqualityComparer.Instance);
     private readonly ConcurrentDictionary<GlyphKey, GlyphBitmap> _glyphs = new();
     private int _glyphCount;
+    private readonly object _fieldAppearancesLock = new();
+    private Dictionary<int, PdfStream>? _fieldAppearances;
+    private bool _fieldAppearancesReady;
 
     // A large image that one page draws, such as the scan of a scanned page, goes to a small pool of its own whose
     // least recently drawn entries give way to new ones, until another page draws it too: kept with the others, every
@@ -71,6 +75,26 @@ internal sealed class RenderCache
         _imagePool = new Pool(imageLimit);
         _singlePagePool = new Pool(singlePageImageLimit);
     }
+
+    /// <summary>
+    /// Makes the appearances viewers draw for form fields that have none, or for every field when the form asks for that
+    /// (/NeedAppearances), once per document. It runs in a render scope of its own before the page's, so that no page's
+    /// decode budget pays for the form and every page finds the same appearances.
+    /// </summary>
+    public void PrepareFieldAppearances(PdfFile file, CancellationToken cancel)
+    {
+        if (Volatile.Read(ref _fieldAppearancesReady)) return;
+        lock (_fieldAppearancesLock)
+        {
+            if (_fieldAppearancesReady) return;
+            using (PdfFile.BeginRender(cancel)) _fieldAppearances = PdfFormEditor.ViewerAppearances(file, cancel);
+            Volatile.Write(ref _fieldAppearancesReady, true);
+        }
+    }
+
+    /// <summary>The appearance made for the widget with object number <paramref name="objectNumber"/>, if any.</summary>
+    public PdfStream? FieldAppearance(int objectNumber)
+        => _fieldAppearances != null && _fieldAppearances.TryGetValue(objectNumber, out var stream) ? stream : null;
 
     public PdfFont GetFont(PdfFile file, PdfDict dict, PageCacheUse use)
         => GetOrAdd(_fonts, _fontPool, dict, use, () => (PdfFont.Load(file, dict), 0));

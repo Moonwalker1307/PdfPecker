@@ -31,11 +31,11 @@ internal sealed class FixturePdf
     /// <summary>The object number the next <see cref="Add"/> or <see cref="AddStream"/> call will return.</summary>
     public int NextNumber => _objects.Count + 5;
 
-    public byte[] Build(int width, int height, string content, string resources = "", string pageExtra = "")
+    public byte[] Build(int width, int height, string content, string resources = "", string pageExtra = "", string catalogExtra = "")
     {
         var all = new List<byte[]>
         {
-            Encoding.Latin1.GetBytes("<< /Type /Catalog /Pages 2 0 R >>"),
+            Encoding.Latin1.GetBytes($"<< /Type /Catalog /Pages 2 0 R {catalogExtra}>>"),
             Encoding.Latin1.GetBytes("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
             Encoding.Latin1.GetBytes($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Resources << {resources} >> /Contents 4 0 R {pageExtra} >>"),
             Encoding.Latin1.GetBytes($"<< /Length {content.Length} >>\nstream\n{content}\nendstream"),

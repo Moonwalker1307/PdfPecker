@@ -113,6 +113,7 @@ internal sealed class RenderDocument
         var p = Pages[index];
         var collector = new TextCollector(Take(_spareGlyphs) ?? NewGlyphList(), rules ? Take(_spareRules) ?? new List<PageRule>() : null);
         var r = new PageRenderer(File, _cache, collector, cancel);
+        if (annotations) _cache.PrepareFieldAppearances(File, cancel);
         using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, PageMatrix(p, p.UserUnit, p.UserUnit), annotations);
         Volatile.Write(ref _glyphsPerPage, collector.Glyphs.Count);
         VerticalText.Apply(collector.Glyphs);
@@ -172,6 +173,7 @@ internal sealed class RenderDocument
         var p = Pages[index];
         var collector = new ImageCollector(clips);
         var r = new PageRenderer(File, _cache, collector, cancel);
+        if (annotations) _cache.PrepareFieldAppearances(File, cancel);
         using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, PageMatrix(p, p.UserUnit, p.UserUnit), annotations);
         return collector.Draws;
     }
@@ -218,6 +220,7 @@ internal sealed class RenderDocument
         double sx = scaleX * p.UserUnit, sy = scaleY * p.UserUnit;
         var m = PageMatrix(p, sx, sy);
         var r = new PageRenderer(File, _cache, canvas, cancel);
+        if (annotations) _cache.PrepareFieldAppearances(File, cancel);
         using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, m, annotations);
         if (background != 0) PutOnBackground(canvas.Pixels, background);
         return canvas;

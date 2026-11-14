@@ -988,6 +988,8 @@ internal sealed partial class PageRenderer
                 var state = _file.GetName(annot, "AS");
                 if (state != null) form = _file.Resolve(states[state]) as PdfStream;
             }
+            // A form field the viewer is asked to draw, or one without an appearance, shows the appearance made for it.
+            if (item is PdfRef widgetRef && _cache.FieldAppearance(widgetRef.Num) is { } fieldAppearance) form = fieldAppearance;
             // An annotation with no normal appearance at all is drawn from its own properties, as viewers draw it; one
             // whose appearance states have none for its current state shows nothing.
             if (form == null && normal == null && subtype != null) form = DrawnAppearance(annot, subtype);
