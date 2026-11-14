@@ -24,6 +24,9 @@ internal sealed partial class PdfFont
         var face = StandardFontPack.Face(faceName) ?? StandardFontPack.Face("Sans");
         Source = face;
         if (face == null) return;
+        Substituted = true;
+        SubstituteBold = faceName.Contains("Bold", StringComparison.Ordinal);
+        SubstituteSerif = faceName.StartsWith("Serif", StringComparison.Ordinal);
         _substUnicode = new int[256];
 
         var encoding = baseEncoding ?? (builtin != null ? null : Encodings.Standard);

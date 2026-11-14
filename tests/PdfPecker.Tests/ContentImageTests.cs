@@ -105,4 +105,38 @@ public class ContentImageTests
             new PdfOptions { Accessibility = PdfAccessibility.PdfUA1 });
         PdfTestHelpers.AssertStructurallyValid(pdf);
     }
+
+    [Fact]
+    public void Text_content_with_alternative_text_draws_the_content_as_Chrome_does()
+    {
+        // Before, the "/" made the value invalid, so the star was not drawn at all.
+        var ops = Layout(".a::before { content: '★' / 'Favourite' } .b::after { content: ' (' attr(data-n) ')' / 'number ' attr(data-n) }",
+            "<p class='a'>Item</p><p class='b' data-n='7'>Count</p>");
+        var text = string.Concat(ops.OfType<TextOp>().Select(t => t.Text));
+        Assert.Contains("★", text);
+        Assert.Contains("(7)", text);
+        Assert.DoesNotContain("Favourite", text);
+        Assert.DoesNotContain("number", text);
+    }
+
+    [Fact]
+    public void Alternative_text_must_be_strings_counters_or_attr()
+    {
+        // As in Chrome, a length or a second "/" makes the whole value invalid, so there is no box.
+        var ops = Layout(".a::before { content: 'A' / 3px } .b::before { content: 'B' / 'x' / 'y' }",
+            "<p class='a'>one</p><p class='b'>two</p>");
+        var text = string.Concat(ops.OfType<TextOp>().Select(t => t.Text));
+        Assert.DoesNotContain("A", text);
+        Assert.DoesNotContain("B", text);
+    }
+
+    [Fact]
+    public void Quotes_in_alternative_text_leave_the_quotes_of_the_page_alone()
+    {
+        var ops = Layout("q::before { content: open-quote / open-quote 'quote' } q::after { content: close-quote }",
+            "<p><q>a</q> <q>b</q></p>");
+        var text = string.Concat(ops.OfType<TextOp>().Select(t => t.Text));
+        Assert.Equal(2, text.Count(c => c == '“'));
+        Assert.DoesNotContain("‘", text);
+    }
 }

@@ -54,6 +54,8 @@ internal static partial class PdfImageDecoder
         if (bpc == 8 && isDefault && cs is DeviceRgb) ConvertRgb8(data, w, h, rowBytes, pixels);
         else if (bpc == 8 && isDefault && cs is DeviceGray) ConvertGray8(data, w, h, rowBytes, pixels);
         else if (bpc == 8 && cs is DeviceCmyk && comps == 4) ConvertCmyk8(data, w, h, rowBytes, inverted: decode![0] > decode[1], pixels);
+        else if (bpc == 8 && cs is IccSpace icc && comps == icc.Components && comps > 1 && (isDefault || Inverted(decode!, comps)))
+            ConvertIcc8(data, w, h, rowBytes, icc, inverted: !isDefault, pixels);
         else if (cs is CalSpace cal && comps == 3 && bpc <= 8) ConvertCalRgb(data, w, h, rowBytes, bpc, cal, decode!, pixels);
         else if (comps == 1 && bpc <= 8) ConvertWithLookup(data, w, h, rowBytes, bpc, cs, decode!, pixels);
         else ConvertGeneral(data, w, h, rowBytes, bpc, comps, cs, decode!, pixels);
@@ -98,6 +100,30 @@ internal static partial class PdfImageDecoder
             int complete = Math.Min(w, Math.Max(0, (data.Length - s) / 4));
             if (complete > 0) DeviceCmyk.ConvertSamples(data.AsSpan(s, 4 * complete), inverted, pixels.AsSpan(o, complete));
             pixels.AsSpan(o + complete, w - complete).Fill(OpaqueAlpha);
+        }
+    }
+
+    /// <summary>Whether a Decode array runs from 1 to 0 for every component, as inverted CMYK JPEGs have it.</summary>
+    private static bool Inverted(double[] decode, int comps)
+    {
+        for (int i = 0; i < comps; i++)
+            if (Math.Abs(decode[2 * i] - 1) > 1e-6 || Math.Abs(decode[2 * i + 1]) > 1e-6) return false;
+        return true;
+    }
+
+    private static void ConvertIcc8(byte[] data, int w, int h, int rowBytes, IccSpace icc, bool inverted, uint[] pixels)
+    {
+        int comps = icc.Components;
+        // Missing samples are 0, as in the other conversions.
+        Span<float> zero = stackalloc float[comps];
+        if (inverted) zero.Fill(1);
+        uint missing = icc.ToRgb(zero) | OpaqueAlpha;
+        for (int y = 0; y < h; y++)
+        {
+            int s = y * rowBytes, o = y * w;
+            int complete = Math.Min(w, Math.Max(0, (data.Length - s) / comps));
+            if (complete > 0) icc.ConvertSamples(data.AsSpan(s, comps * complete), inverted, pixels.AsSpan(o, complete));
+            pixels.AsSpan(o + complete, w - complete).Fill(missing);
         }
     }
 

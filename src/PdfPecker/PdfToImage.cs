@@ -94,6 +94,13 @@ public sealed class ImageOptions
     /// <summary>Password for encrypted PDFs (user or owner password). Not needed for PDFs that only restrict permissions.</summary>
     public string? Password { get; set; }
 
+    /// <summary>
+    /// Fonts that draw the characters of fonts a PDF names but does not embed when the built-in stand-ins lack them, such
+    /// as Chinese, Japanese and Korean text. The built-in faces cover Latin, Greek and Cyrillic; without these fonts other
+    /// characters of a font that is not embedded are left out. Default null.
+    /// </summary>
+    public FontCollection? Fonts { get; set; }
+
     /// <summary>Maximum number of pages rendered at the same time when converting several pages. Default: the processor count.</summary>
     public int MaxDegreeOfParallelism { get; set; } = Environment.ProcessorCount;
 
@@ -456,7 +463,7 @@ public sealed class PdfRenderer
         Canvas canvas;
         try
         {
-            canvas = _doc.Render(pageIndex, sx, sy, w, h, premul, options.RenderAnnotations, cancellationToken, reuse);
+            canvas = _doc.Render(pageIndex, sx, sy, w, h, premul, options.RenderAnnotations, cancellationToken, reuse, options.Fonts);
         }
         catch (PdfFormatException ex)
         {

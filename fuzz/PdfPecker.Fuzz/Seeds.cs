@@ -129,6 +129,8 @@ internal sealed class SeedContext
         for (int i = 0; i < pixels.Length; i++) pixels[i] = (byte)(i * 7 + i / 96 * 13);
         yield return ("generated:flate-predictor.pdf", ImagePdf("/FlateDecode", PdfPecker.Images.PdfImage.DeflatePredicted(pixels, 32, 32, 3, out var parms), 32, 32, "/DeviceRGB", 8, "/DecodeParms " + parms));
         yield return ("generated:colour-spaces.pdf", ColourSpacePdf());
+        yield return ("generated:cjk-cmaps.pdf", CjkCMapPdf());
+        yield return ("generated:icc-profiles.pdf", IccProfilePdf());
 
         // Tagged tables with spanned cells, uncompressed so mutations reach the spans and the cells of the structure tree,
         // which the Markdown and structured HTML targets read within a budget of grid positions per page.
@@ -164,6 +166,37 @@ internal sealed class SeedContext
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 10 0 R >>",
             $"<< /Length {cmap.Length} >>\nstream\n{cmap}\nendstream",
         };
+        return UncompressedPdf(objects);
+    }
+
+    /// <summary>
+    /// Fonts that name predefined CJK CMaps, Shift-JIS and UCS-2, and an embedded CMap built on one both with usecmap and
+    /// with /UseCMap, so mutations reach the predefined CMaps' code splitting, their parents and the Unicode fallback.
+    /// </summary>
+    private static byte[] CjkCMapPdf()
+    {
+        const string content = "BT /F1 20 Tf 10 150 Td <41829f88ea> Tj /F2 20 Tf 0 -30 Td <30414e00> Tj /F3 20 Tf 0 -30 Td <829f82a0> Tj ET";
+        const string cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /90ms-RKSJ-H usecmap /WMode 1 def\n"
+            + "1 begincidchar <829f> 1 endcidchar 1 begincidrange <82a0> <82f1> 843 endcidrange endcmap";
+        string Font(int n, string encoding) => $"<< /Type /Font /Subtype /Type0 /BaseFont /MS-Mincho /Encoding {encoding} /DescendantFonts [{n} 0 R] >>";
+        var objects = new[]
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> >>",
+            $"<< /Length {content.Length} >>\nstream\n{content}\nendstream",
+            Font(8, "/90ms-RKSJ-V"),
+            Font(8, "/UniJIS-UCS2-H"),
+            Font(8, "9 0 R"),
+            "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /MS-Mincho /CIDSystemInfo << /Registry (Adobe) /Ordering (Japan1) /Supplement 2 >> "
+                + "/FontDescriptor << /Type /FontDescriptor /FontName /MS-Mincho /Flags 6 /FontBBox [0 -141 1000 859] /ItalicAngle 0 /Ascent 859 /Descent -141 /CapHeight 700 /StemV 80 >> /DW 1000 >>",
+            $"<< /Type /CMap /CMapName /Custom-V /UseCMap /90ms-RKSJ-V /Length {cmap.Length} >>\nstream\n{cmap}\nendstream",
+        };
+        return UncompressedPdf(objects);
+    }
+
+    private static byte[] UncompressedPdf(string[] objects)
+    {
         var sb = new StringBuilder("%PDF-1.7\n");
         var offsets = new List<int>();
         for (int i = 0; i < objects.Length; i++)
@@ -176,6 +209,71 @@ internal sealed class SeedContext
         foreach (int o in offsets) sb.Append(o.ToString("D10", System.Globalization.CultureInfo.InvariantCulture)).Append(" 00000 n \n");
         sb.Append("trailer\n<< /Size ").Append(objects.Length + 1).Append(" /Root 1 0 R >>\nstartxref\n").Append(xref).Append("\n%%EOF\n");
         return Encoding.ASCII.GetBytes(sb.ToString());
+    }
+
+    /// <summary>
+    /// ICCBased fills and an image with uncompressed profiles, for mutations to reach the profile reader: a CMYK lut16
+    /// table and an RGB matrix/TRC profile, whose counts, offsets and grid sizes the reader takes from the file.
+    /// </summary>
+    private static byte[] IccProfilePdf()
+    {
+        static byte[] U16(int v) => new[] { (byte)(v >> 8), (byte)v };
+        static byte[] U32(int v) => new[] { (byte)(v >> 24), (byte)(v >> 16), (byte)(v >> 8), (byte)v };
+        static byte[] Ascii(string s) => Encoding.ASCII.GetBytes(s);
+        static byte[] Profile(string space, string pcs, params (string Tag, byte[] Data)[] tags)
+        {
+            var body = new List<byte>();
+            var table = new List<byte>(U32(tags.Length));
+            foreach (var (tag, data) in tags)
+            {
+                table.AddRange(Ascii(tag).Concat(U32(132 + 12 * tags.Length + body.Count)).Concat(U32(data.Length)));
+                body.AddRange(data);
+                while (body.Count % 4 != 0) body.Add(0);
+            }
+            var header = new byte[128];
+            Ascii(space).CopyTo(header, 16);
+            Ascii(pcs).CopyTo(header, 20);
+            Ascii("acsp").CopyTo(header, 36);
+            var profile = header.Concat(table).Concat(body).ToArray();
+            U32(profile.Length).CopyTo(profile, 0);
+            return profile;
+        }
+        var lut = new List<byte>(Ascii("mft2").Concat(new byte[4]).Concat(new byte[] { 4, 3, 2, 0 }).Concat(new byte[36]).Concat(U16(2)).Concat(U16(2)));
+        for (int i = 0; i < 4; i++) lut.AddRange(U16(0).Concat(U16(65535)));
+        for (int corner = 0; corner < 16; corner++) lut.AddRange(U16(65280 - corner * 3000).Concat(U16(32640 + corner * 500)).Concat(U16(32640 - corner * 700)));
+        for (int i = 0; i < 3; i++) lut.AddRange(U16(0).Concat(U16(65535)));
+        var cmyk = Profile("CMYK", "Lab ", ("A2B0", lut.ToArray()));
+        byte[] Xyz(int x, int y, int z) => Ascii("XYZ ").Concat(new byte[4]).Concat(U32(x)).Concat(U32(y)).Concat(U32(z)).ToArray();
+        var curve = Ascii("curv").Concat(new byte[4]).Concat(U32(3)).Concat(U16(0)).Concat(U16(20000)).Concat(U16(65535)).ToArray();
+        var rgb = Profile("RGB ", "XYZ ", ("rXYZ", Xyz(28581, 14582, 911)), ("gXYZ", Xyz(25239, 46983, 6364)), ("bXYZ", Xyz(9378, 3972, 46799)),
+            ("rTRC", curve), ("gTRC", curve), ("bTRC", curve));
+        const string content = "/C0 cs 0.1 0.6 0.3 0.2 sc 10 10 80 80 re f /C1 cs 0.8 0.2 0.5 sc 100 10 80 80 re f q 180 0 0 80 10 100 cm /Im Do Q";
+        byte[] image = { 0, 0, 0, 0, 255, 0, 0, 0, 0, 255, 128, 0, 0, 0, 0, 255 };
+        var objects = new List<byte[]>
+        {
+            Ascii("<< /Type /Catalog /Pages 2 0 R >>"),
+            Ascii("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            Ascii("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /ColorSpace << /C0 [/ICCBased 5 0 R] /C1 [/ICCBased 6 0 R] >> /XObject << /Im 7 0 R >> >> >>"),
+            Ascii($"<< /Length {content.Length} >>\nstream\n{content}\nendstream"),
+            Ascii($"<< /N 4 /Length {cmyk.Length} >>\nstream\n").Concat(cmyk).Concat(Ascii("\nendstream")).ToArray(),
+            Ascii($"<< /N 3 /Length {rgb.Length} >>\nstream\n").Concat(rgb).Concat(Ascii("\nendstream")).ToArray(),
+            Ascii($"<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /BitsPerComponent 8 /ColorSpace [/ICCBased 5 0 R] /Length {image.Length} >>\nstream\n").Concat(image).Concat(Ascii("\nendstream")).ToArray(),
+        };
+        var pdf = new List<byte>(Ascii("%PDF-1.7\n"));
+        var offsets = new List<int>();
+        for (int i = 0; i < objects.Count; i++)
+        {
+            offsets.Add(pdf.Count);
+            pdf.AddRange(Ascii($"{i + 1} 0 obj\n"));
+            pdf.AddRange(objects[i]);
+            pdf.AddRange(Ascii("\nendobj\n"));
+        }
+        int xref = pdf.Count;
+        var tail = new StringBuilder("xref\n0 ").Append(objects.Count + 1).Append("\n0000000000 65535 f \n");
+        foreach (int o in offsets) tail.Append(o.ToString("D10", System.Globalization.CultureInfo.InvariantCulture)).Append(" 00000 n \n");
+        tail.Append("trailer\n<< /Size ").Append(objects.Count + 1).Append(" /Root 1 0 R >>\nstartxref\n").Append(xref).Append("\n%%EOF\n");
+        pdf.AddRange(Ascii(tail.ToString()));
+        return pdf.ToArray();
     }
 
     /// <summary>Width and height from the header of a binary PBM (P4) file.</summary>
@@ -228,7 +326,7 @@ internal sealed class SeedContext
             + "<div style='display:flex;gap:4px'><div style='flex:1 1 0'>a</div><div style='flex:2'>b</div></div>"
             + "<div style='display:grid;grid-template-columns:1fr 2fr;grid-template-areas:\"a b\"'><p style='grid-area:a'>x</p></div>"
             + "<ul><li>one<ol><li>two<li>three</ol></ul><p style='columns:2;column-gap:10px'>" + string.Concat(Enumerable.Repeat("word ", 80)) + "</p>"
-            + "<form><input type=text name=a value=v><select name=s><option>1<option>2</select><textarea name=t>t</textarea><input type=checkbox checked><input type=radio name=r></form>"
+            + "<form><input type=text name=a value=v><select name=s><option>1<option>2</select><textarea name=t>t</textarea><input type=checkbox checked><input type=radio name=r><input type=range min=0 max=10 step=3 value=7><input type=color value=#336699><select style=display:block><option>b</select></form>"
             + "<p style='float:left;width:30%'>float</p><p style='position:absolute;top:10px;left:5px'>abs</p><h2 style='page-break-before:always'>next</h2>"
             + "<style>.il::first-letter{initial-letter:3}</style><p class=il>Drop cap " + string.Concat(Enumerable.Repeat("word ", 40)) + "</p>"
             + "<picture><source media='print' srcset='a.png 1x, b.png 2x'><img src='c.png' srcset='d.png 40w, e.png 80w' sizes='(max-width: 300px) 50vw, 100px' alt=pic></picture>"));

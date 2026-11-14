@@ -25,14 +25,24 @@ internal sealed partial class PdfFont
         var encodingObject = file.Resolve(dict["Encoding"]);
         if (encodingObject is PdfName encodingName)
         {
-            // Of the predefined CMaps only the Identity ones are built in; the others are read as Identity too, and
-            // the Unicode ones are remembered for text extraction.
-            _cmap = CMap.Identity(encodingName.Value.EndsWith("-V", StringComparison.Ordinal));
-            _unicodeCodes = encodingName.Value.StartsWith("Uni", StringComparison.Ordinal) && (encodingName.Value.Contains("UCS2") || encodingName.Value.Contains("UTF16"));
+            // The Chinese, Japanese and Korean predefined CMaps are Adobe's own; a name the library does not have is read
+            // as Identity. The codes of the Unicode ones are also the text.
+            string name = encodingName.Value;
+            var predefined = name.StartsWith("Identity", StringComparison.Ordinal) ? null : PredefinedCMaps.Get(name);
+            _cmap = predefined ?? CMap.Identity(name.EndsWith("-V", StringComparison.Ordinal));
+            if (predefined != null) _predefinedOrdering = PredefinedCMaps.OrderingOf(name);
+            _unicodeCodes = name.StartsWith("Uni", StringComparison.Ordinal) && (name.Contains("UCS2") || name.Contains("UTF16"));
         }
         else if (encodingObject is PdfStream encodingStream)
         {
-            _cmap = CMap.Parse(file.DecodeStream(encodingStream), file) ?? CMap.Identity(false);
+            var data = file.DecodeStream(encodingStream);
+            // An embedded CMap may name a predefined one it builds on in its dictionary instead of with usecmap.
+            if (file.GetName(encodingStream, "UseCMap") is { } useName && PredefinedCMaps.Get(useName) is { } parent)
+            {
+                _cmap = CMap.Over(parent, data);
+                _predefinedOrdering = PredefinedCMaps.OrderingOf(useName);
+            }
+            else _cmap = CMap.Parse(data) ?? CMap.Identity(false);
         }
         else
         {
@@ -54,8 +64,54 @@ internal sealed partial class PdfFont
         }
         if (file.GetArray(cidFont, "W2") is { } verticalMetrics) ReadVerticalMetrics(file, verticalMetrics);
 
-        if (LoadCidProgram(file, cidFont)) return;
+        var systemInfo = file.GetDict(cidFont, "CIDSystemInfo");
+        _ordering = (file.Resolve(systemInfo?["Registry"]) as PdfString)?.Text == "Adobe"
+            ? (file.Resolve(systemInfo?["Ordering"]) as PdfString)?.Text
+            : null;
+        if (PredefinedCMaps.CidToUnicode(_ordering) == null) _ordering = _predefinedOrdering;
+
+        if (LoadCidProgram(file, cidFont))
+        {
+            if (Source is TrueTypeFont trueType && _cidToGid == null && _predefinedOrdering != null) UseUnicodeCmap(trueType);
+            return;
+        }
         SubstituteCidFont(file, dict, cidFont);
+    }
+
+    /// <summary>The character a code stands for by its CID in the font's Adobe ordering, or -1.</summary>
+    private int OrderingCodePoint(int code)
+    {
+        if (_unicodeCodes) return code is > 0 and <= 0xFFFF && !char.IsSurrogate((char)code) ? code : -1;
+        var map = _cidUnicode ??= PredefinedCMaps.CidToUnicode(_ordering);
+        if (map?.ToUnicode((uint)_cmap!.ToCid((uint)code)) is not { Length: > 0 } text) return -1;
+        return Rune.DecodeFromUtf16(text, out var rune, out _) == OperationStatus.Done ? rune.Value : -1;
+    }
+
+    /// <summary>
+    /// An embedded TrueType font with a predefined CJK CMap and no CIDToGIDMap: its glyphs are not in the order of the
+    /// Adobe CIDs, so they are found through the font's own Unicode cmap, as other readers do. Adobe's orderings give
+    /// their proportional spaces as en and em spaces, which a font may only have as a plain space; a character the
+    /// font lacks shows nothing, since its CID is no glyph of this font.
+    /// </summary>
+    private void UseUnicodeCmap(TrueTypeFont trueType)
+    {
+        var bmp = trueType.GetCmap(3, 1);
+        var full = trueType.GetCmap(3, 10);
+        if (bmp == null && full == null) return;
+        _cidFallbackGid = code =>
+        {
+            int u = OrderingCodePoint(code);
+            int gid = Find(u);
+            if (gid == 0 && u is >= 0x2000 and <= 0x200A) gid = Find(' ');
+            return gid;
+        };
+
+        int Find(int u)
+        {
+            int gid = 0;
+            if (u >= 0 && !(bmp != null && bmp.TryGetValue(u, out gid)) && full != null) full.TryGetValue(u, out gid);
+            return gid;
+        }
     }
 
     /// <summary>The CID a code selects in a CID font, read through the font's CMap; the code itself in other fonts.</summary>
@@ -130,10 +186,15 @@ internal sealed partial class PdfFont
         var face = StandardFontPack.Face(FaceName(mono, serif, bold, italic));
         Source = face;
         if (face == null) return;
+        Substituted = true;
+        SubstituteBold = bold;
+        SubstituteSerif = serif;
         var cmap = _cmap!;
         _cidFallbackGid = code =>
         {
             var text = toUnicode?.ToUnicode((uint)code);
+            if ((text == null || text.Length == 0) && OrderingCodePoint(code) is >= 0 and var u)
+                return face.Lookup(u) is > 0 and var gid ? gid : u is >= 0x2000 and <= 0x200A ? face.Lookup(' ') : 0;
             if (text == null || text.Length == 0)
             {
                 // Identity encodings of Latin fonts often carry the character code itself.

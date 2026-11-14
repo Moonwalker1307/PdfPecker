@@ -107,13 +107,15 @@ internal abstract class ColorSpace
     }
 
     /// <summary>
-    /// [/ICCBased stream]: the profile itself is not applied. The alternate space is used when its component count
-    /// matches /N, and otherwise the device space with N components.
+    /// [/ICCBased stream]: the profile is applied when it is one <see cref="IccProfile"/> reads with /N components.
+    /// Otherwise the alternate space is used when its component count matches /N, and else the device space with N
+    /// components.
     /// </summary>
     private static ColorSpace ParseIccBased(PdfFile file, PdfArray array, PdfDict? resources, int depth)
     {
         var stream = array.Count > 1 ? file.Resolve(array[1]) as PdfStream : null;
         int components = file.GetInt(stream, "N", 3);
+        if (stream != null && components is 1 or 3 or 4 && IccSpace.Create(file.DecodeStream(stream), components) is { } icc) return icc;
         var alternateObj = stream?["Alternate"];
         var alternate = alternateObj != null ? Parse(file, alternateObj, resources, depth + 1) : null;
         if (alternate != null && alternate.Components == components) return alternate;

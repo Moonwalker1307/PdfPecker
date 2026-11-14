@@ -75,6 +75,12 @@ internal sealed partial class StyleResolver
         if (s.Content == null || s.Display == Display.None) return;
         if (s.CounterReset != null || s.CounterSet != null || s.CounterIncrement != null) { _countersUsed = true; ApplyCounters(s, ref scope); }
         var box = new Element(which == PseudoElement.Before ? "::before" : "::after") { Generated = true, Style = s, Parent = host };
+        if (GeneratedContent.AltSlash(s.Content) >= 0)
+        {
+            var alt = GeneratedContent.AltText(s.Content, host, this, s);
+            if (alt == null) return;
+            box.GeneratedAlt = alt;
+        }
         if (GeneratedContent.HasImage(s.Content))
         {
             if (!GenerateWithImages(box, host, s.Content)) return;

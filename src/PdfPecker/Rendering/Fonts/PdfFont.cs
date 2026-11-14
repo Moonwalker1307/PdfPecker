@@ -42,6 +42,17 @@ internal sealed partial class PdfFont
     private readonly Dictionary<int, (double W1, double Vx, double Vy)> _vMetrics = new();
     private CffFont? _cidCff;
     private Func<int, int>? _cidFallbackGid;
+    // The Adobe ordering (Japan1, GB1, CNS1 or Korea1) of a CID font's CIDs, whose map gives a CID's character.
+    private string? _ordering, _predefinedOrdering;
+    private CMap? _cidUnicode;
+
+    /// <summary>
+    /// Whether a built-in face stands in for a font the PDF does not embed, and which weight and style it was chosen
+    /// for, so that characters the face lacks can be drawn with a caller's fonts.
+    /// </summary>
+    public bool Substituted { get; private set; }
+    public bool SubstituteBold { get; private set; }
+    public bool SubstituteSerif { get; private set; }
 
     // Type 3.
     public Matrix FontMatrix { get; private set; } = Matrix.Scale(0.001, 0.001);

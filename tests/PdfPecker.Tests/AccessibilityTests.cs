@@ -127,6 +127,21 @@ public class AccessibilityTests
     }
 
     [Fact]
+    public void Generated_content_with_alternative_text_is_read_as_that_text()
+    {
+        var pdf = Tagged("""
+            <style>.fav::before { content: "★ " / "Favourite: " } .next::before { content: "→ " / "" }</style>
+            <p class="fav">Item</p><p class="next">Onwards</p>
+            """);
+        Assert.Equal("Document P Span P", Types(pdf));
+        Assert.Contains("/Alt (Favourite:)", pdf);
+        var content = Content(pdf);
+        AssertAllContentMarked(content);
+        // The arrow with empty alternative text is decorative: an artifact, not a marked part of the paragraph.
+        Assert.Equal(3, Regex.Matches(content, @"<</MCID \d+>> BDC").Count);
+    }
+
+    [Fact]
     public void Heading_levels_do_not_skip()
     {
         var pdf = Tagged("<h2>A</h2><h4>B</h4><h3>C</h3><h1>D</h1><h3>E</h3>");

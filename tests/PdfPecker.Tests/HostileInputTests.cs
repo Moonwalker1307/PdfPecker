@@ -297,6 +297,21 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(sb.ToString()));
     }
 
+    [Fact]
+    public void Custom_function_expansion_is_capped()
+    {
+        // Each function calls the previous one four times (4^40 calls if expanded), one calls itself forever, and
+        // locals use each other four times over.
+        var sb = new StringBuilder("<style>@function --f0(--x) { result: var(--x) }");
+        for (int i = 1; i < 40; i++) sb.Append($"@function --f{i}(--x) {{ result: --f{i - 1}(var(--x)) --f{i - 1}(var(--x)) --f{i - 1}({{var(--x), var(--x)}}) --f{i - 1}(var(--x)) }}");
+        sb.Append("@function --self(--x) { result: --self(--self(var(--x))) }");
+        sb.Append("@function --locals() { --l0: x;");
+        for (int i = 1; i < 40; i++) sb.Append($"--l{i}: var(--l{i - 1}) var(--l{i - 1}) var(--l{i - 1}) var(--l{i - 1});");
+        sb.Append("result: var(--l39) }");
+        sb.Append("p { font-family: --f39(x); margin: --self(1px); --v: --locals(); width: var(--v) }</style>").Append(Repeat("<p>text</p>", 2000));
+        AssertStructurallyValid(Bounded(sb.ToString()));
+    }
+
     // Lengths near the float range overflowed to infinity once added or scaled in layout, and the box geometry built from
     // them reached the painters as NaN, where rounding it threw ArithmeticException.
     [Theory]
@@ -2783,6 +2798,33 @@ public class HostileInputTests
     }
 
     /// <summary>Runs <paramref name="work"/> on one thread and returns its result with the bytes that thread allocated.</summary>
+    [Fact]
+    public void Icc_profiles_that_claim_huge_tables_or_point_outside_themselves_are_not_used()
+    {
+        static byte[] B(params int[] values) => values.Select(v => (byte)v).ToArray();
+        byte[] u32Max = B(0xFF, 0xFF, 0xFF, 0xFF);
+        var profiles = new[]
+        {
+            // A lut16 table of four inputs with 255 grid points a side: 12 billion values in a few bytes.
+            IccProfileTests.Profile("CMYK", "Lab ", 0x02100000, ("A2B0", Encoding.ASCII.GetBytes("mft2").Concat(new byte[4]).Concat(B(4, 3, 255, 0)).Concat(new byte[40]).Concat(B(0, 2, 0, 2)).ToArray())),
+            // A lutAtoB table whose curves and table lie past the end of the profile.
+            IccProfileTests.Profile("CMYK", "Lab ", 0x04300000, ("A2B0", Encoding.ASCII.GetBytes("mAB ").Concat(new byte[4]).Concat(B(4, 3, 0, 0)).Concat(u32Max).Concat(new byte[8]).Concat(u32Max).Concat(u32Max).ToArray())),
+            // A gray curve of four billion entries.
+            IccProfileTests.Profile("GRAY", "XYZ ", 0x02100000, ("kTRC", Encoding.ASCII.GetBytes("curv").Concat(new byte[4]).Concat(u32Max).ToArray())),
+        };
+        foreach (var profile in profiles)
+        {
+            int components = profile[16] == (byte)'C' ? 4 : 1; // the header's colour space, CMYK or GRAY
+            var (space, allocated) = Allocating(() => Rendering.Content.IccSpace.Create(profile, components));
+            Assert.Null(space);
+            Assert.True(allocated < 1 << 20, $"allocated {allocated} bytes");
+        }
+        // A tag table that claims more tags than the profile has room for.
+        var header = IccProfileTests.Profile("GRAY", "XYZ ", 0x02100000);
+        u32Max.CopyTo(header, 128);
+        Assert.Null(Rendering.Content.IccSpace.Create(header, 1));
+    }
+
     private static (T Result, long Allocated) Allocating<T>(Func<T> work) => Bounded(() =>
     {
         long before = GC.GetAllocatedBytesForCurrentThread();
@@ -3884,6 +3926,21 @@ public class HostileInputTests
         // A mark is cut to 64 characters, never inside a surrogate pair.
         Assert.Equal(new string('x', 64), Css.GeneratedContent.UnquoteMark("\"" + new string('x', 100) + "\""));
         Assert.Equal(new string('x', 63), Css.GeneratedContent.Cut(new string('x', 63) + "\U0001F600", 64));
+    }
+
+    [Theory]
+    [InlineData("columns: 2; column-height: 1px")]
+    [InlineData("columns: 100; column-height: 1.5px; row-gap: 0")]
+    [InlineData("columns: 3; column-height: 1e30px")]
+    [InlineData("columns: 3; column-height: 0")]
+    [InlineData("columns: 3; column-wrap: wrap; height: 2px")]
+    public void Tiny_and_huge_column_heights_stay_bounded(string style)
+    {
+        // Every row of columns is laid out again while the rows grow, so rows of a pixel over a long text must stop at
+        // the fragment limit rather than lay the content out thousands of times.
+        string text = Repeat("<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>", 2000);
+        var pdf = Bounded($"<div style='{style}'><div style='columns: 2; column-height: 3px'>{text}</div>{text}</div>");
+        Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(pdf, 0, 5));
     }
 }
 
@@ -5085,6 +5142,19 @@ public class PatternTileCacheTests
         }
         FixturePdf.AssertAt(img, Patterns - 5, Patterns - 5, 0, 128, 0);
         Assert.True(peak < 256L << 20, $"the renderer retained {peak >> 20} MB");
+    }
+
+    [Theory]
+    [InlineData("min=-1e308 max=1e308 step=1e-300")]
+    [InlineData("min=1e308 max=-1e308 value=Infinity step=NaN")]
+    [InlineData("min=0 max=1 step=1e-320 value=0.3")]
+    [InlineData("min=-1.7976931348623157e308 max=1.7976931348623157e308 value=-1e308 step=1e308")]
+    public void Slider_attributes_at_the_ends_of_the_double_range_draw_a_slider(string attributes)
+    {
+        // A slider's fraction and step come from the page's attributes; huge, tiny or non-finite ones must neither
+        // throw nor write a number the CSS parser cannot read.
+        var pdf = HtmlToPdf.Convert($"<input type=range {attributes}><input type=color value='#12345g'>");
+        Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(pdf, 0, 5));
     }
 }
 

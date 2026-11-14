@@ -454,6 +454,8 @@ internal sealed partial class ComputedStyle
     public uint? ColumnRuleColor { get => _containers.ColumnRuleColor; set { if (_containers.ColumnRuleColor != value) Containers.ColumnRuleColor = value; } }
     public bool ColumnSpanAll { get => _containers.ColumnSpanAll; set { if (_containers.ColumnSpanAll != value) Containers.ColumnSpanAll = value; } }
     public bool ColumnFillAuto { get => _containers.ColumnFillAuto; set { if (_containers.ColumnFillAuto != value) Containers.ColumnFillAuto = value; } }
+    public Length? ColumnHeight { get => _containers.ColumnHeight; set => Containers.ColumnHeight = value; }
+    public ColumnWrap ColumnWrap { get => _containers.ColumnWrap; set { if (_containers.ColumnWrap != value) Containers.ColumnWrap = value; } }
     public int LineClamp { get => _containers.LineClamp; set { if (_containers.LineClamp != value) Containers.LineClamp = value; } }
     public bool LegacyBox { get => _containers.LegacyBox; set { if (_containers.LegacyBox != value) Containers.LegacyBox = value; } }
     public bool BoxVertical { get => _containers.BoxVertical; set { if (_containers.BoxVertical != value) Containers.BoxVertical = value; } }
@@ -491,6 +493,8 @@ internal sealed partial class ComputedStyle
         public uint? ColumnRuleColor;        // null = currentColor
         public bool ColumnSpanAll;           // column-span: all
         public bool ColumnFillAuto;          // column-fill: auto (fill each column in turn) rather than balance
+        public Length? ColumnHeight;         // column-height; null = auto
+        public ColumnWrap ColumnWrap;
         public int LineClamp;                // -webkit-line-clamp / line-clamp: lines shown, then an ellipsis; 0 = none
         // The legacy flexible box (display: -webkit-box) and its -webkit-box- properties, which Chrome lays out as a flex
         // container in place of the flex properties. -webkit-box-direction is inherited, the others are not.
@@ -551,6 +555,8 @@ internal sealed partial class ComputedStyle
     public string[]? ContainerNames { get => _rare.ContainerNames; set { if (_rare.ContainerNames != value) Rare.ContainerNames = value; } }
     public Length ControlWidth { get => _rare.ControlWidth; set => Rare.ControlWidth = value; }
     public SizeKeyword WidthKeyword { get => _rare.WidthKeyword; set { if (_rare.WidthKeyword != value) Rare.WidthKeyword = value; } }
+    public CalcSizeAdjust? WidthCalcSize { get => _rare.WidthCalcSize; set { if (_rare.WidthCalcSize != value) Rare.WidthCalcSize = value; } }
+    public CalcSizeAdjust? HeightCalcSize { get => _rare.HeightCalcSize; set { if (_rare.HeightCalcSize != value) Rare.HeightCalcSize = value; } }
     public StretchSizes Stretched { get => _rare.Stretched; set { if (_rare.Stretched != value) Rare.Stretched = value; } }
     public bool ColumnBreakBefore { get => _rare.ColumnBreakBefore; set { if (_rare.ColumnBreakBefore != value) Rare.ColumnBreakBefore = value; } }
     public bool ColumnBreakAfter { get => _rare.ColumnBreakAfter; set { if (_rare.ColumnBreakAfter != value) Rare.ColumnBreakAfter = value; } }
@@ -618,6 +624,8 @@ internal sealed partial class ComputedStyle
         public Length ControlWidth = Length.Auto;   // a text field's own width, used while width is auto and not stretched
         public bool FieldSizingContent;             // field-sizing: content: a form control takes the size of its value
         public SizeKeyword WidthKeyword;            // width: min-content, max-content or fit-content; Width is then auto
+        public CalcSizeAdjust? WidthCalcSize;       // width: calc-size() of auto or a WidthKeyword: how it changes that size
+        public CalcSizeAdjust? HeightCalcSize;      // height: calc-size() of auto or fit-content: how it changes the content's height
         public StretchSizes Stretched;              // the sizes set to stretch, which become lengths once the box's margins are known
         public bool ColumnBreakBefore, ColumnBreakAfter; // break-before/after: column, which only breaks inside a multicol
         public bool AvoidColumnBreakBefore, AvoidColumnBreakAfter, AvoidColumnBreakInside; // avoid-column: only inside a multicol

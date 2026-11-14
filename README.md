@@ -240,7 +240,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   length basis in a column whose container has only a `min-height`, as card and label layouts use), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders, backgrounds,
   shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
   computes it, for templates that shrink a page to fit), multi-column layout (with `column-span: all` also inside
-  sections and other blocks of the columns, which are split around it as in Chrome), gap decorations (`column-rule` and
+  sections and other blocks of the columns, which are split around it as in Chrome, and `column-height` with
+  `column-wrap` for rows of columns down the page, each row kept whole on one page as Chrome prints it), gap decorations (`column-rule` and
   `row-rule` in grid and flex containers too, with lists and `repeat()`, `rule-break`, `rule-inset`,
   `rule-visibility-items` and `rule-overlap`, cut where a grid or flex container breaks across pages),
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
@@ -255,7 +256,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   buttons and badges), `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
   (`text-underline-position`), solid underlines, overlines and line-throughs as thick and placed as Chrome draws them, drop caps, `::first-line` styles with a background, `::marker` styles (a larger marker font or a tall marker image makes its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
-  text, as in Chrome), images and gradients in `::before` and `::after` content, inline SVG (with
+  text, as in Chrome), images and gradients in `::before` and `::after` content, alternative text after `/` in `content`
+  (`content: "★" / "Favourite"`, read in place of the content in tagged PDFs, and empty for decoration), inline SVG (with
   percentage coordinates and sizes, as in Bootstrap's placeholder images, `cx`, `cy`, `r`, `rx`, `ry`, `x`, `y`, `width`, `height`, `d: path()` and `stop-color` set from style sheets, HTML in `<foreignObject>`, text placed character by character with lists of `x`, `y`, `dx`, `dy` and `rotate`, and icons drawn
   with `<use>` from a sprite of symbols that is itself hidden, in the `currentColor` where they are used, as in Bootstrap's icon sprites; lengths in mm, cm, in, pt and em; nested `<svg>` and `<symbol>` viewports with `preserveAspectRatio` and clipping; also CSS `transform` with `transform-box` and
   `transform-origin` on SVG elements, such as a gauge needle turning about its own centre, and `vector-effect: non-scaling-stroke`
@@ -268,10 +270,15 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   property, as in Chrome: `width: attr(data-pct %)`, `color: attr(data-color type(<color>), gray)` or
   `calc(attr(data-v number) * 1mm)` draw bar charts and badges from data attributes, with fallbacks, `::before` reading
   its element's attributes, and no attribute value ever reaching a `url()`. `sibling-index()` and `sibling-count()`
-  work as in Chrome too, for staggered widths, colours that step through a list and tabs that share a row evenly. `if()`
+  work as in Chrome too, for staggered widths, colours that step through a list and tabs that share a row evenly. Math
+  functions go beyond `calc()` as in Chrome: `progress()`, a length or angle divided by another (`calc(1in / 1px)` is
+  96), and `calc-size()`, as in `width: calc-size(fit-content, size + 2em)`. `if()`
   chooses a value from `style()` of a custom property, `media()` or `supports()`, such as
   `border-color: if(style(--status: overdue): red; else: green)`, as in Chrome (whose `media()` in `if()` still asks
-  about the screen when it prints). Older CSS works too: the
+  about the screen when it prints). Custom functions defined with `@function` work as in Chrome:
+  `@function --space(--n: 1) { result: calc(var(--n) * 4px) }` then `padding: --space(2) --space(6)`, with default
+  arguments, local custom properties, `{a, b}` list arguments, functions calling functions, `if()` on a parameter and
+  `@media` and `@supports` blocks in the body (parameter and result types are not checked). Older CSS works too: the
   `-webkit-` property names Chrome still takes (`-webkit-transform`, `-webkit-flex`, ...), the legacy
   `display: -webkit-box` and its `-webkit-box-` properties, and the `-webkit-gradient()` and prefixed gradient
   syntaxes. As in browsers, a length without a unit (`width: 200`) counts as pixels only in a page without a doctype;
@@ -346,7 +353,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. Check boxes
   and radio buttons take `accent-color`, and `appearance: none` leaves them to the page's own CSS (`:checked`,
   `::before` and `::after`), as for toggle switches; such a control is drawn rather than made a field. `field-sizing: content` makes text
-  fields, textareas and drop-downs as wide (and textareas as tall) as their value, as in Chrome. An element with
+  fields, textareas and drop-downs as wide (and textareas as tall) as their value, as in Chrome. Sliders
+  (`type=range`) and colour wells (`type=color`) are drawn at their value as Chrome prints them, and a drop-down or a
+  button with `display: block` keeps the width of its content. An element with
   `data-pdf-signature="Buyer"` becomes an empty signature field over its box, which `PdfSigner` fills later with
   `FieldName = "Buyer"`. [More](https://pdfpecker.net/docs/forms/)
 - **Digital signatures**: PAdES signing, certification signatures, timestamps, external signers, verification (SHA-1
@@ -393,6 +402,14 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   lines, shapes, lines with their arrowheads, ink and free text) are drawn from their properties, as viewers draw them.
   Filled-in form fields show their values when the form asks the viewer to draw them (`NeedAppearances`, as LibreOffice
   and many fill tools write) or when they have no appearance at all, in images, PDF to HTML and extracted text.
+  Chinese, Japanese and Korean text that names one of Adobe's predefined CMaps instead of embedding one (Shift-JIS
+  `90ms-RKSJ-H`, `UniJIS-UCS2-H`, `GBK-EUC-H`, `ETen-B5-H`, `KSCms-UHC-H` and the rest of the PDF standard's list) is
+  read with Adobe's own CMaps, which the library carries, so it draws the right glyphs and is extracted as text.
+  Fonts a PDF names without embedding them are drawn with built-in faces for Latin, Greek and Cyrillic; for other
+  characters, such as Chinese, Japanese and Korean, pass fonts of your own in `ImageOptions.Fonts` (a `FontCollection`,
+  for example with PdfPecker.Fonts.Cjk).
+  ICC colour profiles (`ICCBased` gray, RGB and CMYK, with matrix or lookup-table profiles such as FOGRA39 or GRACoL)
+  are applied with black point compensation, so press CMYK shows as Acrobat and Chrome show it.
   Older Taiwanese and Japanese fonts that build their characters with TrueType instructions (MingLiU, PMingLiU, DFKai-SB
   and other DynaLab fonts) run those instructions, as FreeType does, so their characters come out whole.
   [More](https://pdfpecker.net/docs/pdf-to-image/)

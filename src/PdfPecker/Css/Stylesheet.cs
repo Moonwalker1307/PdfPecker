@@ -193,6 +193,7 @@ internal sealed class Stylesheet
     public readonly List<CounterStyleRule> CounterStyles = new(); // @counter-style rules, in source order
     public readonly FontFeatureValues FontFeatureValues = new(); // the names of @font-feature-values rules
     public readonly List<FontPaletteValuesRule> FontPaletteValues = new(); // @font-palette-values rules, in source order
+    public Dictionary<string, CssFunction>? Functions; // @function rules by name; the last one of a name wins
     public readonly CascadeLayer LayerRoot = new("");
     public MediaContext Media = new();
     public int NextOrder;

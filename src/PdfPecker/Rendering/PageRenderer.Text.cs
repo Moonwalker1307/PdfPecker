@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Text;
 using PdfPecker.Rendering.Fonts;
 using PdfPecker.Rendering.Graphics;
 using PdfPecker.Rendering.Parsing;
@@ -81,17 +83,26 @@ internal sealed partial class PageRenderer
             else if (font.Source != null && (fill || stroke || clip))
             {
                 int gid = font.GlyphId(code);
+                var source = font.Source;
                 var gm = font.GlyphMatrix;
                 float hs = font.HScale(code);
+                // A character the built-in face standing in for an unembedded font lacks, such as a Chinese, Japanese or
+                // Korean one, is drawn with the caller's fonts when they have it.
+                if (gid == 0 && font.Substituted && _fallbackFonts != null && FallbackGlyph(font, code) is { } fallback)
+                {
+                    (source, gid) = fallback;
+                    gm = source.FontMatrix;
+                    hs = 1f;
+                }
                 if (hs != 1f) gm = gm.Multiply(Matrix.Scale(hs, 1));
                 var full = gm.Multiply(trm);
-                if (canFill && !stroke && !clip) DrawGlyphCached(font.Source, gid, full);
+                if (canFill && !stroke && !clip) DrawGlyphCached(source, gid, full);
                 else
                 {
-                    var glyph = font.Source.GetGlyph(gid);
+                    var glyph = source.GetGlyph(gid);
                     if (glyph != null && !glyph.IsEmpty)
                     {
-                        if (canFill) DrawGlyphCached(font.Source, gid, full);
+                        if (canFill) DrawGlyphCached(source, gid, full);
                         if (stroke && _hidden == 0 && SetupPaint(true))
                         {
                             // Stroke in user space so the line width is transformed by the CTM only.
@@ -179,6 +190,12 @@ internal sealed partial class PageRenderer
     }
 
     /// <summary>Fills a glyph with the current painter setup, through the glyph bitmap cache when it is small enough.</summary>
+    private (IGlyphSource Source, int Gid)? FallbackGlyph(PdfFont font, int code)
+    {
+        if (font.Unicode(code) is not { Length: > 0 } text || Rune.DecodeFromUtf16(text, out var rune, out _) != OperationStatus.Done) return null;
+        return _cache.FallbackGlyph(_fallbackFonts!, rune.Value, font.SubstituteBold, font.SubstituteSerif);
+    }
+
     private void DrawGlyphCached(IGlyphSource source, int gid, in Matrix m)
     {
         var clip = _gs.Clip;

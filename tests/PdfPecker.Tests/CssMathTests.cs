@@ -295,4 +295,81 @@ public class CssMathTests
         var pdf = HtmlToPdf.Convert(html);
         Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(pdf, 0, 4));
     }
+
+    [Theory]
+    [InlineData("calc(1in / 1px * 1px)", 72)]                     // 96 pixels
+    [InlineData("calc(atan2(1px, 1px) / 1deg * 1pt)", 45)]
+    [InlineData("calc(2em / 1pt * 1pt)", 24)]
+    [InlineData("calc(50% / 25% * 10pt)", 20)]
+    [InlineData("calc(progress(15pt, 10pt, 20pt) * 100pt)", 50)]
+    [InlineData("calc(progress(30pt, 10pt, 20pt) * 100pt)", 100)]  // clamped to 1, as in Chrome
+    [InlineData("calc(progress(0pt, 10pt, 20pt) * 100pt)", 0)]     // and to 0
+    [InlineData("calc(progress(5pt, 10pt, 10pt) * 100pt + 1pt)", 1)] // start and end the same: 0
+    [InlineData("calc(progress(50%, 0%, 200%) * 100pt)", 25)]
+    [InlineData("calc(progress(90deg, 0deg, 180deg) * 10pt)", 5)]
+    public void Units_divide_into_numbers_and_progress_gives_a_fraction(string css, float expected) => Near(expected, Len(css, 400));
+
+    [Theory]
+    [InlineData("calc(10pt / 2pt)")]                        // a number where a length is needed
+    [InlineData("calc((100% - 10pt) / 1pt * 1pt)")]         // depends on the reference length
+    [InlineData("calc(10pt / 1deg * 1pt)")]                 // different kinds
+    [InlineData("calc(0pt / 0pt * 1pt)")]
+    [InlineData("calc(progress(1pt, 2deg, 3pt) * 1pt)")]
+    [InlineData("calc(progress(50%, 10pt, 200%) * 1pt)")]
+    [InlineData("calc(progress(1pt, 2pt) * 1pt)")]
+    public void Ratios_that_cannot_be_known_are_rejected(string css)
+        => Assert.False(StyleResolver.TryParseLength(css, 12, 12, out _), css);
+
+    [Fact]
+    public void Calc_size_sizes_boxes_from_their_keyword_as_in_Chrome()
+    {
+        // Widths measured in Chrome 153 with the same markup, in pixels (here points: × 0.75).
+        var ops = Layout("""
+            <div style="width: 400pt; font: 10pt monospace">
+              <div style="width: calc-size(fit-content, size + 30pt); height: 5pt; background: #ff0000">abcde</div>
+              <div style="width: calc-size(fit-content, size * 2); height: 5pt; background: #00ff00">abcde</div>
+              <div style="width: calc-size(auto, size - 100pt); height: 5pt; background: #0000ff"></div>
+              <div style="width: calc-size(50%, size + 20pt); height: 5pt; background: #ffff00"></div>
+              <div style="width: calc-size(min-content, size + 10%); height: 5pt; background: #00ffff">abcde fgh</div>
+              <div style="box-sizing: border-box; padding: 0 5pt; width: calc-size(max-content, size + 20pt); height: 5pt; background: #ff00ff">abcde</div>
+              <div style="width: calc-size(any, 80pt); height: 5pt; background: #808080"></div>
+              <div style="width: calc-size(calc-size(fit-content, size * 2), size + 1pt); height: 5pt; background: #800000">abcde</div>
+              <div style="width: 70pt; height: calc-size(auto, size + 10pt); background: #008000"><div style="height: 20pt"></div></div>
+            </div>
+            """);
+        float text = 30; // five monospace characters at 10pt
+        Near(text + 30, Box(ops, "#ff0000").W, 0.5f);
+        Near(text * 2, Box(ops, "#00ff00").W, 0.5f);
+        Near(300, Box(ops, "#0000ff").W);
+        Near(220, Box(ops, "#ffff00").W);
+        Near(text + 40, Box(ops, "#00ffff").W, 0.5f);
+        Near(text + 10 + 20, Box(ops, "#ff00ff").W, 0.5f);
+        Near(80, Box(ops, "#808080").W);
+        Near(text * 2 + 1, Box(ops, "#800000").W, 0.5f);
+        Near(30, Box(ops, "#008000").H);
+    }
+
+    [Fact]
+    public void Calc_size_widens_an_inline_block_and_what_holds_it()
+    {
+        var ops = Layout("""
+            <div style="font: 10pt monospace">
+              <div style="display: inline-block; background: #ff0000"><span style="display: inline-block; width: calc-size(auto, size + 40pt); background: #00ff00">abcde</span></div>
+            </div>
+            """);
+        Near(70, Box(ops, "#00ff00").W, 0.5f);
+        Near(70, Box(ops, "#ff0000").W, 0.5f);
+    }
+
+    [Theory]
+    [InlineData("calc-size(fit-content, size * size)")] // not linear in size
+    [InlineData("calc-size(fit-content)")]
+    [InlineData("calc-size(any, size)")]
+    [InlineData("calc-size(10pt, size, 1pt)")]
+    [InlineData("calc-size(bogus, size)")]
+    public void Invalid_calc_size_leaves_the_earlier_width(string value)
+    {
+        var ops = Layout($"<div style='width: 50pt; width: {value}; height: 5pt; background: #ff0000'></div>");
+        Near(50, Box(ops, "#ff0000").W);
+    }
 }

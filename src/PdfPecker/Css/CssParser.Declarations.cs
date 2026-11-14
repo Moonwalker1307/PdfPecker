@@ -58,10 +58,11 @@ internal static partial class CssParser
     }
 
     /// <summary>
-    /// Whether the value needs substituting per element: var(), or if(), which the style resolver substitutes the same
-    /// way, so that a shorthand with either is expanded once its value is known.
+    /// Whether the value needs substituting per element: var(), or if() or a custom function call, which the style
+    /// resolver substitutes the same way, so that a shorthand with any of them is expanded once its value is known.
     /// </summary>
-    public static bool HasVar(string value) => value.IndexOf("var(", StringComparison.OrdinalIgnoreCase) >= 0 || CssIf.Has(value);
+    public static bool HasVar(string value)
+        => value.IndexOf("var(", StringComparison.OrdinalIgnoreCase) >= 0 || CssIf.Has(value) || CssFunctions.HasCall(value);
 
     /// <summary>A container-name value: none, or one or more container names.</summary>
     internal static bool ContainerNamesValid(string names)

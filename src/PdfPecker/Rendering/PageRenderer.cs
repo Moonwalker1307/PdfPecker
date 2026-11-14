@@ -49,6 +49,10 @@ internal sealed partial class PageRenderer
     private readonly RenderCache _cache;
     private readonly PageCacheUse _cacheUse = new(); // the shared cache entries this page has used and been charged for
     private readonly CancellationToken _cancel;
+    private FontCollection? _fallbackFonts;
+
+    /// <summary>The caller's fonts for characters that the stand-in of a font the PDF does not embed lacks.</summary>
+    public FontCollection? FallbackFonts { init => _fallbackFonts = value; }
     private Canvas _canvas;
     private readonly Rasterizer _raster = new();
     private readonly Painter _painter = new();
