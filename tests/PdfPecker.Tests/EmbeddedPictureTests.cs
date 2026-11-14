@@ -63,4 +63,55 @@ public class EmbeddedPictureTests
     [Fact]
     public void A_nested_object_in_the_fallback_content_shows_its_picture()
         => Shows(Convert("<object data='missing.png'><object data='green.png'>Inner fallback</object></object>"), Green, 60);
+
+    [Fact]
+    public void A_video_shows_its_poster_and_never_its_fallback_content()
+    {
+        var pdf = Convert("<video poster='red.png' style='display:block'>Fallback<source src='movie.mp4'></video>");
+        Shows(pdf, Red, 30);
+        Assert.DoesNotContain("Fallback", PdfText.Extract(pdf));
+    }
+
+    [Fact]
+    public void A_video_without_a_poster_is_a_black_box_of_the_default_size()
+    {
+        // 300 by 150 px: 225 by 112.5 pt.
+        var pdf = Convert("<video style='display:block'>Fallback</video>");
+        Assert.Equal((0, 0, 0), Pixel(pdf, 220, 110));
+        Assert.Equal((255, 255, 255), Pixel(pdf, 230, 50));
+        Assert.Equal((255, 255, 255), Pixel(pdf, 50, 116));
+        Assert.DoesNotContain("Fallback", PdfText.Extract(pdf));
+    }
+
+    [Fact]
+    public void An_iframe_shows_its_srcdoc_in_its_own_styles()
+    {
+        // The frame's document keeps its body margin and its own style sheet, and the page's styles do not reach in.
+        var pdf = Convert("<style>p{color:red;display:none}</style><iframe srcdoc=\"<style>body{background:#00f}</style><p>Inside the frame</p>\" "
+                          + "style='display:block;border:0' width=200 height=100></iframe><p>Hidden outside</p>");
+        Assert.Contains("Inside the frame", PdfText.Extract(pdf));
+        Assert.DoesNotContain("Hidden outside", PdfText.Extract(pdf));
+        // The body's background fills the frame's viewport, 150 by 75 pt, and nothing past it.
+        Assert.Equal(Blue, Pixel(pdf, 2, 2));
+        Assert.Equal(Blue, Pixel(pdf, 148, 73));
+        Assert.Equal((255, 255, 255), Pixel(pdf, 152, 40));
+    }
+
+    [Fact]
+    public void An_iframe_clips_its_document_to_its_box()
+    {
+        var pdf = Convert("<iframe srcdoc=\"<div style='height:1000px;background:#00f'></div>\" style='display:block;border:0' width=100 height=50></iframe>");
+        Assert.Equal(Blue, Pixel(pdf, 40, 30));
+        Assert.Equal((255, 255, 255), Pixel(pdf, 40, 60));
+        Assert.Equal(1, PdfRenderer.Open(pdf).PageCount);
+    }
+
+    [Fact]
+    public void A_tagged_pdf_draws_an_iframes_document_as_an_artifact()
+    {
+        var pdf = HtmlToPdf.Convert("<!doctype html><p>Outside</p><iframe srcdoc='<p>Inside</p>'></iframe>",
+            new PdfOptions { Accessibility = PdfAccessibility.Tagged });
+        Assert.Contains("Inside", PdfText.Extract(pdf));
+        Assert.Contains("/Artifact BMC", PdfTestHelpers.AllContent(pdf));
+    }
 }

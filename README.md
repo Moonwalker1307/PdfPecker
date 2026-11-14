@@ -235,8 +235,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables (collapsed borders also from `col` and `colgroup`; rows and
   columns with `visibility: collapse` leave), floats with `shape-outside` (and `float` and `clear` with `inline-start` and `inline-end`, on the right in
-  right-to-left text, as in Chrome), `clip-path` shapes (also `rect()` and
-  `xywh()`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for heights and
+  right-to-left text, as in Chrome), `clip-path` shapes (also `rect()`,
+  `xywh()` and `shape()`, whose lines, curves and arcs take percentages of the box, also in `shape-outside`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for heights and
   their limits), percentage heights inside flex items resolved as in Chrome (stretched items, and items flexed from a
   length basis in a column whose container has only a `min-height`, as card and label layouts use), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders, backgrounds,
   shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
@@ -265,7 +265,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   `transform-origin` on SVG elements, such as a gauge needle turning about its own centre, and `vector-effect: non-scaling-stroke`
   for hairlines in a scaled chart, though markers still scale) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
   `image-set()`,
-  shown by `<embed>` and `<object>`, photos turned upright by their EXIF orientation, and `image-rendering: pixelated`
+  shown by `<embed>` and `<object>`, a `<video>`'s poster (a video without one is a black box, as Chrome prints it),
+  an `<iframe srcdoc>` drawn in the frame in its own styles, as its own document (a frame's `src` is not fetched, its
+  web fonts are not loaded, and its text is not tagged in an accessible PDF), photos turned upright by their EXIF orientation, and `image-rendering: pixelated`
   or `crisp-edges` writing enlarged images, such as QR codes and pixel art, with hard pixel edges in every PDF viewer,
   and `object-view-box` cropping a raster image in CSS, as Chrome does), and CSS-only charts such as
   Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Typed `attr()` works in any

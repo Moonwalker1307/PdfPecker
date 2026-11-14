@@ -173,7 +173,7 @@ internal sealed class HtmlParser
     {
         if (name is "input" or "select" or "textarea" or "button" or "progress" or "meter") _used |= NamesUsed.FormControls;
         else if (name == "img") _used |= NamesUsed.Img;
-        else if (name is "embed" or "object") _used |= NamesUsed.Embed;
+        else if (name is "embed" or "object" or "video" or "iframe") _used |= NamesUsed.Embed;
         else if (name == "title") _used |= NamesUsed.Title;
     }
 
@@ -725,7 +725,7 @@ internal enum NamesUsed : byte
     Img = 2,
     /// <summary>title.</summary>
     Title = 4,
-    /// <summary>embed or object.</summary>
+    /// <summary>embed, object, video or iframe.</summary>
     Embed = 8,
     /// <summary>A doctype that puts the document in standards mode rather than quirks mode, such as &lt;!DOCTYPE html&gt;.</summary>
     StandardsMode = 16,

@@ -52,7 +52,7 @@ internal static class Targets
     private static readonly string[] HtmlWords =
     {
         "<table>", "</table>", "<tr>", "<td colspan=2>", "<td rowspan=0>", "<div>", "</div>", "<span>", "<p>", "<ul>", "<li>", "<ol>", "<form>", "<input type=radio>", "<input type=date value=2024-02-29>", "<input type=time step=1 value=23:59:59.999>", "<input type=week value=2020-W53>", "<progress>",
-        "<select>", "<option>", "<textarea>", "<svg>", "<math>", "<img src=\"data:image/png;base64,\">", "<style>", "</style>", "<a href=\"#a\">", "<br>", "<hr>",
+        "<select>", "<option>", "<textarea>", "<svg>", "<math>", "<iframe srcdoc=\"<p style='height:1e9px'>a<iframe srcdoc=x>\">", "<iframe srcdoc=\"", "<video poster=\"data:image/png;base64,\">", "<video width=1e9>", "<img src=\"data:image/png;base64,\">", "<style>", "</style>", "<a href=\"#a\">", "<br>", "<hr>",
         "<h1>", "<pre>", "<center>", "<font>", "<details>", "<template>", "<!doctype html>", "&#0;", "&#x110000;", "&amp", "&notin;", "style=\"", "class=\"a\"", "id=\"a\"",
         "display:table-cell", "display:flex", "display:grid", "position:absolute", "float:left", "width:50%", "height:1e9px", "margin:-1e9px", "column-count:99",
         "page-break-before:always", "overflow:hidden", "transform:scale(1e9)", "content:\"x\"", "counter-increment:a 999999999", "font-size:0", "line-height:0", "<![CDATA[",
@@ -117,7 +117,7 @@ internal static class Targets
         "attr(a)", "attr(data-x type(*), ", "attr(data-x px, ", "attr(class type(<length>+))", "attr(id raw-string)", "attr(title number)", "type(<color>)", "width:attr(data-x %)", "counter(a)", "counters(a, \".\")", "content:", "display:grid", "grid-template-columns: repeat(999999, 1fr)", "grid-column: 1 / span 99999", "flex: 1e9",
         "1e9px", "-1e9px", "100000%", "calc(1/0)", "calc(0/0)", "inherit", "initial", "unset", "revert", "all:unset", "--a:", "var(--a, var(--b, var(--a)))",
         "mask-image:", "-webkit-mask:", "mask-composite: exclude", "mask-mode: luminance", "mask-size: 1e9px", "url(#m)", "backdrop-filter: blur(1e9px)", "-webkit-backdrop-filter:",
-        "shape-outside:", "inset(", "ellipse(", "polygon(", "path(", "margin-box", "content-box", "shape-margin: 1e9px", "shape-image-threshold: 1e9",
+        "shape-outside:", "inset(", "ellipse(", "polygon(", "path(", "shape(from 0 0, ", "arc by 1e9px 0 of 1e-9px large cw, ", "smooth to right bottom, ", "curve by 1px 1px with 1e9px 0 from end / 1px 1px, ", "hline to x-end, ", "margin-box", "content-box", "shape-margin: 1e9px", "shape-image-threshold: 1e9",
         "::first-letter", "initial-letter: 3", "initial-letter: 1e9 999999", "initial-letter: 2 raise",
         "rule: 1px solid red", "column-rule-color: red, repeat(auto, blue, green)", "row-rule-width: repeat(999999999, 1px)",
         "rule-inset: -1e9px / overlap-join", "column-rule-inset-cap-end: -1e9px", "row-rule-inset: 0 -1e30px", "rule-break: intersection", "rule-visibility-items: between", "rule-overlap: column-over-row",

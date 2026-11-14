@@ -23,9 +23,17 @@ internal sealed partial class StyleResolver
         }
         switch (e.Name)
         {
+            case "video" when !e.EmbedsPicture:
+                // A video without a poster to show is an empty box of the default size, as Chrome prints it.
+                Hint("display", "inline-block");
+                Hint("width", e.GetAttribute("width") is { } vw ? PxOrPercent(vw) : "300px");
+                Hint("height", e.GetAttribute("height") is { } vh ? PxOrPercent(vh) : "150px");
+                break;
             case "img":
             case "embed":
             case "object":
+            case "video":
+            case "iframe":
                 if ((v = e.GetAttribute("width")) != null) Hint("width", PxOrPercent(v));
                 if ((v = e.GetAttribute("height")) != null) Hint("height", PxOrPercent(v));
                 if ((v = e.GetAttribute("hspace")) != null) { Hint("margin-left", PxOrPercent(v)); Hint("margin-right", PxOrPercent(v)); }
