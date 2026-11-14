@@ -250,6 +250,7 @@ internal sealed partial class LayoutEngine
         t.MinWidth = s.MinHeight.IsAuto || !s.MinHeight.IsPercent && s.MinHeight.Value == 0 ? Length.Auto : s.MinHeight;
         t.MinHeight = s.MinWidth.IsAuto ? Length.Zero : s.MinWidth;
         t.WidthKeyword = SizeKeyword.None;
+        t.WidthCalcSize = t.HeightCalcSize = null;
         if (s.AspectRatio > 0) t.AspectRatio = 1 / s.AspectRatio;
         var from = SidesFrom(turn, transposed);
         Length[] margins = { s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft };

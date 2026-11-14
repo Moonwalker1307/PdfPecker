@@ -6,8 +6,9 @@ namespace PdfPecker.Css;
 /// <summary>
 /// The CSS math functions <c>calc()</c>, <c>min()</c>, <c>max()</c>, <c>clamp()</c>, the stepped value functions
 /// <c>round()</c>, <c>mod()</c>, <c>rem()</c>, the sign-related <c>abs()</c> and <c>sign()</c>, the trigonometric functions
-/// and <c>pow()</c>, <c>sqrt()</c>, <c>hypot()</c>, <c>log()</c> and <c>exp()</c>, nested in any combination, on numbers,
-/// lengths and angles.
+/// and <c>pow()</c>, <c>sqrt()</c>, <c>hypot()</c>, <c>log()</c>, <c>exp()</c> and <c>progress()</c>, nested in any
+/// combination, on numbers, lengths and angles. A length or angle divided by one of the same kind is a number, as in
+/// Chrome (<c>calc(1in / 1px)</c> is 96).
 /// Font- and viewport-relative units are resolved while parsing; percentages stay symbolic until layout resolves them
 /// against the property's own reference (the containing block's width for <c>width</c>, the parent's font size for
 /// <c>font-size</c>, and so on). A sum of points and a percentage is kept as two numbers; anything else that depends
@@ -131,7 +132,7 @@ internal static class CssMath
     private static readonly string[] Names =
     {
         "calc", "min", "max", "clamp", "round", "mod", "rem", "abs", "sign", "sin", "cos", "tan", "asin", "acos", "atan2", "atan",
-        "pow", "sqrt", "hypot", "log", "exp",
+        "pow", "sqrt", "hypot", "log", "exp", "progress",
     };
 
     private static int MatchingParen(string v, int open)
@@ -214,7 +215,8 @@ internal static class CssMath
                 if (!TryPrimary(out var r)) return false;
                 if (divide)
                 {
-                    if (!r.IsNumber) return false;
+                    if (!r.IsNumber && !Ratio(ref t, r)) return false;
+                    if (!r.IsNumber) continue;
                     if (r.Pt == 0)
                     {
                         // Division by zero gives infinity (clamped by the property), as in Chrome; 0/0 is NaN, which fails.
@@ -344,6 +346,28 @@ internal static class CssMath
             }
             if (!StyleResolver.TryParseLength(_s.Substring(start, _pos - start), _em, _rem, out var len, _vw, _vh) || len.IsAuto) return false;
             t = len.Unit == LengthUnit.Percent ? new Term(TermKind.Length, 0, len.Value) : new Term(TermKind.Length, len.Value);
+            return true;
+        }
+
+        /// <summary>
+        /// A length or angle divided by one of the same kind, which makes a number (typed arithmetic, as Chrome has it).
+        /// Both must be known now: plain lengths or angles, or plain percentages of the same reference. False otherwise.
+        /// </summary>
+        private static bool Ratio(ref Term t, Term r)
+        {
+            if (t.Kind != r.Kind || t.Fn != null || r.Fn != null) return false;
+            float a, b;
+            if (t.Pct == 0 && r.Pct == 0) { a = t.Pt; b = r.Pt; }
+            else if (t.Pt == 0 && r.Pt == 0) { a = t.Pct; b = r.Pct; }
+            else return false;
+            if (b == 0)
+            {
+                // As with a number, x / 0 is infinite and 0 / 0 is NaN, which fails.
+                if (a == 0) return false;
+                t = new Term(TermKind.Number, a > 0 ? float.PositiveInfinity : float.NegativeInfinity);
+                return true;
+            }
+            t = new Term(TermKind.Number, a / b);
             return true;
         }
 
@@ -477,6 +501,21 @@ internal static class CssMath
                     double r = Math.Log(args[0].Pt);
                     if (args.Count == 2) r /= Math.Log(args[1].Pt);
                     t = new Term(TermKind.Number, (float)r);
+                    return true;
+                }
+                case "progress":
+                {
+                    // progress(value, start, end): where value lies from start to end, clamped to 0..1 as in Chrome; 0 when
+                    // start and end are the same. Lengths with percentages count only when every one is a plain percentage.
+                    if (args.Count != 3 || args[1].Kind != args[0].Kind || args[2].Kind != args[0].Kind) return false;
+                    foreach (var a in args)
+                        if (a.Fn != null) return false;
+                    bool pct = args[0].Pct != 0 || args[1].Pct != 0 || args[2].Pct != 0;
+                    if (pct && (args[0].Pt != 0 || args[1].Pt != 0 || args[2].Pt != 0)) return false;
+                    float v = pct ? args[0].Pct : args[0].Pt, from = pct ? args[1].Pct : args[1].Pt, to = pct ? args[2].Pct : args[2].Pt;
+                    float p = to == from ? 0 : (v - from) / (to - from);
+                    if (float.IsNaN(p)) return false;
+                    t = new Term(TermKind.Number, Math.Clamp(p, 0, 1));
                     return true;
                 }
                 case "hypot":

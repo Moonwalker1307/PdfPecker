@@ -109,7 +109,7 @@ internal static class Targets
 
     private static readonly string[] CssWords =
     {
-        "var(--a)", "calc(", "min(", "max(", "clamp(", "!important", "@media print {", "@media (min-width: 1px) {", "@supports (display:grid) {", "@page {", "@font-face {", "@keyframes a {",
+        "var(--a)", "calc(", "min(", "max(", "clamp(", "progress(", "calc-size(fit-content, size * 2 + 1px)", "calc-size(auto, ", "/ 1px", "!important", "@media print {", "@media (min-width: 1px) {", "@supports (display:grid) {", "@page {", "@font-face {", "@keyframes a {",
         "@import url(x);", "@container (min-width:1px) {", "@counter-style a {", "@font-feature-values a { @styleset { b: 1 2 20; } @character-variant { c: 99 9; } }", "font-variant-alternates:styleset(b) character-variant(c) historical-forms", "@font-palette-values --a { font-family: Fz; base-palette: 99; override-colors: 0 red, 65535 blue }", "font-palette:--a", "font-palette:dark", ":is(", ":not(", ":where(", ":has(", ":nth-child(2n+1 of p)", "::before", "::after", "::marker",
         "*", ">", "~", "+", "|", "[a=b i]", "url(data:,)", "linear-gradient(", "radial-gradient(", "conic-gradient(", "repeating-linear-gradient(", "-webkit-gradient(", "-webkit-", "rotate(", "matrix(",
         "attr(a)", "attr(data-x type(*), ", "attr(data-x px, ", "attr(class type(<length>+))", "attr(id raw-string)", "attr(title number)", "type(<color>)", "width:attr(data-x %)", "counter(a)", "counters(a, \".\")", "content:", "display:grid", "grid-template-columns: repeat(999999, 1fr)", "grid-column: 1 / span 99999", "flex: 1e9",
