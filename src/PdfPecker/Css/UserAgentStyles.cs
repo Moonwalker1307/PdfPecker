@@ -100,6 +100,8 @@ pdf-gauge { display: block; box-sizing: border-box; height: 100%; border: 1px so
 meter > pdf-gauge { border-color: #cacaca; }
 pdf-gauge-value { display: block; box-sizing: border-box; height: 100%; background-color: #107c10; border-radius: calc(0.25em - 1px) 0 0 calc(0.25em - 1px); }
 progress pdf-gauge-value { height: calc(100% + 2px); margin: -1px 0 0 -1px; border: 1px solid #3b75ba; border-right: 0; border-radius: 0.25em 0 0 0.25em; background-color: #0075ff; }
+/* An indeterminate progress bar, as Chrome prints it: a short bar at the start of the track. */
+progress pdf-gauge-value[indeterminate] { border-right: 1px solid #3b75ba; border-radius: 0.25em; }
 pdf-gauge-value[suboptimal] { background-color: #ffb900; }
 pdf-gauge-value[even-less-good] { background-color: #d83b01; }
 /* The first summary of a details element is its label, with a disclosure triangle; a closed details shows only that. */
@@ -115,6 +117,26 @@ pdf-field-value[combo] { padding: 0 20px 0 4px; }
 pdf-field-value[combo]:not([sizer]) { padding-top: 1px; padding-bottom: 1px; }
 input[type=date] pdf-field-value, input[type=month] pdf-field-value, input[type=week] pdf-field-value,
 input[type=datetime-local] pdf-field-value { padding: 1px 0; }
+/* Date and time inputs, as Chrome prints them: the value in a monospace font, as wide as the format, with a calendar or a
+   clock at the end. The icon takes no room in the line, as the text never reaches it in Chrome either. */
+input[type=date], input[type=time], input[type=datetime-local], input[type=month], input[type=week] { font-family: monospace; padding: 1px 1px 1px 2px; }
+input[type=date] { -pdfpecker-control-width: 9.025em; }
+input[type=time] { -pdfpecker-control-width: 7.425em; }
+input[type=time][pdf-seconds] { -pdfpecker-control-width: 9.375em; }
+input[type=datetime-local] { -pdfpecker-control-width: 15.475em; }
+input[type=datetime-local][pdf-seconds] { -pdfpecker-control-width: 17.275em; }
+input[type=month] { -pdfpecker-control-width: 11.275em; }
+input[type=week] { -pdfpecker-control-width: 10.675em; }
+input[type=time] pdf-field-value { padding: 0.175em 0; }
+pdf-field-icon {
+  float: right; width: 0.75em; height: 0.806em; margin: 0.17em 0.287em 0 -1.037em;
+  background: url(""data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 32'%3E%3Cpath d='M2 7h26v4H2z M7 1h3v6H7z M20 1h3v6h-3z'/%3E%3Crect x='2' y='5' width='26' height='25.5' rx='2.5' fill='none' stroke='black' stroke-width='3'/%3E%3C/svg%3E"") no-repeat;
+  background-size: 100% 100%;
+}
+pdf-field-icon[clock] {
+  width: 0.86em; height: 0.84em; margin: 0.32em 0.32em 0 -1.18em;
+  background-image: url(""data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='black' stroke-width='3'/%3E%3Cpath d='M16 7v10l6.5 4' fill='none' stroke='black' stroke-width='3'/%3E%3C/svg%3E"");
+}
 textarea pdf-field-value { white-space: pre-wrap; overflow-wrap: break-word; }
 option, optgroup { display: none; }
 /* A nested svg element, a symbol and a marker clip what they draw to their viewport, as in Chrome. */

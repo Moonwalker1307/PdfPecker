@@ -2163,9 +2163,10 @@ internal sealed partial class LayoutEngine
         }
         else if (e.Control is { Kind: ControlKind.Text } && !s.FieldSizingContent)
         {
-            // A text field is as wide as its size attribute (a textarea's cols) says, whatever its value, as in Chrome;
+            // A text field is as wide as its size attribute (a textarea's cols) or its type says, whatever its value, as in Chrome;
             // with field-sizing: content it is measured by its value like any other box.
-            float w = FormControls.FieldWidthEm(FormControls.FieldChars(e) ?? 20) * s.FontSize;
+            float w = FormControls.FieldChars(e) is int chars ? FormControls.FieldWidthEm(chars) * s.FontSize
+                : s.ControlWidth.Unit == LengthUnit.Pt ? s.ControlWidth.Value : FormControls.FieldWidthEm(20) * s.FontSize;
             result = (w + frame, w + frame);
         }
         else if (HasSizeContainment(s))
