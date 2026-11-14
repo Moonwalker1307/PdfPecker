@@ -46,6 +46,14 @@ internal sealed partial class PdfFont
     private string? _ordering, _predefinedOrdering;
     private CMap? _cidUnicode;
 
+    /// <summary>
+    /// Whether a built-in face stands in for a font the PDF does not embed, and which weight and style it was chosen
+    /// for, so that characters the face lacks can be drawn with a caller's fonts.
+    /// </summary>
+    public bool Substituted { get; private set; }
+    public bool SubstituteBold { get; private set; }
+    public bool SubstituteSerif { get; private set; }
+
     // Type 3.
     public Matrix FontMatrix { get; private set; } = Matrix.Scale(0.001, 0.001);
     public PdfStream?[]? Type3Procs { get; private set; }

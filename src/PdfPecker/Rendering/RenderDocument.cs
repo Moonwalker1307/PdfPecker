@@ -210,14 +210,14 @@ internal sealed class RenderDocument
     /// <paramref name="reuse"/> when it has the canvas's pixel count.
     /// </summary>
     public Canvas Render(int index, double scaleX, double scaleY, int width, int height, uint background, bool annotations, CancellationToken cancel,
-        uint[]? reuse = null)
+        uint[]? reuse = null, FontCollection? fonts = null)
     {
         var p = Pages[index];
         // Pages are drawn on a transparent backdrop, as PDF blend modes expect, then put on the background.
         var canvas = new Canvas(width, height, 0, reuse);
         double sx = scaleX * p.UserUnit, sy = scaleY * p.UserUnit;
         var m = PageMatrix(p, sx, sy);
-        var r = new PageRenderer(File, _cache, canvas, cancel);
+        var r = new PageRenderer(File, _cache, canvas, cancel) { FallbackFonts = fonts };
         using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, m, annotations);
         if (background != 0) PutOnBackground(canvas.Pixels, background);
         return canvas;
