@@ -87,6 +87,7 @@ internal sealed class Element : Node
         public Layout.FormControl? Control;
         public Dictionary<string, string>? AttributeIndex;
         public string? AltText;
+        public string? GeneratedAlt;
         public bool EmbedsPicture;
         public float GeneratedResolution = 1;
         public float ContainerWidth = float.NaN, ContainerHeight = float.NaN;
@@ -176,6 +177,16 @@ internal sealed class Element : Node
     {
         get => _rare?.AltText;
         set { if (value != null || _rare != null) Rare.AltText = value; }
+    }
+
+    /// <summary>
+    /// For a ::before or ::after box whose content has alternative text after "/": that text, which the structure tree
+    /// of a tagged PDF gives in place of the box's content. Empty marks the content as decorative.
+    /// </summary>
+    public string? GeneratedAlt
+    {
+        get => _rare?.GeneratedAlt;
+        set { if (value != null || _rare != null) Rare.GeneratedAlt = value; }
     }
 
     /// <summary>
