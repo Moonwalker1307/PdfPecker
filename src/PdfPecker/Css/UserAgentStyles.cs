@@ -73,7 +73,15 @@ input, select, button, textarea {
 }
 input, select, textarea { background-color: white; border: 1px solid #767676; }
 input { padding: 2px 3px; border-radius: 2px; -pdfpecker-control-width: 13.275em; }
-input[type=hidden], input[type=image], input[type=file], input[type=range], input[type=color] { display: none; }
+input[type=hidden], input[type=image], input[type=file] { display: none; }
+/* A slider and a colour well, as Chrome prints them: the track, its filled part and the thumb, and a swatch. Chrome puts
+   a slider's baseline at its bottom border edge and a colour well's at the bottom of its swatch. */
+input[type=range] { width: 129px; height: 16px; margin: 2px; padding: 0; border: 0; border-radius: 0; background: none; box-sizing: border-box; -pdfpecker-control-width: auto; vertical-align: -2px; }
+pdf-range-track { display: block; position: relative; box-sizing: border-box; height: 8px; margin: 4px 1px; border: 1px solid #b2b2b2; border-radius: 4px; background-color: #efefef; }
+pdf-range-fill { display: block; box-sizing: border-box; height: 8px; margin: -1px 0 0 -1px; border: 1px solid #3b75ba; border-right: 0; border-radius: 4px 0 0 4px; background-color: #0075ff; }
+pdf-range-thumb { display: block; position: absolute; top: -5px; width: 16px; height: 16px; border-radius: 50%; background-color: #0075ff; }
+input[type=color] { width: 50px; height: 27px; padding: 1px 2px; border-radius: 3px; background-color: #efefef; box-sizing: border-box; -pdfpecker-control-width: auto; }
+pdf-color-swatch { display: inline-block; box-sizing: border-box; width: calc(100% - 4px); height: calc(100% - 8px); margin: 4px 2px 0; border: 1px solid #777777; }
 input[type=checkbox], input[type=radio] { width: 13px; height: 13px; padding: 0; box-sizing: border-box; }
 input[type=checkbox] { margin: 3px 3px 3px 4px; border-radius: 2px; }
 input[type=radio] { margin: 3px 3px 0 5px; border-radius: 50%; }

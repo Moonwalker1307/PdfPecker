@@ -119,6 +119,7 @@ internal static class GeneratedContent
         {
             char c = value[i];
             if (char.IsWhiteSpace(c)) { i++; continue; }
+            if (c == '/') break; // alternative text follows (AltText reads it); it is not drawn
             if (c is '"' or '\'')
             {
                 if (!ReadString(value, ref i, sb)) return null;
@@ -154,6 +155,46 @@ internal static class GeneratedContent
             if (sb.Length > MaxLength) break;
         }
         return sb.Length > MaxLength ? sb.ToString(0, MaxLength) : sb.ToString();
+    }
+
+    /// <summary>
+    /// The alternative text of a content value, after its "/" (content: "★" / "Favourite"): what assistive technology
+    /// reads instead of the generated content. Empty alternative text marks the content as decorative. Null when the
+    /// value has none, or when it is not valid, as it may only hold strings, counters and attr().
+    /// </summary>
+    public static string? AltText(string value, Element host, StyleResolver resolver, ComputedStyle? style = null)
+    {
+        int slash = AltSlash(value);
+        if (slash < 0) return null;
+        var alt = value.Substring(slash + 1).Trim();
+        if (AltSlash(alt) >= 0) return null;
+        // Quotes in alternative text must not change the nesting depth of the quotes the page shows.
+        int depth = resolver.QuoteDepth;
+        var text = Evaluate(alt, host, resolver, style);
+        resolver.QuoteDepth = depth;
+        return text;
+    }
+
+    /// <summary>The index of the "/" that starts a content value's alternative text, outside strings and functions; -1 if none.</summary>
+    internal static int AltSlash(string v)
+    {
+        int depth = 0;
+        char quote = '\0';
+        for (int i = 0; i < v.Length; i++)
+        {
+            char c = v[i];
+            if (quote != '\0')
+            {
+                if (c == '\\') i++;
+                else if (c == quote) quote = '\0';
+                continue;
+            }
+            if (c is '"' or '\'') quote = c;
+            else if (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (c == '/' && depth == 0) return i;
+        }
+        return -1;
     }
 
     private static bool Function(string name, List<string> args, Element host, StyleResolver resolver, StringBuilder sb)

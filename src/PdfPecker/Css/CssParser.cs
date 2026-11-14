@@ -153,6 +153,7 @@ internal static partial class CssParser
                 case "counter-style": ParseCounterStyle(prelude, _reader.Text(brace + 1, close), _scope.Sheet); break;
                 case "font-feature-values": _scope.Sheet.FontFeatureValues.Add(prelude, _reader.Text(brace + 1, close)); break;
                 case "font-palette-values": ParseFontPaletteValues(prelude, _reader.Text(brace + 1, close), _scope.Sheet); break;
+                case "function": ParseFunction(prelude, _reader.Text(brace + 1, close), _scope.Sheet); break;
             }
         }
 
@@ -179,7 +180,7 @@ internal static partial class CssParser
     /// </summary>
     private static void ParseStyleBlock(CssReader block, List<string> selectors, in RuleScope scope)
     {
-        if (block.IndexOfOutsideQuotes('{') < 0)
+        if (block.IndexOfBlockOpen() < 0)
         {
             AddRule(block.RemainingText(), selectors, scope);
             return;
@@ -187,7 +188,7 @@ internal static partial class CssParser
         int declarationsStart = block.Position;
         while (!block.AtEnd)
         {
-            int brace = block.IndexOfOutsideQuotes('{');
+            int brace = block.IndexOfBlockOpen();
             if (brace < 0) break;
             int preludeStart = block.StartOfPrelude(brace, declarationsStart);
             if (preludeStart > declarationsStart) AddRule(block.Text(declarationsStart, preludeStart), selectors, scope);

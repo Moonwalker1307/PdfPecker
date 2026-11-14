@@ -30,6 +30,12 @@ internal sealed partial class StyleResolver
 
     private void ApplyFlexBasis(ComputedStyle s, in DeclaredValue d)
     {
+        if (CssCalcSize.Is(d.Lower))
+        {
+            if (!CssCalcSize.TryRead(d.Lower, d.Em, _rootFontSize, _vw, _vh, out var value, out var adjust) || adjust != null) return;
+            ApplyFlexBasis(s, new DeclaredValue(value, d.Em));
+            return;
+        }
         if (d.Lower is "content" or "auto" or "max-content" or "min-content" or "fit-content") s.FlexBasis = Length.Auto;
         else
         {
@@ -153,5 +159,13 @@ internal sealed partial class StyleResolver
         var width = s.ColumnWidth;
         SetLength(ref width, d.Lower, d.Em, null);
         s.ColumnWidth = width.IsPercent ? Length.Auto : width;
+    }
+
+    /// <summary>column-height: auto or a length that is not negative; Chrome takes no percentage.</summary>
+    private void ApplyColumnHeight(ComputedStyle s, in DeclaredValue d)
+    {
+        if (d.Lower == "auto") { s.ColumnHeight = null; return; }
+        var height = Length.Auto;
+        if (SetLength(ref height, d.Lower, d.Em, null, noAuto: true) && !height.IsPercent && height.Value >= 0) s.ColumnHeight = height;
     }
 }

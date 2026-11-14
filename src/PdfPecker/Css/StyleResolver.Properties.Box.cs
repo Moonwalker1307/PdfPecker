@@ -47,6 +47,15 @@ internal sealed partial class StyleResolver
     /// <summary>width: a length, or an intrinsic size keyword, which leaves the length auto for layout to size.</summary>
     private void ApplyWidth(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
+        if (CssCalcSize.Is(d.Lower))
+        {
+            // calc-size(): a length basis gives a calc(); a keyword basis keeps the keyword, with the change to its size.
+            if (!CssCalcSize.TryRead(d.Lower, d.Em, _rootFontSize, _vw, _vh, out var value, out var adjust)) return;
+            ApplyWidth(s, parent, new DeclaredValue(value, d.Em));
+            s.WidthCalcSize = adjust;
+            return;
+        }
+        s.WidthCalcSize = d.Inherit ? parent.WidthCalcSize : null;
         if (IsStretch(d.Lower))
         {
             s.Width = Length.Auto;
@@ -75,12 +84,35 @@ internal sealed partial class StyleResolver
         else if (set) s.Stretched &= ~StretchSizes.Width;
     }
 
+    /// <summary>height: as the other sizes, and calc-size(), whose keyword basis is the height of the content.</summary>
+    private void ApplyHeight(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (CssCalcSize.Is(d.Lower))
+        {
+            if (!CssCalcSize.TryRead(d.Lower, d.Em, _rootFontSize, _vw, _vh, out var value, out var adjust)) return;
+            // Height has no intrinsic keywords of its own: each of them is the content's height, as auto is.
+            if (adjust != null || value is "min-content" or "max-content" or "fit-content") value = "auto";
+            ApplyHeight(s, parent, new DeclaredValue(value, d.Em));
+            s.HeightCalcSize = adjust;
+            return;
+        }
+        ApplySize(ref s.Height, s, parent, in d, StretchSizes.Height, d.Inherit ? parent.Height : null);
+        s.HeightCalcSize = d.Inherit ? parent.HeightCalcSize : null;
+    }
+
     /// <summary>
     /// height, min-width, min-height, max-width or max-height (<paramref name="which"/>): a length, none for the maximums,
     /// or stretch, which <see cref="ResolveStretched"/> turns into a length once the margins are known.
     /// </summary>
     private void ApplySize(ref Length target, ComputedStyle s, ComputedStyle parent, in DeclaredValue d, StretchSizes which, Length? inherited)
     {
+        if (CssCalcSize.Is(d.Lower))
+        {
+            // A minimum or maximum takes calc-size() of a length; its keyword bases have no size here.
+            if (!CssCalcSize.TryRead(d.Lower, d.Em, _rootFontSize, _vw, _vh, out var value, out var adjust) || adjust != null || !value.StartsWith("calc(", StringComparison.Ordinal)) return;
+            ApplySize(ref target, s, parent, new DeclaredValue(value, d.Em), which, inherited);
+            return;
+        }
         if (IsStretch(d.Lower))
         {
             s.Stretched |= which;

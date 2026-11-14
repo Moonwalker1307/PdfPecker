@@ -151,7 +151,7 @@ internal sealed partial class StyleResolver
             case "max-inline-size": Apply(s, parent, "max-width", raw); break;
             case "max-block-size": Apply(s, parent, "max-height", raw); break;
             case "width": ApplyWidth(s, parent, in d); break;
-            case "height": ApplySize(ref s.Height, s, parent, in d, StretchSizes.Height, d.Inherit ? parent.Height : null); break;
+            case "height": ApplyHeight(s, parent, in d); break;
             case "min-width": { var limit = s.MinWidth; ApplySize(ref limit, s, parent, in d, StretchSizes.MinWidth, null); s.MinWidth = limit; break; }
             case "min-height": { var limit = s.MinHeight; ApplySize(ref limit, s, parent, in d, StretchSizes.MinHeight, null); s.MinHeight = limit; break; }
             case "max-width": { var limit = s.MaxWidth; ApplySize(ref limit, s, parent, in d, StretchSizes.MaxWidth, null); s.MaxWidth = limit; break; }
@@ -329,6 +329,10 @@ internal sealed partial class StyleResolver
                 break;
             case "column-span": s.ColumnSpanAll = d.Lower == "all"; break;
             case "column-fill": s.ColumnFillAuto = d.Lower == "auto"; break;
+            case "column-height": ApplyColumnHeight(s, in d); break;
+            case "column-wrap":
+                if (d.Lower is "auto" or "nowrap" or "wrap") s.ColumnWrap = d.Lower switch { "nowrap" => ColumnWrap.NoWrap, "wrap" => ColumnWrap.Wrap, _ => ColumnWrap.Auto };
+                break;
 
             // ---- gap decorations (Properties.Gaps.cs)
             case "row-rule-style":

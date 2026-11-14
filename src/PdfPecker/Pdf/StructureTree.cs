@@ -185,6 +185,16 @@ internal sealed class StructureTree
             // content, such as a "Sign here" line, is tagged as usual beside it.
             _forms[e] = new StructElem("Form", parent) { Alt = signature.Tooltip ?? signature.Name, Lang = LangOf(e) };
         }
+        if (e.Generated && e.GeneratedAlt is { } generatedAlt)
+        {
+            // Content with alternative text (content: "★" / "Favourite") is read as that text, like an image's alt,
+            // and empty alternative text makes it an artifact.
+            if (string.IsNullOrWhiteSpace(generatedAlt)) return;
+            var replaced = new StructElem("Span", parent) { Alt = generatedAlt.Trim(), Lang = LangOf(e) };
+            _elements[e] = replaced;
+            VisitChildren(e, replaced);
+            return;
+        }
         switch (e.Name)
         {
             // An image that shows its alt text as text is no figure: the text is content of its parent.
