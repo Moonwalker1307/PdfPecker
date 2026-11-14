@@ -8,10 +8,12 @@ Your details
 
 Name:
 
+someone@example.com
 Email:
 
 Send me the newsletter
 
+Standard
 Plan:
 
 Prices

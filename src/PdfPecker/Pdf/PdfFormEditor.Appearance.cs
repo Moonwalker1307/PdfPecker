@@ -164,7 +164,7 @@ internal sealed partial class PdfFormEditor
             var fileEntries = Entries();
             if (_program.IsCff) fileEntries["Subtype"] = PdfName.Get("OpenType");
             else fileEntries["Length1"] = PdfNumber.Int(fileData.Length);
-            var fileRef = e.Add(FlateStream(fileEntries, fileData));
+            var fileRef = e.Add(e.FlateStream(fileEntries, fileData));
 
             var cmap = new StringBuilder("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n")
                 .Append("/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
@@ -182,7 +182,7 @@ internal sealed partial class PdfFormEditor
                 cmap.Append("endbfchar\n");
             }
             cmap.Append("endcmap\nCMapName currentdict /CMapResource defineresource pop\nend\nend\n");
-            var toUnicode = e.Add(FlateStream(Entries(), Encoding.ASCII.GetBytes(cmap.ToString())));
+            var toUnicode = e.Add(e.FlateStream(Entries(), Encoding.ASCII.GetBytes(cmap.ToString())));
 
             var type0 = new PdfDict(Entries());
             type0.Entries["Type"] = PdfName.Get("Font");
