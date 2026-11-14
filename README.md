@@ -346,7 +346,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. Check boxes
   and radio buttons take `accent-color`, and `appearance: none` leaves them to the page's own CSS (`:checked`,
   `::before` and `::after`), as for toggle switches; such a control is drawn rather than made a field. `field-sizing: content` makes text
-  fields, textareas and drop-downs as wide (and textareas as tall) as their value, as in Chrome. An element with
+  fields, textareas and drop-downs as wide (and textareas as tall) as their value, as in Chrome. Sliders
+  (`type=range`) and colour wells (`type=color`) are drawn at their value as Chrome prints them, and a drop-down or a
+  button with `display: block` keeps the width of its content. An element with
   `data-pdf-signature="Buyer"` becomes an empty signature field over its box, which `PdfSigner` fills later with
   `FieldName = "Buyer"`. [More](https://pdfpecker.net/docs/forms/)
 - **Digital signatures**: PAdES signing, certification signatures, timestamps, external signers, verification (SHA-1

@@ -48,6 +48,8 @@ internal static class FormControls
 {
     public const string ValueElement = "pdf-field-value";
     public const string GaugeElement = "pdf-gauge", GaugeValueElement = "pdf-gauge-value";
+    public const string RangeTrackElement = "pdf-range-track", RangeFillElement = "pdf-range-fill", RangeThumbElement = "pdf-range-thumb";
+    public const string ColorSwatchElement = "pdf-color-swatch";
 
     /// <summary>
     /// The attribute that makes an element's box an empty signature field, named by its value, which
@@ -150,7 +152,10 @@ internal static class FormControls
                     if (type.Length == 0 || type is not ("checkbox" or "radio" or "submit" or "reset" or "button" or "hidden" or "image" or "file" or "range" or "color")
                         && !TextTypes.Contains(type)) type = "text"; // an unknown type is a text field (HTML §4.10.5)
                     SetAttribute(e, "type", type);
-                    if (type is "hidden" or "image" or "file" or "range" or "color") return; // not drawn (see the user agent styles)
+                    if (type is "hidden" or "image" or "file") return; // not drawn (see the user agent styles)
+                    // A slider and a colour well are drawn as Chrome prints them; a PDF has no field for either.
+                    if (type == "range") { PrepareRange(e); return; }
+                    if (type == "color") { PrepareColor(e); return; }
                     string? value = e.GetAttribute("value");
                     switch (type)
                     {
@@ -327,11 +332,59 @@ internal static class FormControls
         track.AppendChild(bar);
         SetValueChildren(e, track);
 
-        static double Number(Element e, string name, double fallback)
-            => double.TryParse(e.GetAttribute(name), NumberStyles.Float, CultureInfo.InvariantCulture, out double v) && double.IsFinite(v) ? v : fallback;
-
         static string Percent(double f) => (Math.Round(f * 100, 4)).ToString(CultureInfo.InvariantCulture) + "%";
     }
+
+    /// <summary>
+    /// A slider: a rounded track, filled up to a round thumb that sits at the value's place between min and max, drawn
+    /// as Chrome prints it (see the user agent styles). The value snaps to the step, as a browser keeps it.
+    /// </summary>
+    private static void PrepareRange(Element e)
+    {
+        double min = Number(e, "min", 0), max = Number(e, "max", 100);
+        if (max < min) max = min;
+        double value = e.HasAttribute("value") && double.TryParse(e.GetAttribute("value"), NumberStyles.Float, CultureInfo.InvariantCulture, out double v) && double.IsFinite(v)
+            ? v : min + (max - min) / 2;
+        value = Math.Clamp(value, min, max);
+        var stepText = e.GetAttribute("step")?.Trim();
+        if (!string.Equals(stepText, "any", StringComparison.OrdinalIgnoreCase))
+        {
+            double step = Number(e, "step", 1);
+            if (step <= 0) step = 1;
+            double snapped = min + Math.Round((value - min) / step, MidpointRounding.AwayFromZero) * step;
+            // A step past the maximum goes back one step, as in a browser.
+            if (snapped > max) snapped -= step;
+            if (double.IsFinite(snapped)) value = Math.Clamp(snapped, min, max);
+        }
+        double fraction = max > min ? (value - min) / (max - min) : 0;
+        if (!double.IsFinite(fraction)) fraction = 0;
+        string f = fraction.ToString("0.######", CultureInfo.InvariantCulture);
+        // The thumb is 16px across and travels over the track's width less its own: its centre runs from 8px to the
+        // width less 8px. The track lies 1px in from each side and has a 1px border, so its content is 4px narrower
+        // than the slider.
+        var fill = new Element(RangeFillElement);
+        fill.AddAttribute("style", "width: calc(" + f + " * (100% - 12px) + 7px)");
+        var thumb = new Element(RangeThumbElement);
+        thumb.AddAttribute("style", "left: calc(" + f + " * (100% - 12px) - 2px)");
+        var track = new Element(RangeTrackElement);
+        track.AppendChild(fill);
+        track.AppendChild(thumb);
+        SetValueChildren(e, track);
+    }
+
+    /// <summary>A colour well: a swatch of its value, which must be a #rrggbb colour (black otherwise), as Chrome prints it.</summary>
+    private static void PrepareColor(Element e)
+    {
+        var value = e.GetAttribute("value")?.Trim() ?? "";
+        bool valid = value.Length == 7 && value[0] == '#';
+        for (int i = 1; valid && i < 7; i++) valid = Uri.IsHexDigit(value[i]);
+        var swatch = new Element(ColorSwatchElement);
+        swatch.AddAttribute("style", "background-color: " + (valid ? value.ToLowerInvariant() : "#000000"));
+        SetValueChildren(e, swatch);
+    }
+
+    private static double Number(Element e, string name, double fallback)
+        => double.TryParse(e.GetAttribute(name), NumberStyles.Float, CultureInfo.InvariantCulture, out double v) && double.IsFinite(v) ? v : fallback;
 
     private static void CollectOptions(Element e, List<(string Export, string Text, bool Selected)> options)
     {
