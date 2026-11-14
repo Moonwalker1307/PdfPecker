@@ -3885,6 +3885,21 @@ public class HostileInputTests
         Assert.Equal(new string('x', 64), Css.GeneratedContent.UnquoteMark("\"" + new string('x', 100) + "\""));
         Assert.Equal(new string('x', 63), Css.GeneratedContent.Cut(new string('x', 63) + "\U0001F600", 64));
     }
+
+    [Theory]
+    [InlineData("columns: 2; column-height: 1px")]
+    [InlineData("columns: 100; column-height: 1.5px; row-gap: 0")]
+    [InlineData("columns: 3; column-height: 1e30px")]
+    [InlineData("columns: 3; column-height: 0")]
+    [InlineData("columns: 3; column-wrap: wrap; height: 2px")]
+    public void Tiny_and_huge_column_heights_stay_bounded(string style)
+    {
+        // Every row of columns is laid out again while the rows grow, so rows of a pixel over a long text must stop at
+        // the fragment limit rather than lay the content out thousands of times.
+        string text = Repeat("<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>", 2000);
+        var pdf = Bounded($"<div style='{style}'><div style='columns: 2; column-height: 3px'>{text}</div>{text}</div>");
+        Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(pdf, 0, 5));
+    }
 }
 
 /// <summary>Hostile CFF and CFF2 fonts whose subroutines fan out exponentially.</summary>

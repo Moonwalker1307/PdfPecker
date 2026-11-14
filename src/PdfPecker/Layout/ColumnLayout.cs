@@ -175,7 +175,7 @@ internal sealed partial class LayoutEngine
     /// Lays out children[from..to) of a multi-column box in n columns from y. Returns the bottom of the columns, which
     /// leaves out the bottom margin of the last box in them, as Chrome does.
     /// </summary>
-    private float LayoutColumnSet(Element e, int from, int to, float x, float y, int n, float colW, float gap, float? definiteH)
+    private float LayoutColumnSet(Element e, int from, int to, float x, float y, int n, float colW, float gap, float? definiteH, bool fixedRow = false)
     {
         if (!HasColumnContent(e, from, to)) return y;
         var s = e.Style;
@@ -185,6 +185,23 @@ internal sealed partial class LayoutEngine
         bool paginated = _paginate;
         int page = paginated ? PageOf(y) : 0;
         float room = paginated ? Math.Max(0, FlowEnd(page) - y) : float.PositiveInfinity;
+        // column-height gives each row of columns its height; with column-wrap (which column-height turns on) the
+        // columns that do not fit a row go on in a new row below it, else they overflow beside the row as when the box
+        // has a height. Without column-height, column-wrap: wrap makes rows of the box's height.
+        float? columnHeight = fixedRow ? null : s.ColumnHeight is { } ch ? Math.Max(0, ch.Value) : null;
+        bool wrap = !fixedRow && ( s.ColumnWrap == ColumnWrap.Wrap || s.ColumnWrap == ColumnWrap.Auto && columnHeight != null);
+        float rowHeight = Math.Min(columnHeight ?? limit, limit);
+        if (wrap && rowHeight >= 1 && !float.IsPositiveInfinity(rowHeight))
+        {
+            float rowGap = s.RowGap is { } rg ? Math.Max(0, rg.IsPercent ? definiteH is { } basis ? rg.Resolve(basis) : 0 : rg.Value) : s.FontSize;
+            return LayoutWrappedColumns(e, from, to, x, y, n, colW, gap, rowHeight, (columnHeight ?? rowHeight) + rowGap);
+        }
+        if (columnHeight is { } single)
+        {
+            // One row as tall as column-height, which the box is as tall as even when balanced content takes less.
+            float end = LayoutColumnSet(e, from, to, x, y, n, colW, gap, Math.Min(single, limit), fixedRow: true);
+            return paginated && PageOf(y + single) != page ? end : Math.Max(end, y + Math.Min(single, limit));
+        }
 
         float[] rows;
         bool overflows;
@@ -238,6 +255,60 @@ internal sealed partial class LayoutEngine
         var (pass, bestGrid, rowH) = best;
         float bottom = PlaceColumns(pass, bestGrid, row, rowH, s, x, n, colW, gap);
         return bottom;
+    }
+
+    /// <summary>
+    /// Lays out children[from..to) in rows of columns <paramref name="rowHeight"/> tall, each row
+    /// <paramref name="pitch"/> below the one before, as column-wrap makes them. A row that does not fit the rest of a
+    /// page starts the next, as in Chrome, which does not split a row between pages. The last row is balanced unless
+    /// column-fill is auto, but the box is as tall as all its rows. Returns the bottom of the last row.
+    /// </summary>
+    private float LayoutWrappedColumns(Element e, int from, int to, float x, float y, int n, float colW, float gap, float rowHeight, float pitch)
+    {
+        var s = e.Style;
+        var outer = _grid;
+        bool paginated = _paginate;
+        int page = paginated ? PageOf(y) : 0;
+        // As many rows as the content needs, found by doubling, up to the fragments a box may split into.
+        int maxRows = Math.Max(1, MaxSplitFragments / n);
+        ColumnPass fill;
+        ColumnGrid grid;
+        int endK, row;
+        for (int count = Math.Min(8, maxRows); ; count = Math.Min(count * 2, maxRows))
+        {
+            Cancellation.ThrowIfCancellationRequested();
+            var heights = new float[count];
+            var tops = new float[count];
+            var pages = new int[count];
+            float t = y;
+            for (int j = 0; j < count; j++)
+            {
+                float h = rowHeight;
+                int p = page;
+                if (j > 0) t = tops[j - 1] + pitch;
+                if (paginated)
+                {
+                    // A row cut short by the end of a page fills it: the next row starts the next page.
+                    if (j > 0 && heights[j - 1] < rowHeight - Eps) t = FlowStart(pages[j - 1] + 1);
+                    p = PageOf(t);
+                    if (t + h > FlowEnd(p) + Eps && !AtPageTop(t)) t = FlowStart(++p);
+                    h = Math.Max(0, Math.Min(h, FlowEnd(p) - t));
+                }
+                tops[j] = t;
+                heights[j] = h;
+                pages[j] = p;
+            }
+            grid = new ColumnGrid(outer, page, y, n, heights, lastOverflows: true, tops, pages);
+            fill = RunColumnPass(e, from, to, x, colW, grid, 0, noteMarks: true);
+            endK = EndFragment(fill, grid);
+            row = grid.RowOf(endK);
+            if (row < count - 1 || count >= maxRows) break;
+        }
+        var best = (Pass: fill, Grid: grid, Height: Math.Min(grid.RowHeight(row), Tallest(fill, grid, row, endK)));
+        if (!s.ColumnFillAuto && endK < grid.FirstFragmentOf(row) + n) best = Balance(e, from, to, x, colW, best, row, endK);
+        // The rules of a balanced last row are as tall as the row, as in Chrome.
+        PlaceColumns(best.Pass, best.Grid, row, best.Height, s, x, n, colW, gap, grid.RowHeight(row));
+        return grid.RowTop(row) + grid.RowHeight(row);
     }
 
     /// <summary>
@@ -313,7 +384,7 @@ internal sealed partial class LayoutEngine
         foreach (var (row, added) in calls)
         {
             if (row > lastRow) continue;
-            int page = g.FirstPage + row;
+            int page = g.RowPage(row);
             float bottom = g.RowTop(row) + (row == lastRow ? lastHeight : g.RowHeight(row));
             float end = FlowEnd(page) - AddedFootnoteReserve(page, added);
             if (bottom <= end + Eps) continue;
@@ -389,7 +460,7 @@ internal sealed partial class LayoutEngine
             }
             long before = _boxLayouts;
             rows[row] = h;
-            var grid = new ColumnGrid(fillGrid.Outer, fillGrid.FirstPage, fillGrid.Top, n, (float[])rows.Clone(), overflows);
+            var grid = fillGrid.WithRows((float[])rows.Clone(), overflows);
             // The content before the row asks how tall the columns after it are, so it lays out as before only while
             // the tallest of them is the same.
             bool same = Math.Abs(grid.Height(first) - fillGrid.Height(first)) < Eps;
@@ -670,9 +741,11 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// Moves the ops of a pass into their columns and appends them to the output, with the anchors, absolutely
-    /// positioned boxes and column rules. Returns the bottom of the last row, <paramref name="lastHeight"/> tall.
+    /// positioned boxes and column rules. Returns the bottom of the last row, <paramref name="lastHeight"/> tall. The rules
+    /// of the last row are <paramref name="lastRuleHeight"/> tall when given.
     /// </summary>
-    private float PlaceColumns(ColumnPass p, ColumnGrid g, int lastRow, float lastHeight, ComputedStyle s, float x, int n, float colW, float gap)
+    private float PlaceColumns(ColumnPass p, ColumnGrid g, int lastRow, float lastHeight, ComputedStyle s, float x, int n, float colW, float gap,
+        float? lastRuleHeight = null)
     {
         float step = colW + gap;
         bool rtl = s.Rtl;
@@ -729,9 +802,9 @@ internal sealed partial class LayoutEngine
         for (int row = 0; row <= lastRow; row++)
         {
             float top = g.RowTop(row), h = row == lastRow ? lastHeight : g.RowHeight(row);
-            ColumnRules(s, used[row], x, top, top + h, colW, gap, n, rtl);
+            ColumnRules(s, used[row], x, top, top + (row == lastRow ? lastRuleHeight ?? h : h), colW, gap, n, rtl);
             // A box around this one that balances its own columns learns where this one's content ends in them.
-            if (row < lastRow && _paginate) _columnNotes?.Break(g.FirstPage + row, top + h, 0);
+            if (row < lastRow && _paginate && g.RowPage(row + 1) > g.RowPage(row)) _columnNotes?.Break(g.RowPage(row), top + h, 0);
         }
         return bottom;
     }
@@ -1277,10 +1350,23 @@ internal sealed class ColumnGrid : PageGrid
     private readonly double[] _rowStart;     // where each row given starts in the grid's flow, and where the last ends
     private readonly bool _lastOverflows;    // the last row given takes all further columns
     private readonly float[] _tallestFrom;   // the tallest column in each row given or any after it
+    private readonly float[]? _rowTop;       // with column-wrap, where each row given starts in Outer
+    private readonly int[]? _rowPage;        // and the fragment of Outer it is in
 
     public ColumnGrid(PageGrid outer, int firstPage, float top, int columns, float[] rows, bool lastOverflows)
+        : this(outer, firstPage, top, columns, rows, lastOverflows, null, null)
+    {
+    }
+
+    /// <summary>
+    /// A grid whose rows were placed by column-wrap: each row given starts at its own place in <see cref="Outer"/>,
+    /// several of them on one page, rather than each at the top of the next page.
+    /// </summary>
+    public ColumnGrid(PageGrid outer, int firstPage, float top, int columns, float[] rows, bool lastOverflows, float[]? rowTops, int[]? rowPages)
         : base(outer.SetupOf(0), uniform: false)
     {
+        _rowTop = rowTops;
+        _rowPage = rowPages;
         Outer = outer;
         FirstPage = firstPage;
         Top = top;
@@ -1318,7 +1404,13 @@ internal sealed class ColumnGrid : PageGrid
     public float RowHeight(int row) => row < _rowH.Length ? _rowH[row] : FragmentHeight(Outer, FirstPage + row);
 
     /// <summary>Where a row starts in <see cref="Outer"/>: the first on the page of the box, the others at the top of the next.</summary>
-    public float RowTop(int row) => row == 0 ? Top : Outer.Start(FirstPage + row);
+    public float RowTop(int row) => _rowTop != null && row < _rowTop.Length ? _rowTop[row] : row == 0 ? Top : Outer.Start(FirstPage + row);
+
+    /// <summary>The fragment of <see cref="Outer"/> a row is in.</summary>
+    public int RowPage(int row) => _rowPage != null && row < _rowPage.Length ? _rowPage[row] : FirstPage + row;
+
+    /// <summary>The same grid with other row heights, its rows starting where they did.</summary>
+    public ColumnGrid WithRows(float[] rows, bool lastOverflows) => new(Outer, FirstPage, Top, Columns, rows, lastOverflows, _rowTop, _rowPage);
 
     private double RowStart(int row)
     {

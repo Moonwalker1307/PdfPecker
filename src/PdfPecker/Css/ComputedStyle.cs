@@ -11,6 +11,9 @@ internal enum Display : byte
 internal enum FlexDirection : byte { Row, RowReverse, Column, ColumnReverse }
 internal enum FlexWrap : byte { NoWrap, Wrap, WrapReverse }
 
+/// <summary>column-wrap: whether columns past a row go on in a new row below it. Auto wraps when column-height is set.</summary>
+internal enum ColumnWrap : byte { Auto, NoWrap, Wrap }
+
 /// <summary>Values of justify-content, align-items, align-self, align-content, justify-items and justify-self.</summary>
 internal enum BoxAlign : byte { Normal, Start, End, Center, Stretch, Baseline, SpaceBetween, SpaceAround, SpaceEvenly, Auto }
 
