@@ -358,7 +358,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   and radio buttons take `accent-color`, and `appearance: none` leaves them to the page's own CSS (`:checked`,
   `::before` and `::after`), as for toggle switches; such a control is drawn rather than made a field. `field-sizing: content` makes text
   fields, textareas and drop-downs as wide (and textareas as tall) as their value, as in Chrome. Sliders
-  (`type=range`) and colour wells (`type=color`) are drawn at their value as Chrome prints them, and a drop-down or a
+  (`type=range`) and colour wells (`type=color`) are drawn at their value as Chrome prints them, date and time inputs
+  show their value in Chrome's en-US format (`11/14/2026`, `01:45 PM`, or `mm/dd/yyyy` when empty) with a calendar or
+  a clock, a progress bar without a value shows Chrome's short bar, and a drop-down or a
   button with `display: block` keeps the width of its content. An element with
   `data-pdf-signature="Buyer"` becomes an empty signature field over its box, which `PdfSigner` fills later with
   `FieldName = "Buyer"`. [More](https://pdfpecker.net/docs/forms/)

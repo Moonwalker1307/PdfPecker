@@ -47,6 +47,8 @@ internal sealed class RadioGroup
 internal static class FormControls
 {
     public const string ValueElement = "pdf-field-value";
+    // The calendar or clock at the end of a date or time input, and the mark of a time input that shows its seconds.
+    public const string IconElement = "pdf-field-icon", SecondsAttribute = "pdf-seconds";
     public const string GaugeElement = "pdf-gauge", GaugeValueElement = "pdf-gauge-value";
     public const string RangeTrackElement = "pdf-range-track", RangeFillElement = "pdf-range-fill", RangeThumbElement = "pdf-range-thumb";
     public const string ColorSwatchElement = "pdf-color-swatch";
@@ -57,9 +59,12 @@ internal static class FormControls
     /// </summary>
     public const string SignatureAttribute = "data-pdf-signature";
 
-    /// <summary>The characters a text field is wide by its size attribute (a textarea's cols), or null without one.</summary>
+    /// <summary>
+    /// The characters a text field is wide by its size attribute (a textarea's cols), or null without one. A date or
+    /// time input is as wide as its format, whatever its size attribute says, as in Chrome.
+    /// </summary>
     public static int? FieldChars(Element e)
-        => int.TryParse(e.GetAttribute(e.Name == "textarea" ? "cols" : "size"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)
+        => !(e.Name == "input" && e.GetAttribute("type") is "date" or "time" or "datetime-local" or "month" or "week") && int.TryParse(e.GetAttribute(e.Name == "textarea" ? "cols" : "size"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)
            && n > 0 ? Math.Min(n, 10000) : null;
 
     /// <summary>
@@ -200,6 +205,21 @@ internal static class FormControls
                             control.Kind = ControlKind.Button;
                             SetValueChildren(e, Line(value ?? (type == "submit" ? "Submit" : type == "reset" ? "Reset" : "")));
                             break;
+                        case "date" or "time" or "datetime-local" or "month" or "week":
+                        {
+                            // Chrome prints the value in its own en-US format with a calendar or a clock after it, and
+                            // the format's pattern when there is no valid value; a placeholder is not shown.
+                            control.Kind = ControlKind.Text;
+                            string? shown = DateShown(type, (value ?? "").Trim(), e.GetAttribute("step"), out bool seconds);
+                            if (seconds) SetAttribute(e, SecondsAttribute, "");
+                            var icon = new Element(IconElement);
+                            if (type == "time") icon.AddAttribute("clock", "");
+                            SetValueChildren(e, icon, Line(shown ?? DatePattern(type, seconds)));
+                            if (!fieldable) break;
+                            control.Field = NewField("text");
+                            control.Field.Value = shown ?? "";
+                            break;
+                        }
                         default:
                         {
                             control.Kind = ControlKind.Text;
@@ -304,12 +324,15 @@ internal static class FormControls
         double fraction;
         if (e.Name == "progress")
         {
-            // Without a value the progress is indeterminate, which a printout shows as an empty track.
+            // Without a value the progress is indeterminate, which Chrome prints as a short bar at the start.
             double max = Number(e, "max", 1);
             if (max <= 0) max = 1;
-            fraction = e.HasAttribute("value") ? Math.Clamp(Number(e, "value", 0), 0, max) / max : 0;
-            // The bar covers the track's left border, so it is a pixel wider than its share of the content.
-            bar.AddAttribute("style", "width: calc(" + Percent(fraction) + " + 1px)");
+            bool indeterminate = !e.HasAttribute("value");
+            fraction = indeterminate ? 0.2 : Math.Clamp(Number(e, "value", 0), 0, max) / max;
+            if (indeterminate) bar.AddAttribute("indeterminate", "");
+            // The bar covers the track's left border (and an indeterminate one its right border too), so it is a pixel
+            // or two wider than its share of the content.
+            bar.AddAttribute("style", "width: calc(" + Percent(fraction) + (indeterminate ? " + 2px)" : " + 1px)"));
         }
         else
         {
@@ -445,6 +468,91 @@ internal static class FormControls
     private static string Collapse(string s) => string.Join(' ', s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     private static string SingleLine(string s) => s.Replace("\r", "").Replace("\n", "");
+
+    private static readonly string[] MonthNames =
+        ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    /// <summary>
+    /// The value of a date or time input as Chrome shows it in en-US, or null when the value is not a valid one of its
+    /// type (HTML §2.3.5; years have four digits here). A time shows its seconds when it has some or when its step is not whole minutes.
+    /// </summary>
+    internal static string? DateShown(string type, string value, string? step, out bool seconds)
+    {
+        seconds = double.TryParse(step, NumberStyles.Float, CultureInfo.InvariantCulture, out double st) && st > 0 && st % 60 != 0;
+        var v = value.AsSpan();
+        switch (type)
+        {
+            case "date":
+                return Date(v);
+            case "month":
+                return v.Length == 7 && v[4] == '-' && Digits(v[..4], out int my) && my > 0 && Digits(v[5..], out int m) && m is >= 1 and <= 12
+                    ? MonthNames[m - 1] + " " + Year(my) : null;
+            case "week":
+            {
+                if (v.Length != 8 || v[4] != '-' || v[5] != 'W' || !Digits(v[..4], out int y) || y <= 0 || !Digits(v[6..], out int w)
+                    || w < 1 || w > ISOWeek.GetWeeksInYear(y)) return null;
+                return "Week " + Two(w) + ", " + Year(y);
+            }
+            case "time":
+                return Time(v, ref seconds);
+            default: // datetime-local
+            {
+                int t = v.IndexOfAny('T', ' ');
+                if (t < 0) return null;
+                string? d = Date(v[..t]), time = Time(v[(t + 1)..], ref seconds);
+                return d != null && time != null ? d + ", " + time : null;
+            }
+        }
+
+        static string? Date(ReadOnlySpan<char> v)
+        {
+            if (v.Length != 10 || v[4] != '-' || v[7] != '-' || !Digits(v[..4], out int y) || y <= 0
+                || !Digits(v.Slice(5, 2), out int m) || m is < 1 or > 12 || !Digits(v[8..], out int d) || d < 1
+                || d > DateTime.DaysInMonth(y, m)) return null;
+            return Two(m) + "/" + Two(d) + "/" + Year(y);
+        }
+
+        static string? Time(ReadOnlySpan<char> v, ref bool seconds)
+        {
+            if (v.Length < 5 || v[2] != ':' || !Digits(v[..2], out int h) || h > 23 || !Digits(v.Slice(3, 2), out int min) || min > 59) return null;
+            int s = 0;
+            if (v.Length > 5)
+            {
+                if (v.Length < 8 || v[5] != ':' || !Digits(v.Slice(6, 2), out s) || s > 59) return null;
+                // Fractions of a second are valid but not shown at this step.
+                if (v.Length > 8 && (v[8] != '.' || v.Length == 9 || v.Length > 12 || !Digits(v[9..], out _))) return null;
+            }
+            seconds |= s != 0;
+            string shown = Two(h % 12 == 0 ? 12 : h % 12) + ":" + Two(min);
+            if (seconds) shown += ":" + Two(s);
+            return shown + (h < 12 ? " AM" : " PM");
+        }
+
+        static bool Digits(ReadOnlySpan<char> v, out int n)
+        {
+            n = 0;
+            if (v.Length == 0 || v.Length > 6) return false;
+            foreach (char c in v)
+            {
+                if (!char.IsAsciiDigit(c)) return false;
+                n = n * 10 + (c - '0');
+            }
+            return true;
+        }
+
+        static string Two(int n) => n.ToString("00", CultureInfo.InvariantCulture);
+        static string Year(int y) => y.ToString("0000", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>What Chrome shows in an empty date or time input: the fields of its format, still to be filled in.</summary>
+    internal static string DatePattern(string type, bool seconds) => type switch
+    {
+        "date" => "mm/dd/yyyy",
+        "time" => seconds ? "--:--:-- --" : "--:-- --",
+        "month" => "--------- ----",
+        "week" => "Week --, ----",
+        _ => seconds ? "mm/dd/yyyy, --:--:-- --" : "mm/dd/yyyy, --:-- --",
+    };
 
     private static Element Line(string text, string? flag = null)
     {
