@@ -276,6 +276,32 @@ public class FloatPositionTests
     }
 
     [Theory]
+    // A block's background paints under the inline content of the blocks before it (CSS 2.1 Appendix E), as in Chrome:
+    // text pulled into the next box by a negative margin, a line taller than its box, and an inline box's background.
+    [InlineData("<div>above</div><div style='margin-top:-10px;height:20px;background:#00f'>below</div>")]
+    [InlineData("<div style='height:4px'>above</div><div style='background:#00f'>below</div>")]
+    [InlineData("<div><span style='background:#0f0'>above</span><div style='margin-top:-10px;height:20px;background:#00f'></div></div>")]
+    public void BlockBackgroundsPaintUnderEarlierText(string boxes)
+    {
+        var (ops, _) = Layout("<style>body{margin:0;font:16px sans-serif}</style>" + boxes);
+        var flat = Flatten(ops).ToList();
+        Assert.True(flat.FindIndex(o => o is RectOp { Color: 0xFF0000FF }) < flat.FindIndex(o => o is TextOp { Text: "above" }));
+    }
+
+    [Theory]
+    // Inside an inline-block or a flex item the backgrounds stay with the box's own content, which paints as one piece
+    // with the line around it; and a background that overlaps nothing before it stays where it was made.
+    [InlineData("<div>above</div><span style='display:inline-block'><div style='margin-top:-10px;height:20px;width:20px;background:#00f'></div></span>")]
+    [InlineData("<div>above</div><div style='display:flex'><div style='margin-top:-10px;height:20px;width:20px;background:#00f'></div></div>")]
+    [InlineData("<div>above</div><div style='height:20px;background:#00f'>below</div>")]
+    public void BlockBackgroundsStayAfterContentTheyDoNotReach(string boxes)
+    {
+        var (ops, _) = Layout("<style>body{margin:0;font:16px sans-serif}</style>" + boxes);
+        var flat = Flatten(ops).ToList();
+        Assert.True(flat.FindIndex(o => o is RectOp { Color: 0xFF0000FF }) > flat.FindIndex(o => o is TextOp { Text: "above" }));
+    }
+
+    [Theory]
     // Without offsets, an absolutely positioned child of a flex container goes where it would as the container's only
     // item (css-flexbox §4.1), as in Chrome: here in a 200px by 100px content box, the box is 20px square.
     [InlineData("justify-content:center;align-items:center", 67.5f, 30)]
