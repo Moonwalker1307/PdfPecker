@@ -42,6 +42,9 @@ internal sealed partial class PdfFont
     private readonly Dictionary<int, (double W1, double Vx, double Vy)> _vMetrics = new();
     private CffFont? _cidCff;
     private Func<int, int>? _cidFallbackGid;
+    // The Adobe ordering (Japan1, GB1, CNS1 or Korea1) of a CID font's CIDs, whose map gives a CID's character.
+    private string? _ordering, _predefinedOrdering;
+    private CMap? _cidUnicode;
 
     // Type 3.
     public Matrix FontMatrix { get; private set; } = Matrix.Scale(0.001, 0.001);

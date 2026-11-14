@@ -85,7 +85,9 @@ internal sealed partial class PdfFont
         {
             if (_unicodeCodes) return code is > 0 and <= 0xFFFF && !char.IsSurrogate((char)code) ? ((char)code).ToString() : null;
             if (Source is CffFont { IsCid: false } cff && cff.GlyphName(GlyphId(code)) is { } cidName) return NameToText(cidName);
-            return GlyphText(GlyphId(code));
+            // A font in an Adobe ordering, such as a CID-keyed CFF font, is read through the ordering's Unicode map.
+            // Its proportional spaces come as en and em spaces there, which text extraction reads as plain spaces.
+            return GlyphText(GlyphId(code)) ?? (OrderingCodePoint(code) is > 0 and var u ? FromCodePoint(u is >= 0x2000 and <= 0x200A ? ' ' : u) : null);
         }
         int c = code & 255;
         if (_encNames[c] is { } name && NameToText(name) is { } named) return named;

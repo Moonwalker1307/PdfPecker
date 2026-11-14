@@ -51,6 +51,7 @@
     <EmbeddedResource Include="Rendering/Fonts/StandardFonts.bin" LogicalName="PdfPecker.Rendering.Fonts.StandardFonts.bin" />
     <EmbeddedResource Include="Fonts/Bundled/*.ttf.br" LogicalName="PdfPecker.Fonts.Bundled.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Text/Hyphenation/*.hyph.br;Text/Hyphenation/*.tex.br" LogicalName="PdfPecker.Text.Hyphenation.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Rendering/Fonts/CMaps/*.cmaps.br" LogicalName="PdfPecker.Rendering.Fonts.CMaps.%(Filename)%(Extension)" />
     <InternalsVisibleTo Include="PdfPecker.Tests" />
     <InternalsVisibleTo Include="FontPackBuilder" />
     <InternalsVisibleTo Include="PdfPecker.Fuzz" />
