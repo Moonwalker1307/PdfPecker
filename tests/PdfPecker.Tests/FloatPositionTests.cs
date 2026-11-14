@@ -251,6 +251,30 @@ public class FloatPositionTests
         Assert.Equal(7.5f, r.Y, 1);
     }
 
+    [Theory]
+    // float and clear take inline-start and inline-end from the containing block's direction, as in Chrome.
+    [InlineData("ltr", "inline-start", 0)]
+    [InlineData("ltr", "inline-end", 455)]
+    [InlineData("rtl", "inline-start", 455)]
+    [InlineData("rtl", "inline-end", 0)]
+    public void LogicalFloatsFollowTheContainingBlocksDirection(string dir, string side, float x)
+    {
+        var (ops, _) = Layout("<style>body{margin:0}</style><div dir=" + dir + "><div style='float:" + side +
+                              ";width:60px;height:20px;background:#00f'></div>text</div>");
+        Assert.Equal(x, Rect(ops, 0xFF0000FF).X, 1);
+    }
+
+    [Theory]
+    [InlineData("ltr", "inline-start", true)]
+    [InlineData("rtl", "inline-start", false)]
+    [InlineData("rtl", "inline-end", true)]
+    public void LogicalClearFollowsTheContainingBlocksDirection(string dir, string side, bool cleared)
+    {
+        var (ops, _) = Layout("<style>body{margin:0}</style><div dir=" + dir + "><div style='float:left;width:60px;height:20px'></div>" +
+                              "<div style='clear:" + side + ";height:5px;background:#00f'></div></div>");
+        Assert.Equal(cleared ? 15 : 0, Rect(ops, 0xFF0000FF).Y, 1);
+    }
+
     [Fact]
     public void ZIndexOrdersPainting()
     {

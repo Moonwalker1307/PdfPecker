@@ -234,7 +234,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 ## Features
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables (collapsed borders also from `col` and `colgroup`; rows and
-  columns with `visibility: collapse` leave), floats with `shape-outside`, `clip-path` shapes (also `rect()` and
+  columns with `visibility: collapse` leave), floats with `shape-outside` (and `float` and `clear` with `inline-start` and `inline-end`, on the right in
+  right-to-left text, as in Chrome), `clip-path` shapes (also `rect()` and
   `xywh()`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for heights and
   their limits), percentage heights inside flex items resolved as in Chrome (stretched items, and items flexed from a
   length basis in a column whose container has only a `min-height`, as card and label layouts use), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders, backgrounds,
