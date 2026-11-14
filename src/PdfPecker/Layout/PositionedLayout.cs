@@ -438,6 +438,7 @@ internal sealed partial class LayoutEngine
             });
             FixedOps.AddRange(c.Ops);
             LayerOp.SortLayers(FixedOps);
+            PaintOrder.BackgroundsFirst(FixedOps);
             // A fixed box paints by its z-index and tree order in its stacking context, as in Chrome: content with a
             // higher z-index covers it. A marker layer of the same order says where in the flow it goes: among the
             // layers of its nearest positioned ancestor, which holds its positioned descendants, or else among the
@@ -466,6 +467,7 @@ internal sealed partial class LayoutEngine
             }
         }
         if (_hasLayers) LayerOp.SortLayers(_ops);
+        PaintOrder.BackgroundsFirst(_ops);
     }
 
     /// <summary>The layers of positioned boxes among the ops, by their tree order.</summary>

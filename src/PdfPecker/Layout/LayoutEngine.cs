@@ -280,7 +280,8 @@ internal sealed partial class LayoutEngine
         var d = e.Style.Display;
         if (e.Style.IsAtomicInline) return true;
         if (d != Display.Inline) return false;
-        return !ContainsBlock(e);
+        // An inline SVG is replaced: the blocks in its foreignObject elements are its drawing, not blocks of the line.
+        return e.IsReplaced || !ContainsBlock(e);
     }
 
     private static bool ContainsBlock(Element e)
@@ -289,7 +290,7 @@ internal sealed partial class LayoutEngine
         {
             if (c is not Element ce || ce.Style == null || ce.Detached || ce.Style.Floated || ce.Style.OutOfFlow) continue;
             var d = ce.Style.Display;
-            if (d == Display.None || ce.Style.IsAtomicInline) continue;
+            if (d == Display.None || ce.Style.IsAtomicInline || d == Display.Inline && ce.IsReplaced) continue;
             if (d != Display.Inline) return true;
             if (ContainsBlock(ce)) return true;
         }
@@ -1185,6 +1186,11 @@ internal sealed partial class LayoutEngine
         if (OrthogonalTurn(e) is int turn and not 0) return LayoutOrthogonal(e, x, y, availW, turn);
         var s = e.Style;
         bool table = s.Display == Display.Table;
+        // Inside a box painted as one piece with the lines around it, the block backgrounds stay with its content; a
+        // box with a layer of its own starts over, as its content is painted within the layer.
+        int paintAtomic = _paintAtomic;
+        if (s.Layered || s.Floated) _paintAtomic = 0;
+        else if (PaintsAtomically(e)) _paintAtomic++;
         int opsStart = _ops.Count;
         var savedMarker = _marker;
         int savedListIndex = _currentListIndex;
@@ -1295,8 +1301,20 @@ internal sealed partial class LayoutEngine
         if (avoidInside) _avoidDepth--;
         // Boxes inside this one finish first, and a later box lands lower: the first box moved is the topmost.
         if (moved && !(_movedWhole?.Top < y)) _movedWhole = (y, bottom - y);
+        _paintAtomic = paintAtomic;
         return bottom;
     }
+
+    /// <summary>
+    /// How many boxes around the one being laid out are painted as one piece with the lines they sit in, up to the
+    /// nearest layer: inline-blocks, flex and grid items and tables (CSS 2.1 Appendix E). Only outside them do block
+    /// backgrounds go under the inline content before them.
+    /// </summary>
+    private int _paintAtomic;
+
+    private static bool PaintsAtomically(Element e) =>
+        e.Style.Display is Display.InlineBlock or Display.InlineFlex or Display.InlineGrid or Display.Table or Display.TableCell or Display.TableCaption
+        || e.Parent?.Style is { IsFlex: true } or { IsGrid: true };
 
     /// <summary>Starts the marker of a list item whose content box starts at <paramref name="cx"/>.</summary>
     // Kept out of LayoutBlockBoxCore, as is DrawReplaced, so that its stack frame stays small: nested boxes call it once
@@ -1416,7 +1434,7 @@ internal sealed partial class LayoutEngine
         float bx = x + ml;
 
         int opsStart = _ops.Count;
-        var group = new GroupOp { Reach = bx + used + replacedExcess };
+        var group = new GroupOp { Reach = bx + used + replacedExcess, BlockBackground = _paintAtomic == 0 };
         _ops.Add(group);
 
         // Positioned and transformed boxes are the containing block of their absolutely positioned descendants.

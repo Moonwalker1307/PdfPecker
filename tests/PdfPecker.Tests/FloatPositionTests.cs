@@ -251,6 +251,30 @@ public class FloatPositionTests
         Assert.Equal(7.5f, r.Y, 1);
     }
 
+    [Theory]
+    // float and clear take inline-start and inline-end from the containing block's direction, as in Chrome.
+    [InlineData("ltr", "inline-start", 0)]
+    [InlineData("ltr", "inline-end", 455)]
+    [InlineData("rtl", "inline-start", 455)]
+    [InlineData("rtl", "inline-end", 0)]
+    public void LogicalFloatsFollowTheContainingBlocksDirection(string dir, string side, float x)
+    {
+        var (ops, _) = Layout("<style>body{margin:0}</style><div dir=" + dir + "><div style='float:" + side +
+                              ";width:60px;height:20px;background:#00f'></div>text</div>");
+        Assert.Equal(x, Rect(ops, 0xFF0000FF).X, 1);
+    }
+
+    [Theory]
+    [InlineData("ltr", "inline-start", true)]
+    [InlineData("rtl", "inline-start", false)]
+    [InlineData("rtl", "inline-end", true)]
+    public void LogicalClearFollowsTheContainingBlocksDirection(string dir, string side, bool cleared)
+    {
+        var (ops, _) = Layout("<style>body{margin:0}</style><div dir=" + dir + "><div style='float:left;width:60px;height:20px'></div>" +
+                              "<div style='clear:" + side + ";height:5px;background:#00f'></div></div>");
+        Assert.Equal(cleared ? 15 : 0, Rect(ops, 0xFF0000FF).Y, 1);
+    }
+
     [Fact]
     public void ZIndexOrdersPainting()
     {
@@ -273,6 +297,32 @@ public class FloatPositionTests
                               "<div style='position:relative'>" + boxes + "</div>");
         var rects = Flatten(ops).OfType<RectOp>().ToList();
         Assert.True(rects.FindIndex(r => r.Color == 0xFFFF0000) < rects.FindIndex(r => (r.Color & 0xFFFFFF) == 0x0000FF));
+    }
+
+    [Theory]
+    // A block's background paints under the inline content of the blocks before it (CSS 2.1 Appendix E), as in Chrome:
+    // text pulled into the next box by a negative margin, a line taller than its box, and an inline box's background.
+    [InlineData("<div>above</div><div style='margin-top:-10px;height:20px;background:#00f'>below</div>")]
+    [InlineData("<div style='height:4px'>above</div><div style='background:#00f'>below</div>")]
+    [InlineData("<div><span style='background:#0f0'>above</span><div style='margin-top:-10px;height:20px;background:#00f'></div></div>")]
+    public void BlockBackgroundsPaintUnderEarlierText(string boxes)
+    {
+        var (ops, _) = Layout("<style>body{margin:0;font:16px sans-serif}</style>" + boxes);
+        var flat = Flatten(ops).ToList();
+        Assert.True(flat.FindIndex(o => o is RectOp { Color: 0xFF0000FF }) < flat.FindIndex(o => o is TextOp { Text: "above" }));
+    }
+
+    [Theory]
+    // Inside an inline-block or a flex item the backgrounds stay with the box's own content, which paints as one piece
+    // with the line around it; and a background that overlaps nothing before it stays where it was made.
+    [InlineData("<div>above</div><span style='display:inline-block'><div style='margin-top:-10px;height:20px;width:20px;background:#00f'></div></span>")]
+    [InlineData("<div>above</div><div style='display:flex'><div style='margin-top:-10px;height:20px;width:20px;background:#00f'></div></div>")]
+    [InlineData("<div>above</div><div style='height:20px;background:#00f'>below</div>")]
+    public void BlockBackgroundsStayAfterContentTheyDoNotReach(string boxes)
+    {
+        var (ops, _) = Layout("<style>body{margin:0;font:16px sans-serif}</style>" + boxes);
+        var flat = Flatten(ops).ToList();
+        Assert.True(flat.FindIndex(o => o is RectOp { Color: 0xFF0000FF }) > flat.FindIndex(o => o is TextOp { Text: "above" }));
     }
 
     [Theory]

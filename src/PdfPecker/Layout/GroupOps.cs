@@ -27,6 +27,12 @@ internal class GroupOp : DrawOp
     /// </summary>
     public bool Ink;
 
+    /// <summary>
+    /// The background and borders of a block box in normal flow, outside any inline-level, flex, grid or table box:
+    /// painted before the inline content of its stacking context (see <see cref="PaintOrder"/>).
+    /// </summary>
+    public bool BlockBackground;
+
     /// <summary>The group's ops, moved by any offset that <see cref="OffsetLater"/> put off.</summary>
     public List<DrawOp> Ops
     {

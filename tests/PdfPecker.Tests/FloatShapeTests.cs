@@ -178,6 +178,14 @@ public class FloatShapeTests
     }
 
     [Fact]
+    public void Shape_function_is_scanned_by_rows_in_its_reference_box()
+    {
+        var starts = LineStarts("shape-outside: shape(from 0 0, line to 100% 0, line to 0 100%, close)");
+        Assert.Equal(75, starts[0], 2);
+        Assert.Equal(60 * 0.75f, starts[2], 2);
+    }
+
+    [Fact]
     public void Lines_wrap_around_an_unusable_image_as_a_box()
     {
         var starts = LineStarts("shape-outside: url(missing.png)");

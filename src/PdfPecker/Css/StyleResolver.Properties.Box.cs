@@ -240,10 +240,15 @@ internal sealed partial class StyleResolver
     private static void ApplyFloat(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         string lower = d.Lower;
+        // inline-start and inline-end are the start and end of the containing block's lines (CSS Logical §2.3), so
+        // in right-to-left text inline-start is on the right, as in Chrome.
+        bool rtl = parent.Rtl;
         s.Float = lower switch
         {
-            "left" or "inline-start" => FloatSide.Left,
-            "right" or "inline-end" => FloatSide.Right,
+            "left" => FloatSide.Left,
+            "right" => FloatSide.Right,
+            "inline-start" => rtl ? FloatSide.Right : FloatSide.Left,
+            "inline-end" => rtl ? FloatSide.Left : FloatSide.Right,
             "none" or "footnote" => FloatSide.None,
             "inherit" => parent.Float,
             _ => s.Float,
@@ -257,8 +262,10 @@ internal sealed partial class StyleResolver
     private static void ApplyClear(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit) { s.ClearLeft = parent.ClearLeft; s.ClearRight = parent.ClearRight; return; }
-        s.ClearLeft = d.Lower is "left" or "both" or "inline-start";
-        s.ClearRight = d.Lower is "right" or "both" or "inline-end";
+        // As with float, the logical sides are those of the containing block's direction.
+        bool rtl = parent.Rtl;
+        s.ClearLeft = d.Lower is "left" or "both" || d.Lower == (rtl ? "inline-end" : "inline-start");
+        s.ClearRight = d.Lower is "right" or "both" || d.Lower == (rtl ? "inline-start" : "inline-end");
     }
 
     /// <summary>shape-outside: none, a basic shape and/or a reference box, or an image or gradient.</summary>
