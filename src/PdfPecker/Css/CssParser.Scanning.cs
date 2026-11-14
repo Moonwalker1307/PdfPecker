@@ -173,6 +173,31 @@ internal ref struct CssReader
         return -1;
     }
 
+    /// <summary>
+    /// The next "{" that opens a block: outside quotes and parentheses, so that a brace in a function's arguments, as in
+    /// a custom function call with a list argument (--f({1px, 2px})), stays in its declaration. -1 when there is none.
+    /// </summary>
+    public readonly int IndexOfBlockOpen()
+    {
+        string text = _text;
+        int depth = 0;
+        for (int i = _position; i < _end; i++)
+        {
+            char c = text[i];
+            if (c == '\\') i++;
+            else if (c is '"' or '\'')
+            {
+                int close = StringEnd(text, i, _end);
+                if (close < 0) return -1;
+                i = close;
+            }
+            else if (c == '(') depth++;
+            else if (c == ')') depth = Math.Max(0, depth - 1);
+            else if (c == '{' && depth == 0) return i;
+        }
+        return -1;
+    }
+
     /// <summary>The quote closing the string that opens at <paramref name="open"/>, past escaped quotes, or -1.</summary>
     private static int StringEnd(string text, int open, int to)
     {

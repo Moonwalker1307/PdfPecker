@@ -124,7 +124,7 @@ internal static class Targets
         "counter(page, lower-roman)", "white-space-collapse:", "box-decoration-break: clone", "hyphenate-limit-lines: 1",
         "bleed: 3mm", "bleed: -1e30px", "marks: crop cross", "marks: cross",
         "@page :nth(2n+1) {", "@page :nth(1 of chapter) {", ":nth(-n+3)",
-        "sibling-index()", "sibling-count()", "calc(sibling-index() * 1e9px)", "if(", "media(print): ", "supports(display: grid): ", "style(--a: 1): ",
+        "sibling-index()", "sibling-count()", "calc(sibling-index() * 1e9px)", "if(", "@function --f(--a, --b: 1px) { --l: var(--a); result: var(--l) var(--b); @media print { result: 2px } } ", "--f(", "--f({1px, 2px})", "media(print): ", "supports(display: grid): ", "style(--a: 1): ",
         "; else: ", "contrast-color(", "contrast-color(currentcolor)", "device-cmyk(", "device-cmyk(0 0 0 1)", "device-cmyk(0, 1, 1, 0)", "object-view-box: ", "inset(10% 1e9px)", "xywh(0 0 100% 100%)",
         "box-shadow: inset 0 0 9px red",
     };

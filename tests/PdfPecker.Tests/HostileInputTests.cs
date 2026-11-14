@@ -297,6 +297,21 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(sb.ToString()));
     }
 
+    [Fact]
+    public void Custom_function_expansion_is_capped()
+    {
+        // Each function calls the previous one four times (4^40 calls if expanded), one calls itself forever, and
+        // locals use each other four times over.
+        var sb = new StringBuilder("<style>@function --f0(--x) { result: var(--x) }");
+        for (int i = 1; i < 40; i++) sb.Append($"@function --f{i}(--x) {{ result: --f{i - 1}(var(--x)) --f{i - 1}(var(--x)) --f{i - 1}({{var(--x), var(--x)}}) --f{i - 1}(var(--x)) }}");
+        sb.Append("@function --self(--x) { result: --self(--self(var(--x))) }");
+        sb.Append("@function --locals() { --l0: x;");
+        for (int i = 1; i < 40; i++) sb.Append($"--l{i}: var(--l{i - 1}) var(--l{i - 1}) var(--l{i - 1}) var(--l{i - 1});");
+        sb.Append("result: var(--l39) }");
+        sb.Append("p { font-family: --f39(x); margin: --self(1px); --v: --locals(); width: var(--v) }</style>").Append(Repeat("<p>text</p>", 2000));
+        AssertStructurallyValid(Bounded(sb.ToString()));
+    }
+
     // Lengths near the float range overflowed to infinity once added or scaled in layout, and the box geometry built from
     // them reached the painters as NaN, where rounding it threw ArithmeticException.
     [Theory]

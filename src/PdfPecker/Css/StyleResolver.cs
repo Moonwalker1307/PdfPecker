@@ -141,6 +141,7 @@ internal sealed partial class StyleResolver
     private CssAttr.Context? _attrs;
     /// <summary>The printed page that media() in if() asks about: the author sheet's.</summary>
     private readonly MediaContext _media;
+    private readonly Dictionary<string, CssFunction>? _functions; // the @function rules
     private Element? _attrHost; // the element whose attributes attr() reads in the style being computed
 
     /// <summary>
@@ -195,6 +196,7 @@ internal sealed partial class StyleResolver
         _containerUnits = authorSheet.HasContainerUnits;
         _attrUsed = authorSheet.HasAttrSubstitution;
         _media = authorSheet.Media;
+        _functions = authorSheet.Functions;
         CounterStyles = CounterStyles.From(authorSheet.CounterStyles);
         if (!authorSheet.FontFeatureValues.IsEmpty) _fontFeatureValues = authorSheet.FontFeatureValues;
         if (authorSheet.FontPaletteValues.Count > 0)
