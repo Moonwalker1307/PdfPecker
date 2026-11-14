@@ -174,6 +174,33 @@ public sealed class FontCollection
         return this;
     }
 
+    /// <summary>
+    /// The font and glyph that draw <paramref name="codePoint"/> for the PDF renderer, for text in a font a PDF does not
+    /// embed: the first face in registration order whose unicode-range and glyphs cover it, preferring one of the
+    /// weight and of the serif or sans style asked for. Faces are read only when they are candidates.
+    /// </summary>
+    internal (FontProgram Program, int Gid)? GlyphFor(int codePoint, bool bold, bool serif)
+    {
+        var faces = GetSnapshot().All;
+        var candidates = new List<(int Score, int Order, FontFace Face)>();
+        for (int i = 0; i < faces.Count; i++)
+        {
+            var face = faces[i];
+            if (face.Italic || face.Range != null && !face.Range.Contains(codePoint)) continue;
+            bool faceBold = face.WeightMin >= 600;
+            bool faceSerif = face.Family.Contains("Serif", StringComparison.OrdinalIgnoreCase)
+                || face.Family.Contains("Mincho", StringComparison.OrdinalIgnoreCase) || face.Family.Contains("Song", StringComparison.OrdinalIgnoreCase);
+            bool mono = face.Family.Contains("Mono", StringComparison.OrdinalIgnoreCase);
+            candidates.Add(((faceBold == bold ? 4 : 0) + (faceSerif == serif ? 2 : 0) + (mono ? 0 : 1), i, face));
+        }
+        candidates.Sort((a, b) => a.Score != b.Score ? b.Score.CompareTo(a.Score) : a.Order.CompareTo(b.Order));
+        foreach (var (_, _, face) in candidates)
+        {
+            if (face.Program is { } program && program.GlyphId(codePoint) is > 0 and var gid) return (program, gid);
+        }
+        return null;
+    }
+
     private static readonly Lazy<FontCollection> SystemFonts = new(LoadSystemFonts);
 
     /// <summary>The fonts installed on this machine, for <see cref="PdfOptions.UseSystemFonts"/>. Scanned once per process.</summary>

@@ -186,6 +186,9 @@ internal sealed partial class PdfFont
         var face = StandardFontPack.Face(FaceName(mono, serif, bold, italic));
         Source = face;
         if (face == null) return;
+        Substituted = true;
+        SubstituteBold = bold;
+        SubstituteSerif = serif;
         var cmap = _cmap!;
         _cidFallbackGid = code =>
         {

@@ -403,6 +403,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   Chinese, Japanese and Korean text that names one of Adobe's predefined CMaps instead of embedding one (Shift-JIS
   `90ms-RKSJ-H`, `UniJIS-UCS2-H`, `GBK-EUC-H`, `ETen-B5-H`, `KSCms-UHC-H` and the rest of the PDF standard's list) is
   read with Adobe's own CMaps, which the library carries, so it draws the right glyphs and is extracted as text.
+  Fonts a PDF names without embedding them are drawn with built-in faces for Latin, Greek and Cyrillic; for other
+  characters, such as Chinese, Japanese and Korean, pass fonts of your own in `ImageOptions.Fonts` (a `FontCollection`,
+  for example with PdfPecker.Fonts.Cjk).
   ICC colour profiles (`ICCBased` gray, RGB and CMYK, with matrix or lookup-table profiles such as FOGRA39 or GRACoL)
   are applied with black point compensation, so press CMYK shows as Acrobat and Chrome show it.
   Older Taiwanese and Japanese fonts that build their characters with TrueType instructions (MingLiU, PMingLiU, DFKai-SB
