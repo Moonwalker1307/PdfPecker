@@ -129,6 +129,7 @@ internal sealed class SeedContext
         for (int i = 0; i < pixels.Length; i++) pixels[i] = (byte)(i * 7 + i / 96 * 13);
         yield return ("generated:flate-predictor.pdf", ImagePdf("/FlateDecode", PdfPecker.Images.PdfImage.DeflatePredicted(pixels, 32, 32, 3, out var parms), 32, 32, "/DeviceRGB", 8, "/DecodeParms " + parms));
         yield return ("generated:colour-spaces.pdf", ColourSpacePdf());
+        yield return ("generated:cjk-cmaps.pdf", CjkCMapPdf());
         yield return ("generated:icc-profiles.pdf", IccProfilePdf());
 
         // Tagged tables with spanned cells, uncompressed so mutations reach the spans and the cells of the structure tree,
@@ -165,6 +166,37 @@ internal sealed class SeedContext
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 10 0 R >>",
             $"<< /Length {cmap.Length} >>\nstream\n{cmap}\nendstream",
         };
+        return UncompressedPdf(objects);
+    }
+
+    /// <summary>
+    /// Fonts that name predefined CJK CMaps, Shift-JIS and UCS-2, and an embedded CMap built on one both with usecmap and
+    /// with /UseCMap, so mutations reach the predefined CMaps' code splitting, their parents and the Unicode fallback.
+    /// </summary>
+    private static byte[] CjkCMapPdf()
+    {
+        const string content = "BT /F1 20 Tf 10 150 Td <41829f88ea> Tj /F2 20 Tf 0 -30 Td <30414e00> Tj /F3 20 Tf 0 -30 Td <829f82a0> Tj ET";
+        const string cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /90ms-RKSJ-H usecmap /WMode 1 def\n"
+            + "1 begincidchar <829f> 1 endcidchar 1 begincidrange <82a0> <82f1> 843 endcidrange endcmap";
+        string Font(int n, string encoding) => $"<< /Type /Font /Subtype /Type0 /BaseFont /MS-Mincho /Encoding {encoding} /DescendantFonts [{n} 0 R] >>";
+        var objects = new[]
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> >>",
+            $"<< /Length {content.Length} >>\nstream\n{content}\nendstream",
+            Font(8, "/90ms-RKSJ-V"),
+            Font(8, "/UniJIS-UCS2-H"),
+            Font(8, "9 0 R"),
+            "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /MS-Mincho /CIDSystemInfo << /Registry (Adobe) /Ordering (Japan1) /Supplement 2 >> "
+                + "/FontDescriptor << /Type /FontDescriptor /FontName /MS-Mincho /Flags 6 /FontBBox [0 -141 1000 859] /ItalicAngle 0 /Ascent 859 /Descent -141 /CapHeight 700 /StemV 80 >> /DW 1000 >>",
+            $"<< /Type /CMap /CMapName /Custom-V /UseCMap /90ms-RKSJ-V /Length {cmap.Length} >>\nstream\n{cmap}\nendstream",
+        };
+        return UncompressedPdf(objects);
+    }
+
+    private static byte[] UncompressedPdf(string[] objects)
+    {
         var sb = new StringBuilder("%PDF-1.7\n");
         var offsets = new List<int>();
         for (int i = 0; i < objects.Length; i++)

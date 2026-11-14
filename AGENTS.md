@@ -174,10 +174,11 @@ are in `BUILD.md` and `TESTING.md`.
   - `tools/UseTables/build.cs` → `src/PdfPecker/Fonts/UseTables.g.cs`
   - `tools/StringPrep/build.cs` → `src/PdfPecker/Text/SaslPrep.g.cs`
   - `tools/HtmlEntities/build.cs` → `src/PdfPecker/Html/HtmlEntities.g.cs`
+  - `tools/CMaps/build.cs` → `src/PdfPecker/Rendering/Fonts/CMaps/*.cmaps.br`
   - `tools/ShapingReference/generate.py` → `tests/PdfPecker.Tests/Fixtures/shaping/harfbuzz.txt`
   - `tools/ThirdPartyPdfs/generate.sh` → `tests/PdfPecker.Tests/Fixtures/third-party/*.pdf`
-  - FontPackBuilder and Hyphenation pin their inputs by SHA-256; a deliberate update changes the hashes, the versions
-    named in the tool and `THIRD-PARTY-NOTICES.md` together.
+  - FontPackBuilder, Hyphenation and CMaps pin their inputs by SHA-256; a deliberate update changes the hashes, the
+    versions named in the tool and `THIRD-PARTY-NOTICES.md` together.
 - **Bundled fonts or data sources**: update `THIRD-PARTY-NOTICES.md`.
 - **PDF/A and PDF/UA**: run the veraPDF check from `conformance.yml`; a new failure that is not in
   `tools/ConformanceSamples/known-failures.txt` fails CI.

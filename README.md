@@ -400,6 +400,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   renders a page straight into a buffer of yours as grey, RGB or RGBA pixels, sized by `GetPixelSize`, for OCR and image
   processing. Comments that carry no appearance of their own (notes, highlights, underlines, strike-outs, squiggly
   lines, shapes, lines with their arrowheads, ink and free text) are drawn from their properties, as viewers draw them.
+  Chinese, Japanese and Korean text that names one of Adobe's predefined CMaps instead of embedding one (Shift-JIS
+  `90ms-RKSJ-H`, `UniJIS-UCS2-H`, `GBK-EUC-H`, `ETen-B5-H`, `KSCms-UHC-H` and the rest of the PDF standard's list) is
+  read with Adobe's own CMaps, which the library carries, so it draws the right glyphs and is extracted as text.
   ICC colour profiles (`ICCBased` gray, RGB and CMYK, with matrix or lookup-table profiles such as FOGRA39 or GRACoL)
   are applied with black point compensation, so press CMYK shows as Acrobat and Chrome show it.
   Older Taiwanese and Japanese fonts that build their characters with TrueType instructions (MingLiU, PMingLiU, DFKai-SB

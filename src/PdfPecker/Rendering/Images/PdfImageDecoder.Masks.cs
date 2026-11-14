@@ -22,7 +22,14 @@ internal static partial class PdfImageDecoder
             {
                 pixels = Enlarge(img, w, h);
                 var cs = samples.ColorSpace!;
-                if (file.GetNumbers(smask, "Matte") is { } matte && matte.Length >= cs.Components) UnblendMatte(pixels, alpha, cs, matte);
+                if (file.GetNumbers(smask, "Matte") is { } matte && matte.Length >= cs.Components)
+                {
+                    // The samples are un-blended in the image's own colour space where they map one to one onto the
+                    // pixels; a conversion that is not linear (CMYK, ICC, Lab) gives other colours when RGB is un-blended.
+                    if (w == samples.Width && h == samples.Height && cs is not (DeviceRgb or DeviceGray or IndexedSpace) && samples.Components == cs.Components)
+                        UnblendMatteSamples(pixels, alpha, samples, matte);
+                    else UnblendMatte(pixels, alpha, cs, matte);
+                }
                 ApplyAlpha(pixels, alpha);
             }
             img.Opaque = false;
@@ -111,7 +118,8 @@ internal static partial class PdfImageDecoder
     /// <summary>
     /// Undoes the pre-blending a /Matte entry declares: the samples were stored as m + alpha * (c - m), so compositing
     /// them as they are would mix in the matte colour twice (ISO 32000-1, 11.6.5.3). The matte is converted to RGB and
-    /// un-blended there, which is exact for the device spaces and close enough for the others.
+    /// un-blended there, which is exact for gray and RGB; <see cref="UnblendMatteSamples"/> handles the other spaces when
+    /// the mask is the image's size, as the standard requires of a mask with a matte.
     /// </summary>
     private static void UnblendMatte(uint[] pixels, byte[] alpha, ColorSpace cs, double[] matte)
     {
@@ -128,6 +136,37 @@ internal static partial class PdfImageDecoder
             uint p = pixels[i];
             int r = Unblend((int)(p & 0xFF), mr, a), g = Unblend((int)(p >> 8 & 0xFF), mg, a), b = Unblend((int)(p >> 16 & 0xFF), mb, a);
             pixels[i] = (p & 0xFF000000) | (uint)(r | g << 8 | b << 16);
+        }
+    }
+
+    /// <summary>
+    /// Undoes the pre-blending of a /Matte entry on the samples themselves: each partly transparent pixel's components
+    /// are read through the Decode array, un-blended as c = m + (c' - m) / alpha, clamped to the Decode range and
+    /// converted again. Opaque and fully transparent pixels keep the conversion they have.
+    /// </summary>
+    private static void UnblendMatteSamples(uint[] pixels, byte[] alpha, in Samples samples, double[] matte)
+    {
+        var cs = samples.ColorSpace!;
+        int comps = samples.Components, bpc = samples.BitsPerComponent, w = samples.Width;
+        int maxValue = (1 << bpc) - 1;
+        double scale = bpc == 16 ? 65535.0 : maxValue;
+        var decode = samples.Decode is { } d && d.Length >= 2 * comps ? d : cs.DefaultDecode(bpc);
+        long rowBits = ((long)w * comps * bpc + 7) / 8 * 8;
+        Span<float> components = stackalloc float[comps];
+        int n = Math.Min(pixels.Length, alpha.Length);
+        for (int i = 0; i < n; i++)
+        {
+            int a = alpha[i];
+            if (a == 0 || a == 255) continue;
+            long bitPos = i / w * rowBits + (long)(i % w) * comps * bpc;
+            for (int k = 0; k < comps; k++, bitPos += bpc)
+            {
+                double low = decode[2 * k], high = decode[2 * k + 1];
+                double c = low + Sample(samples.Data, bitPos, bpc, maxValue) / scale * (high - low);
+                double m = matte[k];
+                components[k] = (float)Math.Clamp(m + (c - m) * 255 / a, Math.Min(low, high), Math.Max(low, high));
+            }
+            pixels[i] = (pixels[i] & 0xFF000000) | (cs.ToRgb(components) & 0xFFFFFF);
         }
     }
 

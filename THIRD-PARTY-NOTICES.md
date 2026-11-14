@@ -45,6 +45,9 @@ third-party material below, each under its own license, which is reproduced in t
   hyph-utf8's `hyph-sv.tex`, distributed under clause 2 of the LaTeX Project Public License. The file is only
   Brotli-compressed and is restored byte for byte when loaded. The original is available from the hyph-utf8 project
   and from CTAN (https://ctan.org/pkg/hyph-utf8).
+- The predefined Chinese, Japanese and Korean CMaps the PDF renderer reads
+  (`src/PdfPecker/Rendering/Fonts/CMaps/*.cmaps.br`) are unmodified copies of Adobe's CMap resource files, packed by
+  `tools/CMaps/build.cs` and Brotli-compressed. Each file keeps its own copyright notice.
 
 In SPDX terms the library is `MIT AND OFL-1.1 AND Bitstream-Vera AND APAFML AND BSD-3-Clause AND MIT-Modern-Variant AND Unicode-3.0 AND FSFAP AND LPPL-1.3c`. nuget.org accepts
 only OSI or FSF-approved licenses in a license expression, so this file is the NuGet package's license file instead,
@@ -367,6 +370,46 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+## Adobe CMap resources
+
+Source: https://github.com/adobe-type-tools/cmap-resources, as shipped in poppler-data 0.4.12
+(https://poppler.freedesktop.org/). The files are listed with their SHA-256 hashes in `tools/CMaps/build.cs`.
+
+```
+Copyright 1990-2019 Adobe. All rights reserved.
+
+Redistribution and use in source and binary forms, with or
+without modification, are permitted provided that the
+following conditions are met:
+
+Redistributions of source code must retain the above
+copyright notice, this list of conditions and the following
+disclaimer.
+
+Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following
+disclaimer in the documentation and/or other materials
+provided with the distribution.
+
+Neither the name of Adobe nor the names of its contributors
+may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ## HarfBuzz
