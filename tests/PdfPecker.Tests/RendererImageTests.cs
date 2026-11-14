@@ -472,6 +472,23 @@ public class RendererImageTests
     }
 
     [Fact]
+    public void Smask_matte_un_blends_cmyk_samples_before_converting_them()
+    {
+        // A CMYK colour pre-blended at alpha one half with the paper (no ink). Converting CMYK to RGB is not linear, so
+        // un-blending the converted RGB gives another colour; un-blending the inks gives the colour itself.
+        var opaque = Render(new FixturePdf().Build(4, 4, "0 0.8 0.6 0.1 k 0 0 4 4 re f"));
+        var (r, g, b, _) = At(opaque, 2, 2);
+        var pdf = new FixturePdf();
+        int mask = pdf.AddStream("/Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceGray /Matte [0 0 0 0]",
+            new byte[] { 128 });
+        byte[] stored = { 0, (byte)Math.Round(0.8 * 128), (byte)Math.Round(0.6 * 128), (byte)Math.Round(0.1 * 128) };
+        int im = pdf.AddStream($"/Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceCMYK /SMask {mask} 0 R", stored);
+        var img = Render(pdf.Build(4, 4, "0 0 1 rg 0 0 4 4 re f q 4 0 0 4 0 0 cm /Im Do Q", $"/XObject << /Im {im} 0 R >>"));
+        double a = 128 / 255.0;
+        AssertAt(img, 2, 2, (int)Math.Round(a * r), (int)Math.Round(a * g), (int)Math.Round(a * b + (1 - a) * 255), 2);
+    }
+
+    [Fact]
     public void Smask_matte_leaves_fully_transparent_samples_alone()
     {
         var pdf = new FixturePdf();
