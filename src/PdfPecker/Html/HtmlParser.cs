@@ -511,26 +511,42 @@ internal sealed class HtmlParser
                     value = HtmlEntities.DecodeAttribute(Source(vs, p - vs));
                 }
             }
-            if (attrName.Length > 0 && !Has(attributes, attrName))
+            if (attrName.Length > 0 && !Has(attrName))
                 attributes.Add(new KeyValuePair<string, string>(attrName, value));
         }
         if (attributes.Count > 0)
         {
             el.SetAttributes(attributes);
             attributes.Clear();
+            _attributeNames?.Clear();
         }
         return selfClosing;
+    }
 
-        static bool Has(List<KeyValuePair<string, string>> attributes, string name)
+    // The attributes of the tag being read: the element gets a list of exactly their number once the tag ends.
+    private readonly List<KeyValuePair<string, string>> _attributes = new();
+
+    // A tag with more attributes than this also keeps their names in a set, so that a tag of many thousands of them
+    // takes time in proportion to their number rather than its square, which finding a name in the list would.
+    private const int ListedAttributes = 16;
+    private HashSet<string>? _attributeNames;
+
+    /// <summary>Whether the tag being read already has an attribute of the name: the first one of a name counts.</summary>
+    private bool Has(string name)
+    {
+        var attributes = _attributes;
+        if (attributes.Count < ListedAttributes)
         {
             foreach (var a in attributes)
                 if (a.Key == name) return true;
             return false;
         }
+        var names = _attributeNames ??= new HashSet<string>(StringComparer.Ordinal);
+        if (names.Count == 0)
+            foreach (var a in attributes) names.Add(a.Key);
+        // The caller adds the name when this returns false, so it goes in the set now.
+        return !names.Add(name);
     }
-
-    // The attributes of the tag being read: the element gets a list of exactly their number once the tag ends.
-    private readonly List<KeyValuePair<string, string>> _attributes = new();
 
     private void ImplicitlyClose(string name)
     {
