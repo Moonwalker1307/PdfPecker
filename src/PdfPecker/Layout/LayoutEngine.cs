@@ -280,7 +280,8 @@ internal sealed partial class LayoutEngine
         var d = e.Style.Display;
         if (e.Style.IsAtomicInline) return true;
         if (d != Display.Inline) return false;
-        return !ContainsBlock(e);
+        // An inline SVG is replaced: the blocks in its foreignObject elements are its drawing, not blocks of the line.
+        return e.IsReplaced || !ContainsBlock(e);
     }
 
     private static bool ContainsBlock(Element e)
@@ -289,7 +290,7 @@ internal sealed partial class LayoutEngine
         {
             if (c is not Element ce || ce.Style == null || ce.Detached || ce.Style.Floated || ce.Style.OutOfFlow) continue;
             var d = ce.Style.Display;
-            if (d == Display.None || ce.Style.IsAtomicInline) continue;
+            if (d == Display.None || ce.Style.IsAtomicInline || d == Display.Inline && ce.IsReplaced) continue;
             if (d != Display.Inline) return true;
             if (ContainsBlock(ce)) return true;
         }
