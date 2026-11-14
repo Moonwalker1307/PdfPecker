@@ -2783,6 +2783,33 @@ public class HostileInputTests
     }
 
     /// <summary>Runs <paramref name="work"/> on one thread and returns its result with the bytes that thread allocated.</summary>
+    [Fact]
+    public void Icc_profiles_that_claim_huge_tables_or_point_outside_themselves_are_not_used()
+    {
+        static byte[] B(params int[] values) => values.Select(v => (byte)v).ToArray();
+        byte[] u32Max = B(0xFF, 0xFF, 0xFF, 0xFF);
+        var profiles = new[]
+        {
+            // A lut16 table of four inputs with 255 grid points a side: 12 billion values in a few bytes.
+            IccProfileTests.Profile("CMYK", "Lab ", 0x02100000, ("A2B0", Encoding.ASCII.GetBytes("mft2").Concat(new byte[4]).Concat(B(4, 3, 255, 0)).Concat(new byte[40]).Concat(B(0, 2, 0, 2)).ToArray())),
+            // A lutAtoB table whose curves and table lie past the end of the profile.
+            IccProfileTests.Profile("CMYK", "Lab ", 0x04300000, ("A2B0", Encoding.ASCII.GetBytes("mAB ").Concat(new byte[4]).Concat(B(4, 3, 0, 0)).Concat(u32Max).Concat(new byte[8]).Concat(u32Max).Concat(u32Max).ToArray())),
+            // A gray curve of four billion entries.
+            IccProfileTests.Profile("GRAY", "XYZ ", 0x02100000, ("kTRC", Encoding.ASCII.GetBytes("curv").Concat(new byte[4]).Concat(u32Max).ToArray())),
+        };
+        foreach (var profile in profiles)
+        {
+            int components = profile[16] == (byte)'C' ? 4 : 1; // the header's colour space, CMYK or GRAY
+            var (space, allocated) = Allocating(() => Rendering.Content.IccSpace.Create(profile, components));
+            Assert.Null(space);
+            Assert.True(allocated < 1 << 20, $"allocated {allocated} bytes");
+        }
+        // A tag table that claims more tags than the profile has room for.
+        var header = IccProfileTests.Profile("GRAY", "XYZ ", 0x02100000);
+        u32Max.CopyTo(header, 128);
+        Assert.Null(Rendering.Content.IccSpace.Create(header, 1));
+    }
+
     private static (T Result, long Allocated) Allocating<T>(Func<T> work) => Bounded(() =>
     {
         long before = GC.GetAllocatedBytesForCurrentThread();
