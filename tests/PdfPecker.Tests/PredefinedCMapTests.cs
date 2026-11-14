@@ -115,4 +115,38 @@ public class PredefinedCMapTests
         Assert.Equal("一葛A", PdfText.Extract(Page("/90ms-RKSJ-H", shiftJis, embedded: false)).Trim());
         Assert.Equal("一葛A", PdfText.Extract(Page("/UniJIS-UCS2-H", Encoding.BigEndianUnicode.GetBytes("一葛A"), embedded: false)).Trim());
     }
+
+    private static RenderedImage RenderWith(byte[] pdf, FontCollection? fonts)
+        => PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 72, Fonts = fonts });
+
+    private static int Ink(RenderedImage image)
+    {
+        int count = 0;
+        for (int i = 0; i < image.Rgba.Length; i += 4) if (image.Rgba[i] < 128) count++;
+        return count;
+    }
+
+    [Fact]
+    public void Characters_of_a_font_that_is_not_embedded_are_drawn_with_the_caller_s_fonts()
+    {
+        var shiftJis = Encoding.GetEncoding(932).GetBytes("一葛");
+        var page = Page("/90ms-RKSJ-H", shiftJis, embedded: false);
+        // With the font the PDF names, the page looks as it does with the font embedded; without it, the built-in
+        // stand-in, which has no Japanese, draws something else.
+        var fonts = new FontCollection().Add(NotoSansJP, "Noto Sans JP");
+        var drawn = RenderWith(page, fonts);
+        var embedded = Render(Page("/90ms-RKSJ-H", shiftJis)).Rgba;
+        Assert.True(Ink(drawn) > 100);
+        Assert.Equal(embedded, drawn.Rgba);
+        Assert.NotEqual(embedded, RenderWith(page, null).Rgba);
+    }
+
+    [Fact]
+    public void Caller_fonts_without_the_character_change_nothing()
+    {
+        var page = Page("/UniJIS-UCS2-H", Encoding.BigEndianUnicode.GetBytes("A\uAC00"), embedded: false);
+        var fonts = new FontCollection().Add(NotoSansJP, "Noto Sans JP");
+        // Noto Sans JP has no Korean; the Latin A comes from the built-in face either way.
+        Assert.Equal(RenderWith(page, null).Rgba, RenderWith(page, fonts).Rgba);
+    }
 }

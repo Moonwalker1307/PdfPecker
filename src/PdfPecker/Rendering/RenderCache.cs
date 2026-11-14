@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using PdfPecker.Fonts;
 using PdfPecker.Rendering.Content;
 using PdfPecker.Rendering.Fonts;
 using PdfPecker.Rendering.Images;
@@ -45,6 +46,8 @@ internal sealed class RenderCache
     private readonly Dictionary<PdfObject, Entry<PdfFunction?>> _functions = new(ReferenceEqualityComparer.Instance);
     private readonly ConcurrentDictionary<GlyphKey, GlyphBitmap> _glyphs = new();
     private int _glyphCount;
+    private readonly ConcurrentDictionary<(FontCollection Fonts, int CodePoint, bool Bold, bool Serif), (IGlyphSource Source, int Gid)?> _fallbackGlyphs = new();
+    private static readonly ConditionalWeakTable<FontProgram, GlyphSourceBox> FallbackSources = new();
 
     // A large image that one page draws, such as the scan of a scanned page, goes to a small pool of its own whose
     // least recently drawn entries give way to new ones, until another page draws it too: kept with the others, every
@@ -70,6 +73,40 @@ internal sealed class RenderCache
     {
         _imagePool = new Pool(imageLimit);
         _singlePagePool = new Pool(singlePageImageLimit);
+    }
+
+    /// <summary>
+    /// The glyph a caller's font gives a character that the built-in face standing in for a PDF's unembedded font lacks,
+    /// such as Chinese, Japanese and Korean text, or null when none of the fonts has it. Each character is looked up once
+    /// per document and collection.
+    /// </summary>
+    public (IGlyphSource Source, int Gid)? FallbackGlyph(FontCollection fonts, int codePoint, bool bold, bool serif)
+        => _fallbackGlyphs.GetOrAdd((fonts, codePoint, bold, serif), static key =>
+        {
+            if (key.Fonts.GlyphFor(key.CodePoint, key.Bold, key.Serif) is not { } found) return null;
+            return GlyphSourceOf(found.Program) is { } source ? (source, found.Gid) : null;
+        });
+
+    /// <summary>The renderer's reading of a caller's font, made once per font for the life of the process.</summary>
+    private static IGlyphSource? GlyphSourceOf(FontProgram program)
+        => FallbackSources.GetValue(program, static p =>
+        {
+            var tables = p.Tables.Select(t => (FontProgramTag(t.Tag), t.Offset, t.Length));
+            var trueType = TrueTypeFont.Parse(p.Data, tables);
+            IGlyphSource? source = trueType is { HasGlyf: true } ? trueType : trueType?.CffTable is { } cff ? CffFont.Parse(cff) : null;
+            return new GlyphSourceBox(source);
+        }).Source;
+
+    private static string FontProgramTag(uint tag) => string.Create(4, tag, static (chars, t) =>
+    {
+        for (int i = 0; i < 4; i++) chars[i] = (char)(t >> (24 - 8 * i) & 0xFF);
+    });
+
+    private sealed class GlyphSourceBox
+    {
+        public GlyphSourceBox(IGlyphSource? source) => Source = source;
+
+        public IGlyphSource? Source { get; }
     }
 
     public PdfFont GetFont(PdfFile file, PdfDict dict, PageCacheUse use)
