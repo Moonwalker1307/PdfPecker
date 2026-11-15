@@ -3952,6 +3952,42 @@ public class HostileInputTests
         var pdf = Bounded($"<div style='{style}'><div style='columns: 2; column-height: 3px'>{text}</div>{text}</div>");
         Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(pdf, 0, 5));
     }
+
+    [Fact]
+    public void Many_anchors_with_one_name_and_many_anchored_boxes_stay_bounded()
+    {
+        // Each anchored box looks up the last anchor of its name; with thousands of each that must not scan every
+        // anchor for every box.
+        var html = "<style>.a{anchor-name:--a;height:2px}.t{position:absolute;position-anchor:--a;position-area:bottom;width:4px;height:4px;"
+            + "position-try-fallbacks:flip-block,flip-inline,top,left}</style>" + Repeat("<div class=a></div>", 4000) + Repeat("<div class=t></div>", 4000);
+        Assert.NotEmpty(Bounded(html));
+    }
+
+    [Fact]
+    public void Nested_anchored_boxes_with_fallbacks_that_never_fit_stay_bounded()
+    {
+        // Every option lays the box out again with all the anchored boxes inside it; nested, the options would
+        // multiply level by level.
+        var options = string.Join(",", Enumerable.Repeat("flip-block,flip-inline,flip-block flip-inline,top,bottom", 20));
+        var html = "<style>.a{anchor-name:--a;width:10px;height:10px}.t{position:absolute;position-anchor:--a;top:anchor(bottom);"
+            + "width:5000px;height:5000px;position-try-fallbacks:" + options + "}</style><div class=a></div>"
+            + Repeat("<div class=t>", 40) + "x" + Repeat("</div>", 40);
+        Assert.NotEmpty(Bounded(html));
+    }
+
+    [Theory]
+    [InlineData("top:anchor(--a bottom, anchor(--a bottom, anchor(--a bottom, anchor(--a bottom, anchor(--a bottom, anchor(--a bottom, 1px))))))")]
+    [InlineData("left:anchor(--a 1e30%);top:anchor(--a -1e30%)")]
+    [InlineData("width:anchor-size(--a width);height:calc(anchor-size(--a height) * 1e30)")]
+    [InlineData("top:anchor(--a bottom")]
+    [InlineData("top:anchor(;left:anchor-size()")]
+    public void Extreme_anchor_functions_end_in_a_document_or_a_limit(string css)
+    {
+        var html = $"<style>.a{{anchor-name:--a;width:1e30px;height:20px}}.t{{position:absolute;position-anchor:--a;{css}}}</style>"
+            + "<div class=a>a</div><div class=t>tip</div>" + Repeat("<div class=t style='top:" + Repeat("anchor(--a top, ", 200) + "1px" + Repeat(")", 200) + "'>x</div>", 3);
+        try { Assert.NotEmpty(Bounded(html)); }
+        catch (PdfLimitException) { }
+    }
 }
 
 /// <summary>Hostile CFF and CFF2 fonts whose subroutines fan out exponentially.</summary>

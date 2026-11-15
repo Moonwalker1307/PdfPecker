@@ -1660,6 +1660,7 @@ internal sealed partial class LayoutEngine
         // A video with no poster to show is black, as Chrome prints it before it has a frame.
         else if (e.Name == "video" && !e.EmbedsPicture && s.Visible && contentW > 0 && contentH > 0) _ops.Add(new RectOp(cx, cy, contentW, contentH, 0xFF000000));
         if (e == CanvasRoot) CanvasRootBox = (bx, y, used, bottom - y);
+        if (s.Anchor?.Names != null) NoteAnchor(e, group.Ops, group, bx, y, used, bottom - y);
         if (s.IsFlex) NoteFlexStaticArea(e, contentW, contentH);
         if (cbFrame != null)
         {

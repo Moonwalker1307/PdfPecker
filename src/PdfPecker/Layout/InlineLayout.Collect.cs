@@ -181,7 +181,7 @@ internal sealed partial class InlineLayout
         float boxLeft = s.PaddingLeft.Resolve(0) + s.BorderLeft, boxRight = s.PaddingRight.Resolve(0) + s.BorderRight;
         var outer = deco;
         bool paints = PaintsInlineBox(s) || s.BoxDecorationClone && (boxLeft > 0 || boxRight > 0);
-        if (paints || s.Positioned) deco = new InlineDeco(e, s, outer, boxLeft, boxRight) { Paints = paints };
+        if (paints || s.Positioned || s.Anchor?.Names != null) deco = new InlineDeco(e, s, outer, boxLeft, boxRight) { Paints = paints };
         float marginLeft = AutoAsZero(s.MarginLeft), marginRight = AutoAsZero(s.MarginRight);
         int first = st.Items.Count;
         var (bidiOpen, bidiClose) = BidiControls(s);
@@ -195,7 +195,7 @@ internal sealed partial class InlineLayout
         AddInlineEdge(st, s, boxRight, marginRight, href, deco, outer, marginFirst: false);
         if (bidiClose != null) AddBidiControl(st, s, bidiClose);
         // A positioned element that paints nothing and holds no absolutely positioned box needs no fragments.
-        if (deco is { Paints: false, HoldsAbsolutes: false } && !ReferenceEquals(deco, outer))
+        if (deco is { Paints: false, HoldsAbsolutes: false } && !ReferenceEquals(deco, outer) && s.Anchor?.Names == null)
             for (int k = first; k < st.Items.Count; k++)
                 if (ReferenceEquals(st.Items[k].Deco, deco)) st.Items[k].Deco = outer;
         if (s.Position == Position.Relative) ShiftRelative(st, first, s);

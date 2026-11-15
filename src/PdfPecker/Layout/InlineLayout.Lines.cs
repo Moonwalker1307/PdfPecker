@@ -379,6 +379,8 @@ internal sealed partial class InlineLayout
         var outerFragments = _inlineFragments;
         var outerCbs = _engine._inlineCbs;
         var outerCbIndex = _engine._inlineCbIndex;
+        var outerPass = _anchorPass;
+        _anchorPass = null;
         _inlineFragments = null;
         _engine._inlineCbs = null;
         _engine._inlineCbIndex = null;
@@ -394,6 +396,7 @@ internal sealed partial class InlineLayout
             _inlineFragments = outerFragments;
             _engine._inlineCbs = outerCbs;
             _engine._inlineCbIndex = outerCbIndex;
+            _anchorPass = outerPass;
         }
     }
 

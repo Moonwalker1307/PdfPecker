@@ -922,6 +922,7 @@ internal sealed partial class LayoutEngine
             PaintOnPages(tableGroup, s, tableBox!, tableTop, tableBottom, sides, collapse);
         else BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW, sides, collapsedCell: collapse);
         m.Breaks.Clear();
+        if (s.Anchor?.Names != null) NoteAnchor(table, tableGroup.Ops, tableGroup, bx, tableTop, boxW, tableBottom - tableTop);
         _lastBoxRight = bx + boxW;
         _lastBoxX = bx;
         _lastBoxTop = tableTop;
@@ -1976,6 +1977,7 @@ internal sealed partial class LayoutEngine
         if (cell.Frame is { Pending.Count: > 0 } frame) LayoutCellAbsolutes(cell, frame, h, shift, collapse);
 
         float x = cell.X, y = cell.Top, w = cell.W;
+        if (cs.Anchor?.Names != null) NoteAnchor(cell.Td, cell.Group!.Ops, cell.Group, x, y, w, h);
         int sides = BoxPainter.AllSides;
         (float X, float Y, float W, float H)? backgroundArea = null;
         if (collapse)
