@@ -22,7 +22,7 @@ internal static class CssSupports
         "overflow-wrap", "word-wrap", "word-break", "line-break", "vertical-align", "list-style", "list-style-type", "list-style-position",
         "list-style-image",
         "visibility", "box-shadow", "table-layout", "border-collapse", "border-spacing", "caption-side", "empty-cells", "image-orientation", "image-rendering", "accent-color", "appearance", "box-sizing", "float", "clear", "shape-outside", "shape-margin", "shape-image-threshold", "initial-letter",
-        "zoom", "position", "inset", "top", "right", "bottom", "left", "z-index", "overflow", "overflow-x", "overflow-y", "overflow-clip-margin", "transform",
+        "zoom", "position", "anchor-name", "position-anchor", "position-area", "position-try-fallbacks", "position-try", "inset", "top", "right", "bottom", "left", "z-index", "overflow", "overflow-x", "overflow-y", "overflow-clip-margin", "transform",
         "transform-origin", "transform-box", "perspective", "perspective-origin", "transform-style", "backface-visibility", "translate", "rotate", "scale", "content", "counter-reset", "counter-set", "counter-increment",
         "break-before", "break-after", "break-inside", "page-break-before", "page-break-after", "page-break-inside",
         "orphans", "widows", "margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "padding", "padding-top",
@@ -190,6 +190,14 @@ internal static class CssSupports
                 return StyleResolver.IsAppearance(lower);
             case "position":
                 return lower is "static" or "relative" or "absolute" or "fixed" or "sticky" || StyleResolver.RunningName(lower) != null;
+            case "anchor-name":
+                return AnchorStyle.TryParseNames(lower, out _);
+            case "position-anchor":
+                return lower is "auto" or "none" || AnchorStyle.IsDashedIdent(lower);
+            case "position-area":
+                return PositionArea.TryParse(lower, false, out _);
+            case "position-try-fallbacks":
+                return TryOption.TryParse(lower, false, out _);
             case "container-type":
                 return lower is "normal" or "size" or "inline-size";
             case "container-name":
@@ -245,7 +253,10 @@ internal static class CssSupports
         // attr() never gets here: a well-formed one returned true above, in content and in every other property. The
         // paged-media functions of content (target-counter(), target-counters(), target-text(), leader()) are generated
         // content this library writes.
-        foreach (var fn in new[] { "anchor(", "env(", "element(", "paint(", "cross-fade(" })
+        // anchor() and anchor-size() only in the insets, sizes and margins of positioned boxes.
+        if (AnchorStyle.UsesFunctions(lower) && !AnchorStyle.Takes(name) && !name.StartsWith("inset", StringComparison.Ordinal)
+            && !name.StartsWith("margin", StringComparison.Ordinal) && !name.Contains("-size", StringComparison.Ordinal)) return false;
+        foreach (var fn in new[] { "env(", "element(", "paint(", "cross-fade(" })
             if (lower.Contains(fn, StringComparison.Ordinal)) return false;
         return true;
     }

@@ -605,6 +605,12 @@ internal sealed partial class ComputedStyle
     /// <summary>The gap decoration properties to change one in: a copy, since styles share them.</summary>
     public GapRules ChangeGapRules() => Rare.GapRules = _rare.GapRules?.Copy() ?? new GapRules();
 
+    /// <summary>The anchor positioning properties, or null when none is set.</summary>
+    public AnchorStyle? Anchor => _rare.Anchor;
+
+    /// <summary>The anchor positioning properties to change one in: a copy, since styles share them.</summary>
+    public AnchorStyle ChangeAnchor() => Rare.Anchor = _rare.Anchor?.Copy() ?? new AnchorStyle();
+
     // The group to change a value in, copied first when other styles share it.
     private RareFields Rare => _rare.Shared ? _rare = _rare.Copy() : _rare;
 
@@ -667,6 +673,7 @@ internal sealed partial class ComputedStyle
         public bool BookmarkClosed;                 // bookmark-state: closed
         public CounterOp[]? CounterReset, CounterSet, CounterIncrement;
         public GapRules? GapRules;                  // row rules, rule lists, breaks, insets, visibility and overlap; null = all initial
+        public AnchorStyle? Anchor;                 // anchor-name, position-anchor, position-area, fallbacks, anchor(); null = all initial
 
         public RareFields Copy()
         {

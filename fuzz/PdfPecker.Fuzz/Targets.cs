@@ -54,6 +54,8 @@ internal static class Targets
         "<table>", "</table>", "<tr>", "<td colspan=2>", "<td rowspan=0>", "<div>", "</div>", "<span>", "<p>", "<ul>", "<li>", "<ol>", "<form>", "<input type=radio>", "<input type=date value=2024-02-29>", "<input type=time step=1 value=23:59:59.999>", "<input type=week value=2020-W53>", "<progress>",
         "<select>", "<option>", "<textarea>", "<svg>", "<math>", "<math display=block>", "<mfrac>", "<msqrt>", "<mroot>", "<msubsup>", "<munderover>", "<mmultiscripts>", "<mprescripts/>", "<mtable><mtr><mtd>", "<mo stretchy=true>(</mo>", "<mi>x</mi>", "<mspace width=1e9em/>", "<mstyle scriptlevel=-9>", "<iframe srcdoc=\"<p style='height:1e9px'>a<iframe srcdoc=x>\">", "<iframe srcdoc=\"", "<video poster=\"data:image/png;base64,\">", "<video width=1e9>", "<img src=\"data:image/png;base64,\">", "<style>", "</style>", "<a href=\"#a\">", "<br>", "<hr>",
         "<h1>", "<pre>", "<center>", "<font>", "<details>", "<template>", "<!doctype html>", "&#0;", "&#x110000;", "&amp", "&notin;", "style=\"", "class=\"a\"", "id=\"a\"",
+        "anchor-name:--a", "position-anchor:--a", "position-area:top span-right", "top:anchor(--a bottom,1e9px)", "width:anchor-size(--a width)",
+        "position-try-fallbacks:flip-block,flip-inline,bottom", "justify-self:anchor-center",
         "display:table-cell", "display:flex", "display:grid", "position:absolute", "float:left", "width:50%", "height:1e9px", "margin:-1e9px", "column-count:99",
         "page-break-before:always", "overflow:hidden", "transform:scale(1e9)", "content:\"x\"", "counter-increment:a 999999999", "font-size:0", "line-height:0", "<![CDATA[",
         "backdrop-filter:blur(99px)", "mask:linear-gradient(red,#0000) exclude", "-webkit-mask-image:url(#a)", "<mask id=\"a\">",
@@ -111,6 +113,8 @@ internal static class Targets
 
     private static readonly string[] CssWords =
     {
+        "anchor-name:--a;", "position-anchor:--a;", "position-area:block-end span-inline-start;", "inset:anchor(--a bottom) auto auto anchor(--a right);", "anchor(", "anchor-size(",
+        "position-try:flip-block flip-inline, top left;", "align-self:anchor-center;",
         "var(--a)", "calc(", "min(", "max(", "clamp(", "progress(", "calc-size(fit-content, size * 2 + 1px)", "calc-size(auto, ", "/ 1px", "!important", "@media print {", "@media (min-width: 1px) {", "@supports (display:grid) {", "@page {", "@font-face {", "@keyframes a {",
         "@import url(x);", "@container (min-width:1px) {", "@counter-style a {", "@font-feature-values a { @styleset { b: 1 2 20; } @character-variant { c: 99 9; } }", "font-variant-alternates:styleset(b) character-variant(c) historical-forms", "@font-palette-values --a { font-family: Fz; base-palette: 99; override-colors: 0 red, 65535 blue }", "font-palette:--a", "font-palette:dark", ":is(", ":not(", ":where(", ":has(", ":nth-child(2n+1 of p)", "::before", "::after", "::marker",
         "*", ">", "~", "+", "|", "[a=b i]", "url(data:,)", "linear-gradient(", "radial-gradient(", "conic-gradient(", "repeating-linear-gradient(", "-webkit-gradient(", "-webkit-", "rotate(", "matrix(",

@@ -411,7 +411,7 @@ internal sealed partial class StyleResolver
     /// </summary>
     internal static float ToLayoutUnits(float pt) => MathF.Truncate(pt / 0.75f * 64f) / 64f * 0.75f;
 
-    private static Length ToLayoutUnits(Length len) => len.Unit == LengthUnit.Pt ? Length.Pt(ToLayoutUnits(len.Value)) : len;
+    internal static Length ToLayoutUnits(Length len) => len.Unit == LengthUnit.Pt ? Length.Pt(ToLayoutUnits(len.Value)) : len;
 
     private float BorderWidth(string lower, float em, float current)
     {

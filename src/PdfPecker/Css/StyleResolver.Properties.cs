@@ -71,6 +71,9 @@ internal sealed partial class StyleResolver
             else Revert(s, parent, prop, d.Lower == "revert-layer");
             return;
         }
+        // anchor() and anchor-size() depend on where the anchor is laid out: the layout resolves them, and the value
+        // stays initial for the boxes where they have no meaning.
+        if (AnchorStyle.Takes(prop) && (s.Anchor?.Functions != null || d.Lower.Contains("anchor", StringComparison.Ordinal)) && ApplyAnchorFunction(s, parent, prop, in d)) return;
         if (d.Lower is "inherit" or "initial" or "unset" && ApplyCssWideKeyword(s, parent, prop, d.Lower)) return;
 
         // A string switch compiles to a hash jump, so one flat switch is the cheapest way to find the property, and this
@@ -91,6 +94,11 @@ internal sealed partial class StyleResolver
             case "bottom": { var inset = s.Bottom; if (SetLength(ref inset, d.Lower, d.Em, d.Inherit ? parent.Bottom : null)) s.Bottom = inset; break; }
             case "left": { var inset = s.Left; if (SetLength(ref inset, d.Lower, d.Em, d.Inherit ? parent.Left : null)) s.Left = inset; break; }
             case "z-index": ApplyZIndex(s, parent, in d); break;
+            case "anchor-name": ApplyAnchorName(s, in d); break;
+            case "position-anchor": ApplyPositionAnchor(s, in d); break;
+            case "position-area": ApplyPositionArea(s, in d); break;
+            case "position-try-fallbacks": ApplyPositionTryFallbacks(s, in d); break;
+            case "position-try": ApplyPositionTry(s, in d); break;
             case "overflow-clip-margin": ApplyOverflowClipMargin(s, parent, in d); break;
             case "overflow":
             case "overflow-x":
@@ -304,8 +312,8 @@ internal sealed partial class StyleResolver
             case "align-items": s.AlignItems = ParseAlign(d.Lower, s.AlignItems); break;
             case "align-content": s.AlignContent = ParseAlign(d.Lower, s.AlignContent); break;
             case "justify-items": s.JustifyItems = ParseAlign(d.Lower, s.JustifyItems); break;
-            case "align-self": s.AlignSelf = ParseAlign(d.Lower, s.AlignSelf); break;
-            case "justify-self": s.JustifySelf = ParseAlign(d.Lower, s.JustifySelf); break;
+            case "align-self": s.AlignSelf = ParseSelfAlign(s, d.Lower, s.AlignSelf, vertical: true); break;
+            case "justify-self": s.JustifySelf = ParseSelfAlign(s, d.Lower, s.JustifySelf, vertical: false); break;
             case "row-gap":
             case "column-gap":
                 ApplyGap(s, prop, in d);

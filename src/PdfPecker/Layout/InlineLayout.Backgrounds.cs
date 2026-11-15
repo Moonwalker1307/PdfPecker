@@ -53,6 +53,9 @@ internal sealed partial class InlineLayout
     private int _inlineFragmentCount;
     private long _inlinePaintWork;
     private readonly List<DecoRun> _decoRuns = new();
+
+    /// <summary>The lines being placed, to which the boxes of the inline anchors on them belong; made on the first.</summary>
+    private object? _anchorPass;
     private readonly List<(InlineDeco Deco, int Start)> _openDecos = new();
 
     /// <summary>
@@ -71,14 +74,15 @@ internal sealed partial class InlineLayout
         {
             var deco = run.Deco;
             bool paints = deco.Paints && deco.Depth < MaxInlineDecoDepth && _inlineFragmentCount < MaxInlineFragments;
-            if (!paints && !deco.HoldsAbsolutes) continue;
             var s = deco.Style;
+            if (!paints && !deco.HoldsAbsolutes && s.Anchor?.Names == null) continue;
             var it = items[run.Start];
             s.Font.LineMetrics(s.TextSize, out float asc, out float desc);
             float above = asc + s.PaddingTop.Resolve(0) + s.BorderTop, below = desc + s.PaddingBottom.Resolve(0) + s.BorderBottom;
             float fx = xs[run.Start] + it.RelX, fw = xs[run.End] - xs[run.Start];
             float fy = baseline + TextShift(s, lineA, lineD) - above + it.RelY, fh = above + below;
             if (deco.HoldsAbsolutes) _engine.NoteInlineCb(deco.Element, baseline, fx, fy, fw, fh);
+            if (s.Anchor?.Names != null) _engine.NoteAnchor(deco.Element, _engine.Ops, _anchorPass ??= new object(), fx, fy, fw, fh);
             if (!paints) continue;
             _inlineFragmentCount++;
             var group = new GroupOp();

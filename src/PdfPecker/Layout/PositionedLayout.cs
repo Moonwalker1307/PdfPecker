@@ -210,6 +210,21 @@ internal sealed partial class LayoutEngine
     private void LayoutAbsolute(Element e, float staticX, float staticY, float cbX, float cbY, float cbW, float cbH)
     {
         Cancellation.ThrowIfCancellationRequested();
+        if (e.Style.Anchor is { Positions: true } anchor && e.Style.Position == Position.Absolute)
+        {
+            LayoutAnchored(e, anchor, staticX, staticY, cbX, cbY, cbW, cbH);
+            return;
+        }
+        var c = MeasureAbsolute(e, staticX, staticY, cbX, cbY, cbW, cbH, AnchorAlign.None, out float x, out float y);
+        PlaceAbsolute(e, c, x, y);
+    }
+
+    /// <summary>
+    /// Lays out an absolutely positioned box against its containing block, and returns it with the place of its border
+    /// box; <paramref name="align"/> places an anchored box on the axes it names.
+    /// </summary>
+    private Captured MeasureAbsolute(Element e, float staticX, float staticY, float cbX, float cbY, float cbW, float cbH, AnchorAlign align, out float x, out float y)
+    {
         // A box placed in the grid of the grid container that is its containing block is positioned in its grid area.
         if (_gridAreas != null && _gridAreas.TryGetValue(e, out var gridArea) && e.Parent?.Style is { } ps
             && (ps.Positioned || ps.Transform != null || ps.Perspective != null || ps.Filters != null))
@@ -236,7 +251,7 @@ internal sealed partial class LayoutEngine
             float w = s.Width.Resolve(cbW);
             borderW = s.BorderBox ? w : w + frameH;
         }
-        else if (s.Width.IsAuto && hasL && hasR && !replaced)
+        else if (s.Width.IsAuto && hasL && hasR && !replaced && !align.AlignsX)
             borderW = Math.Max(0, cbW - l - r - ml - mr);
         if (borderW is { } bw0)
         {
@@ -247,6 +262,9 @@ internal sealed partial class LayoutEngine
         // Room for shrink-to-fit: the containing block less the offsets that are set.
         float room = cbW - (hasL ? l : 0) - (hasR ? r : 0);
         if (!hasL && !hasR) room = Math.Max(0, cbX + cbW - staticX);
+        // Centred on its anchor, it has twice the room on the anchor's nearer side.
+        if (!float.IsNaN(align.CenterX))
+            room = 2 * Math.Max(0, Math.Min(align.CenterX - cbX - (hasL ? l : 0), cbX + cbW - (hasR ? r : 0) - align.CenterX));
 
         // Height: given, or stretched between top and bottom.
         float? borderH = null;
@@ -255,7 +273,7 @@ internal sealed partial class LayoutEngine
             float h = s.Height.IsPercent ? s.Height.Resolve(cbH) : s.Height.Value;
             borderH = s.BorderBox ? h : h + frameV;
         }
-        else if (s.Height.IsAuto && hasT && hasB && !replaced)
+        else if (s.Height.IsAuto && hasT && hasB && !replaced && !align.AlignsY)
             borderH = Math.Max(frameV, cbH - t - b - mt - mb);
 
         // Its min-height and max-height percentages, and its content's when its height is definite, resolve against
@@ -280,8 +298,8 @@ internal sealed partial class LayoutEngine
             else if (s.MarginTop.IsAuto) mt += free;
         }
 
-        float x = hasL ? cbX + l + ml : hasR ? cbX + cbW - r - mr - boxW : staticX + ml;
-        float y = hasT ? cbY + t + mt : hasB ? cbY + cbH - b - mb - boxH : staticY + mt;
+        x = hasL ? cbX + l + ml : hasR ? cbX + cbW - r - mr - boxW : staticX + ml;
+        y = hasT ? cbY + t + mt : hasB ? cbY + cbH - b - mb - boxH : staticY + mt;
         // In a flex container the static position is where the box would go as its only item, aligned by
         // justify-content and align-self (css-flexbox §4.1).
         if (_staticAreas != null && _staticAreas.TryGetValue(e, out var area))
@@ -289,6 +307,18 @@ internal sealed partial class LayoutEngine
             if (!hasL && !hasR) x += area.Fx * (area.W - boxW - ml - mr);
             if (!hasT && !hasB) y += area.Fy * (area.H - boxH - mt - mb);
         }
+        // An anchored box aligns in the space between its insets, or centres on its anchor.
+        float spaceX = cbW - (hasL ? l : 0) - (hasR ? r : 0) - ml - mr - boxW, spaceY = cbH - (hasT ? t : 0) - (hasB ? b : 0) - mt - mb - boxH;
+        if (!float.IsNaN(align.CenterX)) x = align.CenterX - (boxW + ml + mr) / 2 + ml;
+        else if (!float.IsNaN(align.FactorX)) x = cbX + (hasL ? l : 0) + ml + align.FactorX * spaceX;
+        if (!float.IsNaN(align.CenterY)) y = align.CenterY - (boxH + mt + mb) / 2 + mt;
+        else if (!float.IsNaN(align.FactorY)) y = cbY + (hasT ? t : 0) + mt + align.FactorY * spaceY;
+        return c;
+    }
+
+    /// <summary>Places a laid-out absolutely positioned box with its border box at (x, y), in a layer of its own.</summary>
+    private void PlaceAbsolute(Element e, Captured c, float x, float y)
+    {
         int start = _ops.Count;
         Place(c, x - c.BoxX, y - c.BoxY);
         if (_ops.Count > start && !(_ops.Count == start + 1 && _ops[start] is LayerOp)) WrapLayer(start, LayerOp.PositionedOrder, stackingContext: false);
