@@ -28,7 +28,17 @@ internal static class PredefinedCMaps
     private static readonly ConcurrentDictionary<string, Lazy<CMap?>> Parsed = new(StringComparer.Ordinal);
 
     /// <summary>The predefined CMap of that name, or null when the library does not have it.</summary>
-    public static CMap? Get(string name) => Parsed.GetOrAdd(name, n => new Lazy<CMap?>(() => Load(n))).Value;
+    public static CMap? Get(string name)
+    {
+        // Only the names the library has are kept: the names come from the documents, and keeping every one would let
+        // documents of many made-up names grow the process's memory without end.
+        if (Parsed.TryGetValue(name, out var parsed)) return parsed.Value;
+        if (OrderingOf(name) == null) return null;
+        return Parsed.GetOrAdd(name, n => new Lazy<CMap?>(() => Load(n))).Value;
+    }
+
+    /// <summary>How many CMaps the process keeps, for tests.</summary>
+    internal static int KeptCount => Parsed.Count;
 
     /// <summary>
     /// The CID-to-Unicode map of an Adobe ordering ("Japan1", "GB1", "CNS1" or "Korea1"): CIDs as two-byte codes mapped
