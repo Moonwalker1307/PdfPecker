@@ -2851,6 +2851,19 @@ public class HostileInputTests
 
     /// <summary>Runs <paramref name="work"/> on one thread and returns its result with the bytes that thread allocated.</summary>
     [Fact]
+    public void Made_up_predefined_cmap_names_are_not_kept()
+    {
+        // Fonts name their predefined CMap by /Encoding, and every name was kept for the life of the process: documents
+        // of tens of thousands of made-up names each kept megabytes that were never freed.
+        int before = Rendering.Fonts.PredefinedCMaps.KeptCount;
+        for (int i = 0; i < 10_000; i++)
+            Assert.Null(Rendering.Fonts.PredefinedCMaps.Get($"UniJISMadeUp{i}-H"));
+        // Other tests running at the same time may add the few real CMaps they use.
+        Assert.True(Rendering.Fonts.PredefinedCMaps.KeptCount - before < 100);
+        Assert.NotNull(Rendering.Fonts.PredefinedCMaps.Get("UniJIS-UTF16-H"));
+    }
+
+    [Fact]
     public void Icc_profiles_that_claim_huge_tables_or_point_outside_themselves_are_not_used()
     {
         static byte[] B(params int[] values) => values.Select(v => (byte)v).ToArray();
