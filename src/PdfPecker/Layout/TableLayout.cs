@@ -2163,6 +2163,12 @@ internal sealed partial class LayoutEngine
             for (int c = 0; c < m.ColCount; c++) mn += m.ColMin[c];
             result = (mn, Math.Max(mn, mx + ColumnsMaxWidth(m)));
         }
+        else if (e.Name == "math")
+        {
+            // A formula is as wide as it is laid out, on one line.
+            float w = MathWidth(e);
+            result = (w + frame, w + frame);
+        }
         else if (e.Control is { Kind: ControlKind.Text } && !s.FieldSizingContent)
         {
             // A text field is as wide as its size attribute (a textarea's cols) or its type says, whatever its value, as in Chrome;
