@@ -854,6 +854,19 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_row_split_in_vertical_columns_with_no_room_below_the_footer_ends()
+    {
+        // Found by the fuzzer: target fluent. A table row split across the columns of a vertical box, inside a table
+        // whose footer is taller than those columns, was given room for the repeated header and footer on every page
+        // it crossed. Its columns had no height, so each page added more than it took and the loop never ended.
+        const string html = "<table><tbody><tr><td><table><thead><tr></tr></thead><tbody><tr><td>"
+                            + "<div style='writing-mode: vertical-rl; column-count: 2'><div style='column-count: 97'>"
+                            + "<input type=radio style='display: block' checked></div></div></td></tr></tbody></table></td></tr></tbody>"
+                            + "<tfoot><tr><td><div style='height: 75pt'></div></td></tr></tfoot></table>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Deeply_nested_cells_spanning_rows_with_percentage_heights_are_laid_out_a_bounded_number_of_times()
     {
         // A definite cell spanning rows is laid out again once its rows end, which lays out everything inside it again,

@@ -250,7 +250,12 @@ internal sealed partial class LayoutEngine
         if (!_paginate || _splitRow is not { } r) return bottom;
         // Past the body's end on a page, above the footer, the box goes on under the header on the next.
         for (int p = Math.Max(PageOf(top), r.FirstPage); bottom > FlowEnd(p) + Eps; p++)
+        {
+            // A page with no room below the repeated header takes none of the box, so the box would never end: in
+            // columns of no height it went on adding pages until the float ran out. It keeps the size it has instead.
+            if (FlowEnd(p + 1) - _grid.Start(p + 1) <= r.Head + Eps) break;
             bottom += _grid.Start(p + 1) - FlowEnd(p) + r.Head;
+        }
         return bottom;
     }
     private int _rowAboveFoot; // the body row above the footer repeated on this page
