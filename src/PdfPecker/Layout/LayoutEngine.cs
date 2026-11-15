@@ -1890,6 +1890,7 @@ internal sealed partial class LayoutEngine
     private float LayoutContent(Element e, float x, float y, float w, float? definiteH, float minH)
     {
         var s = e.Style;
+        if (e.Name == "math") return LayoutMath(e, x, y, w);
         if (s.IsFlex) return LayoutFlex(e, x, y, w, definiteH, minH);
         if (s.IsGrid) return LayoutGrid(e, x, y, w, definiteH, minH);
         if (s.IsMultiColumn) return LayoutColumns(e, x, y, w, definiteH);

@@ -142,6 +142,26 @@ pdf-field-icon[clock] {
 }
 textarea pdf-field-value { white-space: pre-wrap; overflow-wrap: break-word; }
 option, optgroup { display: none; }
+/* MathML Core: a formula is laid out by the math layout, its parts as blocks of it. Scripts are 71% of the size around
+   them per level (the levels are marked before styling), and a single-letter identifier is italic. */
+math {
+  display: inline-block; font-family: math, serif; font-style: normal; font-weight: normal; line-height: normal;
+  text-indent: 0; text-align: left; text-transform: none; letter-spacing: normal; word-spacing: normal;
+  white-space: nowrap; direction: ltr; break-inside: avoid;
+}
+math[display=block i] { display: block; }
+mi, mn, mo, mtext, ms, mspace, mrow, mstyle, mpadded, mphantom, merror, menclose, mfrac, msqrt, mroot, msub, msup, msubsup,
+munder, mover, munderover, mmultiscripts, mtable, mtr, mlabeledtr, mtd, maction, mfenced, semantics { display: block; }
+annotation, annotation-xml, mprescripts, none { display: none; }
+mi[pdf-math-italic] { font-style: italic; }
+[pdf-math-script=""1""] { font-size: 71%; }
+[pdf-math-script=""2""] { font-size: 50.41%; }
+[pdf-math-script=""3""] { font-size: 35.79%; }
+[pdf-math-script=""4""] { font-size: 25.41%; }
+[pdf-math-script=""-1""] { font-size: 140.85%; }
+[pdf-math-script=""-2""] { font-size: 198.38%; }
+mtd { padding: 0.5ex 0.4em; }
+merror { border: 1px solid #ff0000; background-color: #ffffe0; }
 /* A nested svg element, a symbol and a marker clip what they draw to their viewport, as in Chrome. */
 svg svg, svg symbol, svg marker { overflow: hidden; }
 q::before { content: open-quote; }

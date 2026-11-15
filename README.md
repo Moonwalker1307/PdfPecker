@@ -299,6 +299,10 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   `box-decoration-break: clone` (also tables with separate borders), and
   bookmarks from the headings that `bookmark-level`, `bookmark-label` and `bookmark-state` can extend, rename or close.
   [More](https://pdfpecker.net/docs/paged-media/)
+- **MathML formulas**: `<math>` with MathML Core's fractions, scripts and pre-scripts, square and nth roots, limits
+  and accents, tables, spaces and padding, laid out with the operator dictionary's spacing and drawn with the page's
+  fonts (`font-family: math` falls back to serif). Fences, radicals, arrows and braces stretch as drawn paths, since a
+  text font has no larger variants; `alttext` is the formula's alternative text in tagged PDF.
 - **Content scaled to fit a box**: `-pdfpecker-scale-to-fit: shrink` fits text of any length into a fixed space, for
   labels, badges and certificates. [More](https://pdfpecker.net/docs/html-and-css/#scale-content-to-fit-a-box)
 - **Content kept to one page or box**: `continue: discard` (CSS Overflow 4) keeps the part of a box that fits on the

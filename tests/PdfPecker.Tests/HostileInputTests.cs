@@ -156,6 +156,48 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Deeply_nested_math_stays_bounded()
+    {
+        // Fractions nested deeper than the math layout goes are left out; math inside the text of math is a formula of
+        // its own laid out inside the token, each level as an inline-block. Both run on a thread with the 1.5 MB stack
+        // of Windows' thread pool.
+        byte[]? fractions = null, inText = null;
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                fractions = Bounded("<math>" + Repeat("<mfrac><mi>a</mi><mrow>", 3000) + "<mi>b</mi>" + Repeat("</mrow></mfrac>", 3000) + "</math>");
+                inText = Bounded(Repeat("<math><mtext>a", 3000) + Repeat("</mtext></math>", 3000));
+            }
+            catch (Exception e) { error = e; }
+        }, 1536 * 1024);
+        thread.Start();
+        thread.Join();
+        if (error != null) throw new AggregateException(error);
+        AssertStructurallyValid(fractions!);
+        AssertStructurallyValid(inText!);
+    }
+
+    [Theory]
+    [InlineData("<math><mspace width='1e30em' height='1e30em' depth='-1e30em'/><mi>x</mi></math>")]
+    [InlineData("<math><mfrac linethickness='1e30'><mi>a</mi><mi>b</mi></mfrac></math>")]
+    [InlineData("<math><mpadded width='-1e30em' voffset='1e30em' lspace='nanem'><mi>x</mi></mpadded></math>")]
+    [InlineData("<math><mstyle scriptlevel='-999999'><mi>x</mi></mstyle><mstyle scriptlevel='99999999999'><mi>y</mi></mstyle></math>")]
+    [InlineData("<math><mmultiscripts><mi>x</mi><mprescripts/><mprescripts/><none/></mmultiscripts><mtable><mtr></mtr><mlabeledtr/></mtable></math>")]
+    [InlineData("<math><mo lspace='1e38em' rspace='-1e38em' stretchy=true symmetric=true>(</mo><mspace height=1e9px /></math>")]
+    public void Extreme_math_sizes_end_in_a_limit_or_a_bounded_document(string html)
+    {
+        try
+        {
+            AssertStructurallyValid(Bounded(html));
+        }
+        catch (PdfLimitException)
+        {
+        }
+    }
+
+    [Fact]
     public void Deeply_nested_ruby_stays_bounded()
     {
         // Each ruby pair is an inline-block whose annotation and base are measured; a base holding the next ruby nests
