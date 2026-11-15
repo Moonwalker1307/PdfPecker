@@ -115,7 +115,7 @@ internal abstract class ColorSpace
     {
         var stream = array.Count > 1 ? file.Resolve(array[1]) as PdfStream : null;
         int components = file.GetInt(stream, "N", 3);
-        if (stream != null && components is 1 or 3 or 4 && IccSpace.Create(file.DecodeStream(stream), components) is { } icc) return icc;
+        if (stream != null && components is 1 or 3 or 4 && IccSpace.Create(file, stream, components) is { } icc) return icc;
         var alternateObj = stream?["Alternate"];
         var alternate = alternateObj != null ? Parse(file, alternateObj, resources, depth + 1) : null;
         if (alternate != null && alternate.Components == components) return alternate;

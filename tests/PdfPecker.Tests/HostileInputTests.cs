@@ -2877,6 +2877,32 @@ public class HostileInputTests
         Assert.Null(Rendering.Content.IccSpace.Create(header, 1));
     }
 
+    [Fact]
+    public void Inline_images_taking_turns_among_many_icc_profiles_render_in_bounded_time()
+    {
+        // Each profile is sampled on a grid, which takes some milliseconds, and the profiles shared between documents
+        // are few: 20,000 inline images that took turns among 20 profiles sampled one for every image, so a 23 KB file
+        // kept the page busy for minutes. A document's profiles are now read once each, and only the first 16 apply.
+        static byte[] Profile(int seed)
+        {
+            // A lut8 ('mft1') of four inputs with a grid of two points a side, its table different for each seed.
+            var lut = new List<byte>(Encoding.ASCII.GetBytes("mft1"));
+            lut.AddRange(new byte[4]);
+            lut.AddRange(new byte[] { 4, 3, 2, 0 });
+            foreach (int v in new[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 }) lut.AddRange(new byte[] { 0, (byte)v, 0, 0 });
+            for (int i = 0; i < 4; i++) lut.AddRange(Enumerable.Range(0, 256).Select(b => (byte)b));
+            lut.AddRange(Enumerable.Range(0, 48).Select(i => (byte)((i * 37 + seed * 53) % 256)));
+            for (int i = 0; i < 3; i++) lut.AddRange(Enumerable.Range(0, 256).Select(b => (byte)b));
+            return IccProfileTests.Profile("CMYK", "Lab ", 0x02100000, ("A2B0", lut.ToArray()));
+        }
+        var pdf = new FixturePdf();
+        string spaces = string.Concat(Enumerable.Range(0, 20).Select(k => $"/C{k} [/ICCBased {pdf.AddStream("/N 4", Profile(k))} 0 R] "));
+        var content = new StringBuilder();
+        for (int i = 0; i < 20_000; i++) content.Append("BI /W 1 /H 1 /CS /C").Append(i % 20).Append(" /BPC 8 ID \u0010\u0020\u0030\u0040 EI\n");
+        var bytes = pdf.Build(10, 10, content.ToString(), $"/ColorSpace << {spaces}>>");
+        Assert.NotNull(Bounded(() => FixturePdf.Render(bytes)));
+    }
+
     private static (T Result, long Allocated) Allocating<T>(Func<T> work) => Bounded(() =>
     {
         long before = GC.GetAllocatedBytesForCurrentThread();

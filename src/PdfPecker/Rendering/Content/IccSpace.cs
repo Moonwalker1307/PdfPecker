@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker.Rendering.Content;
 
@@ -13,6 +15,13 @@ internal sealed class IccSpace : ColorSpace
 {
     private const int MaxCachedProfiles = 8;
     private static readonly ConcurrentDictionary<string, Lazy<ColorSpace?>> Cache = new(StringComparer.Ordinal);
+
+    // The profiles one document uses, by their streams. Sampling a profile takes some milliseconds, and the shared cache
+    // above keeps only a few: without this, a page whose inline images take turns among more profiles than it keeps
+    // sampled one again for every image, so a small file kept a page busy for minutes. A document's profiles past this
+    // many are not applied, and their colours go through the alternate space.
+    private const int MaxProfilesPerDocument = 16;
+    private static readonly ConditionalWeakTable<PdfFile, Dictionary<PdfStream, ColorSpace?>> DocumentProfiles = new();
 
     // D50 XYZ to linear sRGB, with Bradford adaptation from D50 to D65 folded in.
     private static readonly double[] D50ToLinearSrgb =
@@ -57,7 +66,25 @@ internal sealed class IccSpace : ColorSpace
     /// <summary>
     /// The colour space for a profile with <paramref name="components"/> components: an <see cref="IccSpace"/>, or the
     /// device space of that many components when the profile gives the same colours to within one level (an sRGB
-    /// profile, for example), or null when the profile cannot be read or does not have that many components.
+    /// profile, for example), or null when the profile cannot be read, does not have that many components, or is past
+    /// the most profiles one document has applied. Each profile stream of a document is read once.
+    /// </summary>
+    public static ColorSpace? Create(PdfFile file, PdfStream stream, int components)
+    {
+        var profiles = DocumentProfiles.GetValue(file, static _ => new Dictionary<PdfStream, ColorSpace?>(ReferenceEqualityComparer.Instance));
+        lock (profiles)
+        {
+            if (profiles.TryGetValue(stream, out var known)) return known;
+            if (profiles.Count >= MaxProfilesPerDocument) return null;
+            var space = Create(file.DecodeStream(stream), components);
+            profiles.Add(stream, space);
+            return space;
+        }
+    }
+
+    /// <summary>
+    /// The colour space for a profile with <paramref name="components"/> components, as <see cref="Create(PdfFile, PdfStream, int)"/>
+    /// gives it, from the profile's bytes.
     /// </summary>
     public static ColorSpace? Create(byte[] profile, int components)
     {
