@@ -274,41 +274,55 @@ internal sealed partial class LayoutEngine
         ColumnPass fill;
         ColumnGrid grid;
         int endK, row;
-        for (int count = Math.Min(8, maxRows); ; count = Math.Min(count * 2, maxRows))
+        // The rows below a header repeated over a split table row already start under it, so the content in them takes
+        // no more room for it. Their fragments are numbered by column, not by page: left in place, the header's room came
+        // off every fragment after the first, rows of columns shorter than it held nothing, and the content went on in
+        // new rows until the pages ran out.
+        var splitRow = _splitRow;
+        try
         {
-            Cancellation.ThrowIfCancellationRequested();
-            var heights = new float[count];
-            var tops = new float[count];
-            var pages = new int[count];
-            float t = y;
-            for (int j = 0; j < count; j++)
+            for (int count = Math.Min(8, maxRows); ; count = Math.Min(count * 2, maxRows))
             {
-                float h = rowHeight;
-                int p = page;
-                if (j > 0) t = tops[j - 1] + pitch;
-                if (paginated)
+                Cancellation.ThrowIfCancellationRequested();
+                _splitRow = splitRow;
+                var heights = new float[count];
+                var tops = new float[count];
+                var pages = new int[count];
+                float t = y;
+                for (int j = 0; j < count; j++)
                 {
-                    // A row cut short by the end of a page fills it: the next row starts the next page.
-                    if (j > 0 && heights[j - 1] < rowHeight - Eps) t = FlowStart(pages[j - 1] + 1);
-                    p = PageOf(t);
-                    if (t + h > FlowEnd(p) + Eps && !AtPageTop(t)) t = FlowStart(++p);
-                    h = Math.Max(0, Math.Min(h, FlowEnd(p) - t));
+                    float h = rowHeight;
+                    int p = page;
+                    if (j > 0) t = tops[j - 1] + pitch;
+                    if (paginated)
+                    {
+                        // A row cut short by the end of a page fills it: the next row starts the next page.
+                        if (j > 0 && heights[j - 1] < rowHeight - Eps) t = FlowStart(pages[j - 1] + 1);
+                        p = PageOf(t);
+                        if (t + h > FlowEnd(p) + Eps && !AtPageTop(t)) t = FlowStart(++p);
+                        h = Math.Max(0, Math.Min(h, FlowEnd(p) - t));
+                    }
+                    tops[j] = t;
+                    heights[j] = h;
+                    pages[j] = p;
                 }
-                tops[j] = t;
-                heights[j] = h;
-                pages[j] = p;
+                grid = new ColumnGrid(outer, page, y, n, heights, lastOverflows: true, tops, pages);
+                _splitRow = null;
+                fill = RunColumnPass(e, from, to, x, colW, grid, 0, noteMarks: true);
+                endK = EndFragment(fill, grid);
+                row = grid.RowOf(endK);
+                if (row < count - 1 || count >= maxRows) break;
             }
-            grid = new ColumnGrid(outer, page, y, n, heights, lastOverflows: true, tops, pages);
-            fill = RunColumnPass(e, from, to, x, colW, grid, 0, noteMarks: true);
-            endK = EndFragment(fill, grid);
-            row = grid.RowOf(endK);
-            if (row < count - 1 || count >= maxRows) break;
+            var best = (Pass: fill, Grid: grid, Height: Math.Min(grid.RowHeight(row), Tallest(fill, grid, row, endK)));
+            if (!s.ColumnFillAuto && endK < grid.FirstFragmentOf(row) + n) best = Balance(e, from, to, x, colW, best, row, endK);
+            // The rules of a balanced last row are as tall as the row, as in Chrome.
+            PlaceColumns(best.Pass, best.Grid, row, best.Height, s, x, n, colW, gap, grid.RowHeight(row));
+            return grid.RowTop(row) + grid.RowHeight(row);
         }
-        var best = (Pass: fill, Grid: grid, Height: Math.Min(grid.RowHeight(row), Tallest(fill, grid, row, endK)));
-        if (!s.ColumnFillAuto && endK < grid.FirstFragmentOf(row) + n) best = Balance(e, from, to, x, colW, best, row, endK);
-        // The rules of a balanced last row are as tall as the row, as in Chrome.
-        PlaceColumns(best.Pass, best.Grid, row, best.Height, s, x, n, colW, gap, grid.RowHeight(row));
-        return grid.RowTop(row) + grid.RowHeight(row);
+        finally
+        {
+            _splitRow = splitRow;
+        }
     }
 
     /// <summary>

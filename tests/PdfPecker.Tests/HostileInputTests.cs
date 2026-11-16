@@ -854,6 +854,21 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Wrapped_columns_in_a_row_split_below_a_repeated_header_end_with_their_content()
+    {
+        // Found by the fuzzer: target html, timeout-530035d2. Rows of columns 2em tall, in a cell of a table row split
+        // across pages below a repeated header, took the header's room off every column after the first. Columns shorter
+        // than the header held nothing, so the content went on in new rows until the fragments ran out: 4 GB and 6 s.
+        var html = "<style>@page { size: A5 } td { border: 1px solid }</style><table><thead><tr><td>H</td><td>H</td></tr></thead>"
+                   + Repeat("<tr><td>Row</td><td>v</td></tr>", 30)
+                   + "<tr><td rowspan=2>a<div style='columns: 3 / 2em'>" + Repeat("Long text in a row that has a spanning cell. ", 40)
+                   + "</div></td><td>x</td></tr><tr><td>y</td></tr></table>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 200L << 20);
+    }
+
+    [Fact]
     public void A_row_split_in_vertical_columns_with_no_room_below_the_footer_ends()
     {
         // Found by the fuzzer: target fluent. A table row split across the columns of a vertical box, inside a table
