@@ -11,4 +11,11 @@
   <PropertyGroup>
     <Version>1.25.1-dev</Version>
   </PropertyGroup>
+
+  <!-- 1.25.0 was the last release for .NET 8 and 9, and the packages now target net10.0 and net11.0 only. Package
+       validation compares each package with its 1.25.0 baseline, which still has the net8.0 and net9.0 folders; those
+       are left out of the comparison on purpose. Remove this once the baseline is a release without them. -->
+  <ItemGroup>
+    <PackageValidationBaselineFrameworkToIgnore Include="net8.0;net9.0" />
+  </ItemGroup>
 </Project>

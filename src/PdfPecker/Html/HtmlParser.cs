@@ -98,7 +98,6 @@ internal sealed class HtmlParser
 
     // Tag and attribute names as written, mapped to their lower-case strings: a document repeats the same few names, so
     // each gets one string instead of one per tag.
-#if NET9_0_OR_GREATER
     private readonly Dictionary<string, string> _names = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> _nameLookup;
 
@@ -118,28 +117,6 @@ internal sealed class HtmlParser
         NoteName(name);
         return name;
     }
-#else
-    // .NET 8 has no span lookup on Dictionary, so names are keyed by their span hash and the stored key is compared;
-    // a hash collision just replaces the entry.
-    private readonly Dictionary<int, (string Key, string Name)> _names = new();
-
-    private HtmlParser(string src, bool implied)
-    {
-        _src = src;
-        _implied = implied;
-    }
-
-    private string Name(ReadOnlySpan<char> written)
-    {
-        var hash = string.GetHashCode(written);
-        if (_names.TryGetValue(hash, out var entry) && written.SequenceEqual(entry.Key)) return entry.Name;
-        var key = written.ToString();
-        var name = key.ToLowerInvariant();
-        _names[hash] = (key, name);
-        NoteName(name);
-        return name;
-    }
-#endif
 
     // The short texts and attribute values seen last, each at the place its hash gives it. A document repeats many of
     // them, such as the class of every cell of a column, the white space between tags or a cell's "0.00", and those

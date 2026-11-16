@@ -26,11 +26,11 @@ File.WriteAllBytes("hello.pdf", pdf);
 dotnet add package PdfPecker
 ```
 
-The package targets `net8.0`, `net9.0`, `net10.0` and `net11.0`, so it works on .NET 8 and later, on Windows, Linux and macOS.
+The package targets `net10.0` and `net11.0`, so it works on .NET 10 and later, on Windows, Linux and macOS.
 
-**1.25.0 is the last release for .NET 8 and 9.** Microsoft ended support for both on 10 November 2026. The next
-release targets .NET 10 and later only; 1.25.0 and earlier releases keep working on .NET 8 and 9. This applies to
-PdfPecker.Fluent, PdfPecker.Testing, PdfPecker.Razor and the `pdfpecker` tool too.
+**.NET 8 and 9 are no longer supported.** Microsoft ended support for both on 10 November 2026, and 1.25.0 was the last
+release for them; it and earlier releases keep working there. This applies to PdfPecker.Fluent, PdfPecker.Testing,
+PdfPecker.Razor and the `pdfpecker` tool too.
 
 ## Quick start
 
@@ -175,7 +175,7 @@ pdfpecker to-image all.pdf pages --format webp       # also to-html, text, info
 
 On a .NET 10 or 11 SDK the tool installs as a Native AOT executable for Windows, macOS and Linux (x64 and Arm64, glibc and
 musl), so a command starts in milliseconds instead of the third of a second the JIT needs: converting the sample invoice took
-17 ms in all instead of 355 ms on a 4-core Linux VM. Other platforms and .NET 8 and 9 SDKs get the framework-dependent tool, as before.
+17 ms in all instead of 355 ms on a 4-core Linux VM. Other platforms get the framework-dependent tool.
 
 A call without a command word is read like wkhtmltopdf's, so a script can switch by changing the program name:
 `pdfpecker -s A4 -T 15mm --footer-center "[page] / [topage]" in.html out.pdf`. Page size, orientation, margins, headers and

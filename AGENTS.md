@@ -139,7 +139,7 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 
 Before pushing, the build must be warning-free (warnings are errors), the tests must pass, and the golden baselines
 must be unchanged unless the output change is intended. If only one runtime is installed, pass `-f net11.0`; CI runs
-`net8.0`, `net9.0`, `net10.0` and `net11.0` on Linux and `net10.0` on Windows. A change to the public API also needs
+`net10.0` and `net11.0` on Linux and `net10.0` on Windows. A change to the public API also needs
 `dotnet pack src/PdfPecker -c Release -o ./nupkg` (or `src/PdfPecker.Fluent`, `src/PdfPecker.Testing`,
 `src/PdfPecker.Razor`), which runs package validation. The tool has no assembly API to validate; pack it with
 `src/PdfPecker.Cli` when its csproj changes. Details
@@ -161,9 +161,8 @@ are in `BUILD.md` and `TESTING.md`.
 - **Public API**: code is `internal` unless it is meant for callers (tests can see internals). Every public member
   needs an XML doc comment (CS1591 is an error). Add overloads rather than changing signatures, add a README line for
   a new feature, and remember the manual in PdfPecker.Web gets a docs change that goes live with the next release.
-- **Newer .NET APIs**: the library also targets .NET 8, which lacks `Dictionary` alternate lookups, span `Split` and
-  some other APIs. Guard them with `#if NET9_0_OR_GREATER` and keep a .NET 8 path. 1.25.0 is the last release for
-  .NET 8 and 9 (`README.md`); the release after it drops them.
+- **Target frameworks**: the packages target .NET 10 and 11 (the tool .NET 10 only). 1.25.0 was the last release for
+  .NET 8 and 9 (`README.md`), so no code needs a .NET 8 path.
 - **Parsers of untrusted input** (PDF, images, fonts, HTML, CSS, SVG, Markdown): add resource limits, a fuzz target in
   `fuzz/PdfPecker.Fuzz`, and for each bug fix a regression test in the `HostileInputCollection`.
 - **Generated data**: change the generator, never its output.
@@ -257,9 +256,8 @@ are in `BUILD.md` and `TESTING.md`.
 - `Microsoft.AspNetCore.Components` reports trim warnings from its own code (it reads component members through
   `GetType()`), so the Razor sample folds only that assembly's warnings into one ignored `IL2104` for the AOT publish;
   `@layout` and `LayoutView` warn in the caller's project, so the sample's layout is a component with `ChildContent`.
-- The tool's per-platform packages are a .NET 10 SDK feature: .NET 8 and 9 SDKs refuse a package whose settings file
-  names platform packages, so only the package's net10.0 folder does, and its net8.0 and net9.0 folders keep the
-  framework-dependent tool. SDK 10.0.4xx writes that file to `tools/any/any`, where a .NET 10 SDK would prefer the net9.0
-  folder, so a target in the project moves it to `tools/net10.0/any`. Alpine needs the musl packages: without them the SDK picks `linux-x64`, whose executable
+- The tool's per-platform packages are a .NET 10 SDK feature, so the tool targets net10.0 only and needs a .NET 10 or
+  later SDK. SDK 10.0.4xx writes the settings file that names them to `tools/any/any`, and a target in the project
+  moves it to `tools/net10.0/any`, where every .NET 10 SDK reads it. Alpine needs the musl packages: without them the SDK picks `linux-x64`, whose executable
   does not run there. The native tool writes slightly larger PDFs than a Linux distribution's own .NET build, because
   Native AOT links zlib-ng as Microsoft's runtime builds do; the inflated content is identical.

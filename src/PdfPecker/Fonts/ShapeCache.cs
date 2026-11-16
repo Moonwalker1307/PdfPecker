@@ -20,9 +20,7 @@ internal sealed class ShapeCache
 
     // A word's key is its characters after a character for its script, which no text holds.
     private const char ScriptKeyBase = '\uE000';
-#if NET9_0_OR_GREATER
     private const int MaxStackKey = 128; // the longest word whose key is put together on the stack to look it up
-#endif
 
     private sealed class Entry(ShapedGlyph[] glyphs, int width, bool free)
     {
@@ -34,20 +32,16 @@ internal sealed class ShapeCache
     private readonly Dictionary<string, Entry> _ltr = new(StringComparer.Ordinal), _rtl = new(StringComparer.Ordinal),
         _words = new(StringComparer.Ordinal);
     private readonly Dictionary<string, bool> _plain = new(StringComparer.Ordinal);
-#if NET9_0_OR_GREATER
     private readonly Dictionary<string, Entry>.AlternateLookup<ReadOnlySpan<char>> _ltrSpan, _rtlSpan, _wordsSpan;
     private readonly Dictionary<string, bool>.AlternateLookup<ReadOnlySpan<char>> _plainSpan;
-#endif
     private int _glyphs;
 
     public ShapeCache()
     {
-#if NET9_0_OR_GREATER
         _ltrSpan = _ltr.GetAlternateLookup<ReadOnlySpan<char>>();
         _rtlSpan = _rtl.GetAlternateLookup<ReadOnlySpan<char>>();
         _wordsSpan = _words.GetAlternateLookup<ReadOnlySpan<char>>();
         _plainSpan = _plain.GetAlternateLookup<ReadOnlySpan<char>>();
-#endif
     }
 
     /// <summary>The glyphs held, as the bound counts them.</summary>
@@ -68,11 +62,7 @@ internal sealed class ShapeCache
         Entry? entry;
         lock (_ltr)
         {
-#if NET9_0_OR_GREATER
             bool found = (rtl ? _rtlSpan : _ltrSpan).TryGetValue(s.AsSpan(start, length), out entry);
-#else
-            bool found = (rtl ? _rtl : _ltr).TryGetValue(s.Substring(start, length), out entry);
-#endif
             if (!found)
             {
                 width = 0;
@@ -101,7 +91,6 @@ internal sealed class ShapeCache
         Entry? entry;
         lock (_ltr)
         {
-#if NET9_0_OR_GREATER
             bool found;
             if (length < MaxStackKey)
             {
@@ -111,9 +100,6 @@ internal sealed class ShapeCache
                 found = _wordsSpan.TryGetValue(key, out entry);
             }
             else found = _words.TryGetValue(WordKey(script, s, start, length), out entry);
-#else
-            bool found = _words.TryGetValue(WordKey(script, s, start, length), out entry);
-#endif
             if (!found)
             {
                 free = false;
@@ -136,11 +122,7 @@ internal sealed class ShapeCache
     {
         lock (_ltr)
         {
-#if NET9_0_OR_GREATER
             return _plainSpan.TryGetValue(s.AsSpan(start, length), out plain);
-#else
-            return _plain.TryGetValue(s.Substring(start, length), out plain);
-#endif
         }
     }
 
