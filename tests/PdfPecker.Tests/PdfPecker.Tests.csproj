@@ -14,7 +14,7 @@
     <!-- Test-only: an independent CMS implementation to verify the signatures PdfPecker writes. -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="11.0.0" />
     <!-- Test-only: collects the coverage report that CI uploads (the XPlat Code Coverage data collector of dotnet test). -->
-    <PackageReference Include="coverlet.collector" Version="10.1.0">
+    <PackageReference Include="coverlet.collector" Version="10.1.1">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
