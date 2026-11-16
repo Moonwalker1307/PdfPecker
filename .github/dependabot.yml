@@ -22,6 +22,11 @@ updates:
     directory: /tests/PdfPecker.Tests
     schedule:
       interval: weekly
+    # net8.0 and net9.0 keep System.Security.Cryptography.Pkcs 10, which version 11 no longer supports; drop this when
+    # those targets go.
+    ignore:
+      - dependency-name: System.Security.Cryptography.Pkcs
+        update-types: ["version-update:semver-major"]
     groups:
       nuget-minor-and-patch:
         update-types: [minor, patch]

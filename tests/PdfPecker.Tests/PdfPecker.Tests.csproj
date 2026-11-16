@@ -11,8 +11,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <!-- Test-only: an independent CMS implementation to verify the signatures PdfPecker writes. -->
-    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="11.0.0" />
     <!-- Test-only: collects the coverage report that CI uploads (the XPlat Code Coverage data collector of dotnet test). -->
     <PackageReference Include="coverlet.collector" Version="10.1.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -22,6 +20,16 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <!-- Test-only: an independent CMS implementation to verify the signatures PdfPecker writes. Version 11 supports only
+       .NET 10 and later, and on .NET 9 its Microsoft.Bcl.Cryptography dependency defines X509CertificateLoader a
+       second time, so net8.0 and net9.0 keep version 10 until those targets are dropped. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0'">
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.15" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' != 'net8.0' And '$(TargetFramework)' != 'net9.0'">
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="11.0.0" />
   </ItemGroup>
 
   <ItemGroup>
