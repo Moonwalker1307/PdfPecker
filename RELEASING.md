@@ -23,7 +23,7 @@ it names.
 - PdfPecker.Cli has no public assembly API to validate: its contract is the command line. Before 2.0 a command or option
   is not removed or renamed and the exit codes (0 success, 1 the work failed, 2 a wrong command line) do not change; add a
   new option instead. The `PdfPecker.Cli.Tests` run the commands and the `nuget.yml` build installs the packed tool and
-  runs it, with the .NET 8 and 9 SDKs and natively on each platform, so a package that does not work fails the build.
+  runs it natively on each platform, so a package that does not work fails the build.
 - Local builds pack as `<next patch>-dev` (the `Version` in `Directory.Build.props`, which all five packages share). CI builds of main and pull requests
   are `<next patch>-preview.<run number>`, computed from the latest `v*` tag, so they sort between two releases.
 

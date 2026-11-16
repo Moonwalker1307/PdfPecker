@@ -2,10 +2,9 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <!-- A pack for one platform (`dotnet pack -r linux-x64`, see below) holds one native executable, so it builds for
-         net10.0 alone; everything else builds for every target framework, as the library does. -->
-    <TargetFrameworks Condition="'$(RuntimeIdentifier)' == ''">net8.0;net9.0;net10.0</TargetFrameworks>
-    <TargetFramework Condition="'$(RuntimeIdentifier)' != ''">net10.0</TargetFramework>
+    <!-- The tool targets net10.0 alone: its Native AOT packages are named in the package's net10.0 folder, which a .NET 11
+         SDK also reads, and a net11.0 folder would make a .NET 11 SDK install a framework-dependent build instead. -->
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <RootNamespace>PdfPecker.Cli</RootNamespace>
@@ -41,17 +40,15 @@
        a second the JIT needs for every command. `dotnet pack` writes the PdfPecker.Cli package, whose net10.0 folder only
        names a package per platform; `dotnet pack -r <rid>` on that operating system writes PdfPecker.Cli.<rid>, and
        `dotnet pack -r any` the framework-dependent PdfPecker.Cli.any, which a .NET 10 SDK installs on any other platform.
-       The package's net8.0 and net9.0 folders keep the framework-dependent tool as before, because older SDKs reject the
-       per-platform layout and install from the folder of their own version. The musl RIDs must be listed: without them
-       Alpine falls back to the glibc executable, which does not run there. -->
+       The musl RIDs must be listed: without them Alpine falls back to the glibc executable, which does not run there. -->
   <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <ToolPackageRuntimeIdentifiers>linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;osx-x64;osx-arm64;win-x64;win-arm64;any</ToolPackageRuntimeIdentifiers>
     <PublishAot Condition="'$(RuntimeIdentifier)' != 'any'">true</PublishAot>
   </PropertyGroup>
 
   <!-- SDK 10.0.1xx writes the settings file that names the platform packages to tools/net10.0/any, later 10.0 SDKs to
-       tools/any/any. NuGet prefers the net9.0 folder to an "any" one for a .NET 10 SDK, which would then install the
-       framework-dependent net9.0 tool, so the file always goes to the net10.0 folder, where every .NET 10 SDK reads it. -->
+       tools/any/any. The file always goes to the net10.0 folder, so every SDK sees the same layout and an older SDK
+       finds no tool for its own version rather than a settings file it cannot read. -->
   <Target Name="_PdfPeckerToolSettingsInNet10Folder" AfterTargets="PackTool"
           Condition="'$(TargetFramework)' == 'net10.0' and '$(RuntimeIdentifier)' == ''">
     <ItemGroup>

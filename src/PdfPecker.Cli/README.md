@@ -16,8 +16,8 @@ Run `pdfpecker help` for the commands and `pdfpecker help <command>` for the opt
 A .NET 10 or 11 SDK installs the tool as a Native AOT executable from a package for its platform (`PdfPecker.Cli.linux-x64`,
 `win-arm64`, `osx-arm64`, ...; Linux x64 and Arm64 with glibc or musl, macOS and Windows on x64 and Arm64). It starts a
 command in a few milliseconds, where the framework-dependent tool spends about a third of a second starting the runtime
-and compiling. On other platforms a .NET 10 or 11 SDK installs `PdfPecker.Cli.any`, the framework-dependent tool, and .NET 8 and
-9 SDKs install the framework-dependent tool from the package itself, as they always have. The commands and their output
+and compiling. On other platforms a .NET 10 or 11 SDK installs `PdfPecker.Cli.any`, the framework-dependent tool. The tool needs a
+.NET 10 or later SDK; 1.25.0 was the last release that .NET 8 and 9 SDKs could install. The commands and their output
 are the same in every case. On Windows the SDK starts the native tool through a `pdfpecker.cmd` file, which Command Prompt
 and PowerShell run as `pdfpecker`; Git Bash needs the full name, `pdfpecker.cmd`.
 

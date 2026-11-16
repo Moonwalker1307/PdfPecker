@@ -84,21 +84,13 @@ internal static class SecurityCommands
 
     private static X509Certificate2 LoadCertificate(string path, string? password)
     {
-#if NET9_0_OR_GREATER
         return X509CertificateLoader.LoadPkcs12FromFile(path, password);
-#else
-        return new X509Certificate2(path, password);
-#endif
     }
 
     private static X509Certificate2 LoadPublicCertificate(string path)
     {
         var bytes = File.ReadAllBytes(path);
-#if NET9_0_OR_GREATER
         return X509CertificateLoader.LoadCertificate(bytes);
-#else
-        return new X509Certificate2(bytes);
-#endif
     }
 
     public static int Verify(CliIo io, IReadOnlyList<string> args, CancellationToken ct)

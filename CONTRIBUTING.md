@@ -26,7 +26,7 @@ compatible, so no reflection-based code.
 
 ## Building and testing
 
-You need the .NET 11 SDK. The libraries and tests target `net8.0`, `net9.0`, `net10.0` and `net11.0`, and CI runs all four.
+You need the .NET 11 SDK. The libraries and tests target `net10.0` and `net11.0`, and CI runs both.
 
 ```
 dotnet build -c Release

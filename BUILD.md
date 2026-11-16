@@ -4,8 +4,8 @@
 
 - The .NET 11 SDK, which the `net11.0` target needs. `global.json` pins `11.0.100` with `rollForward: latestFeature`,
   so any 11.0 feature band works.
-- The .NET 8, 9 and 10 runtimes to run the tests on every target framework, as CI does. With only .NET 11 installed,
-  pass `-f net11.0`.
+- The .NET 10 runtime to run the tests on every target framework, as CI does. With only .NET 11 installed, pass
+  `-f net11.0`.
 - Nothing else: the library, tests, fuzzer, sample and generators need no packages beyond the test framework, and
   no native libraries.
 
@@ -13,7 +13,7 @@
 
 ```
 dotnet build -c Release                                         # library, tests, fuzzer, sample, benchmarks, tools
-dotnet test -c Release --no-build                               # all tests on net8.0 to net11.0
+dotnet test -c Release --no-build                               # all tests on net10.0 and net11.0
 dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class, one runtime
 dotnet pack src/PdfPecker -c Release -o ./nupkg                 # the package, with API validation
 dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg          # PdfPecker.Fluent, with the same version
@@ -42,18 +42,16 @@ dotnet run --project samples/PdfPecker.Razor.Sample -c Release -- output    # wr
 
 ## Target frameworks
 
-The libraries and tests target `net8.0`, `net9.0`, `net10.0` and `net11.0`. APIs that .NET 8 lacks, such as `Dictionary`
-alternate lookups and span `Split`, go behind `#if NET9_0_OR_GREATER` with a .NET 8 path next to them.
-
-1.25.0 is the last release with `net8.0` and `net9.0`, as the README says (Microsoft ended support for both on
-10 November 2026). The release after it drops them from every package, the CI matrix and the tool, and the
-`#if NET9_0_OR_GREATER` guards and their .NET 8 paths go with them.
+The libraries and tests target `net10.0` and `net11.0`. 1.25.0 was the last release with `net8.0` and `net9.0`
+(Microsoft ended support for both on 10 November 2026), so code no longer needs a .NET 8 path. Until the API baseline
+is a release without them, `Directory.Build.props` tells package validation to leave the baseline's `net8.0` and
+`net9.0` folders out of the comparison.
 
 The next .NET is tried before it ships: `-p:PreviewTargetFramework=net12.0` adds it as an extra target to the library
 and tests, and `.github/workflows/dotnet-preview.yml` builds and tests that on the latest .NET 12 preview SDK once one
 is out; until then the workflow runs only by hand. The released package gets the new target only once that .NET is generally available.
 
-The command-line tool stays on `net8.0`, `net9.0` and `net10.0`: its Native AOT packages are named in the package's
+The command-line tool targets `net10.0` alone: its Native AOT packages are named in the package's
 `net10.0` folder, which a .NET 11 SDK also reads, and a `net11.0` folder would make a .NET 11 SDK install a
 framework-dependent build instead.
 

@@ -119,11 +119,7 @@ public sealed class FormAndFootnoteTests
             System.Security.Cryptography.HashAlgorithmName.SHA256, System.Security.Cryptography.RSASignaturePadding.Pkcs1);
         using var self = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
         byte[] pfx = self.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx, "pw");
-#if NET9_0_OR_GREATER
         var cert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(pfx, "pw");
-#else
-        var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(pfx, "pw");
-#endif
         var signed = PdfSigner.Sign(pdf, new PdfSignatureOptions(cert) { FieldName = "Buyer" });
         var result = PdfSignatureVerifier.Verify(signed).Single();
         Assert.Equal("Buyer", result.FieldName);
