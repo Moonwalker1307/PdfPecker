@@ -744,7 +744,10 @@ internal sealed partial class LayoutEngine
         var minimums = new List<float>(items.Count);
         var flexMinimums = new List<float>(items.Count);
         ColumnContributions(items, g.W, colGap, g.ColNames, g.RowNames, contributions, null, 0, minimums, flexMinimums);
-        SizeTracks(cols, g.W, definite: true, colGap, contributions, s.JustifyContent is BoxAlign.Normal or BoxAlign.Stretch, minimums, flexMinimums);
+        // A grid measured at an unbounded width (an item's max-content size in an outer grid) has no free space to share:
+        // its fr columns take their content, as in max-content sizing, or each would be infinite and the columns after
+        // the first would start at infinity, where positions turn into NaN.
+        SizeTracks(cols, g.W, definite: float.IsFinite(g.W), colGap, contributions, s.JustifyContent is BoxAlign.Normal or BoxAlign.Stretch, minimums, flexMinimums);
 
         // Column positions, with justify-content.
         float used = 0;

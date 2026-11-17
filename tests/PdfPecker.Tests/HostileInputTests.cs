@@ -854,6 +854,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Grids_nested_until_their_widths_overflow_paint_borders_at_finite_positions()
+    {
+        // Found by the fuzzer: target html, exception-b889eeb4. Each grid of two fr columns is twice as wide as its
+        // widest item at max-content, so 128 nested ones measured at an unbounded width overflowed the float. Its fr
+        // columns then shared infinite space, the second column started at infinity, and the rule painted in it reached
+        // its corners at NaN, where Math.Sign threw ArithmeticException.
+        var html = "<style>.g { display: grid; grid-template-columns: 1fr 1fr }</style>"
+                   + Repeat("<div class=g>grid<div></div>", 130) + "<hr>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Wrapped_columns_in_a_row_split_below_a_repeated_header_end_with_their_content()
     {
         // Found by the fuzzer: target html, timeout-530035d2. Rows of columns 2em tall, in a cell of a table row split
