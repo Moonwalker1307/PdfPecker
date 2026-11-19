@@ -854,6 +854,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Balanced_lines_millions_of_pixels_wide_end_their_width_search()
+    {
+        // Found by the fuzzer: target html, timeout-d0d017cf. text-wrap: balance looks for the narrowest width that keeps
+        // as many lines, to a CSS pixel. Widths of millions of pixels lie further apart than that as floats, so the middle
+        // of the range was always one of its ends and the search never ended, nor looked at the cancellation.
+        var html = "<p style='width: 30000000px; text-wrap: balance; letter-spacing: 50000px'>" + Repeat("ab ", 600) + "</p>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 200L << 20);
+    }
+
+    [Fact]
     public void Grids_nested_until_their_widths_overflow_paint_borders_at_finite_positions()
     {
         // Found by the fuzzer: target html, exception-b889eeb4. Each grid of two fr columns is twice as wide as its

@@ -346,6 +346,9 @@ internal sealed partial class InlineLayout
         while (lower + CssPixel < upper)
         {
             float mid = (lower + upper) / 2;
+            // Widths of millions of pixels lie further apart than a CSS pixel, and an infinite width has no middle: with
+            // no float between the bounds the search would go on forever without looking at the cancellation.
+            if (mid <= lower || mid >= upper) break;
             var trial = BreakLines(items, mid, indent, hyphenLimit: hyphenLimit);
             bool fits = trial.Count <= n;
             for (int li = 0; li < trial.Count && fits; li++)
