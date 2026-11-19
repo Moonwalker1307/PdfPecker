@@ -854,6 +854,20 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Row_subgrids_nested_across_pages_count_against_the_relayout_budget()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. Each level is a grid with a row and column subgrid inside a
+        // row and column subgrid. A row subgrid is laid out again at its parent's row edges, and the levels that cross a
+        // page lay out everything inside them again, so the work doubled with every level past the first page break.
+        var html = "<style>.t { display: grid; grid-template-columns: 2fr repeat(3, 1fr) }"
+                   + " .s { display: grid; grid-column: 1 / -1; grid-row: span 2; grid-template-columns: subgrid; grid-template-rows: subgrid }</style>"
+                   + Repeat("<div class=t><div class=s><div class=s><div>a</div><div>b</div>", 70);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 1L << 30);
+    }
+
+    [Fact]
     public void Grids_nested_until_their_widths_overflow_paint_borders_at_finite_positions()
     {
         // Found by the fuzzer: target html, exception-b889eeb4. Each grid of two fr columns is twice as wide as its

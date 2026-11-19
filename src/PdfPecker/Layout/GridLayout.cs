@@ -1100,9 +1100,11 @@ internal sealed partial class LayoutEngine
         if (it.El == null) return box;
         float current = box.Height - it.Mt - it.Mb;
         float? want = null;
-        if (g.HasSubgrids && IsSubgrid(it, columns: false) && _subgrids[it.El].Rows is { } axis)
+        // A row subgrid is laid out again at the parent's row edges, whatever its height and alignment say, but only while
+        // the relayout budget lasts (see MayLayOutAgain): grids of row and column subgrids nested a few hundred deep laid
+        // everything inside them out again at each level that crossed a page, which doubled the work per level.
+        if (g.HasSubgrids && IsSubgrid(it, columns: false) && _subgrids[it.El].Rows is { } axis && MayLayOutAgain)
         {
-            // A row subgrid is laid out again at the parent's row edges, whatever its height and alignment say.
             rowSub = true;
             var edges = new float[2 * axis.Count];
             for (int k = 0; k < axis.Count; k++)
