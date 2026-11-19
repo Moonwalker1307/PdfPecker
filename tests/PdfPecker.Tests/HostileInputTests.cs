@@ -865,6 +865,9 @@ public class HostileInputTests
         var (pdf, allocated) = Allocating(() => Bounded(html));
         AssertStructurallyValid(pdf);
         Assert.InRange(allocated, 0, 1L << 30);
+    }
+
+    [Fact]
     public void Balanced_lines_millions_of_pixels_wide_end_their_width_search()
     {
         // Found by the fuzzer: target html, timeout-d0d017cf. text-wrap: balance looks for the narrowest width that keeps
