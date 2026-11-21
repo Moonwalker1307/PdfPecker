@@ -86,18 +86,23 @@ internal readonly struct LayoutLists
         return latin >= 0 ? latin : fallback;
     }
 
+    // A language system that names one feature tens of thousands of times, each time with tens of thousands of
+    // lookups, took billions of steps. As in the shaper's feature lists (OpenTypeLayout.MaxLookupIndexReads), each
+    // feature counts once and reading stops at as many lookup indexes as a lookup list can hold.
     private SortedSet<int> ReadLookupIndexes(int languageSystem, ReadOnlySpan<uint> featureTags)
     {
         var lookupIndexes = new SortedSet<int>();
-        int featureCount = _reader.U16(_features);
-        for (int i = 0, n = _reader.U16(languageSystem + FeatureIndexCountField); i < n; i++)
+        var visited = new HashSet<int>();
+        const int maxReads = OpenTypeLayout.MaxLookupIndexReads;
+        int featureCount = _reader.U16(_features), reads = 0;
+        for (int i = 0, n = _reader.U16(languageSystem + FeatureIndexCountField); i < n && reads < maxReads; i++)
         {
             int featureIndex = _reader.U16(languageSystem + FeatureIndexesField + i * 2);
             if (featureIndex >= featureCount) continue;
             int record = _features + 2 + featureIndex * FeatureRecordLength;
-            if (!featureTags.Contains(_reader.U32(record))) continue;
+            if (!featureTags.Contains(_reader.U32(record)) || !visited.Add(featureIndex)) continue;
             int feature = _features + _reader.U16(record + RecordOffsetField);
-            for (int j = 0, m = _reader.U16(feature + LookupIndexCountField); j < m; j++)
+            for (int j = 0, m = _reader.U16(feature + LookupIndexCountField); j < m && reads < maxReads; j++, reads++)
                 lookupIndexes.Add(_reader.U16(feature + LookupIndexesField + j * 2));
         }
         return lookupIndexes;
