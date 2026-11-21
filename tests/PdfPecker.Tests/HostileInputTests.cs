@@ -4519,6 +4519,24 @@ public class LayoutLookupFanOutTests
         AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
     }
 
+    // Regression: kerning and ligatures read their features' lookup indexes without the shaper's limits. A GPOS kern or
+    // GSUB liga that the language system names 65,535 times, each time with 65,535 lookup indexes, took billions of
+    // steps and could not be cancelled.
+    [Theory]
+    [InlineData("GPOS", "kern")]
+    [InlineData("GSUB", "liga")]
+    public void Kerning_and_ligature_features_named_many_times_stay_bounded(string table, string feature)
+    {
+        var original = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "Inter-Features.ttf"));
+        var font = WithTable(original, table, SharedFeatureIndexes(65535, feature).Table);
+        var html = $"<style>@font-face{{font-family:f;src:url(data:font/ttf;base64,{Convert.ToBase64String(font)})}}</style>"
+            + "<p style='font-family:f'>AVATAR To Wa office waffle</p>";
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
+        // Before the fix each table took about 12 s; now it takes a fraction of a second.
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+    }
+
     // Regression: the glyph digest of a lookup walked every subtable and coverage entry for free, counting only the
     // glyphs it added, and was built again for each lookup index. One lookup of 32,000 subtables that share a coverage
     // of 65,535 inverted ranges took seconds per index, and a thousand indices pointing at it about an hour and a half.
@@ -4567,9 +4585,10 @@ public class LayoutLookupFanOutTests
         return t.ToArray();
     }
 
-    // A GSUB table whose DFLT language system names feature 0 (ccmp) n times, and whose ccmp names lookup 0 n times, in
-    // the same n zero words: the feature table starts at the language system's feature index count.
-    private static (byte[] Table, int Lookup) SharedFeatureIndexes(int n)
+    // A GSUB or GPOS table whose DFLT language system names feature 0 (ccmp, or another tag) n times, and whose feature
+    // names lookup 0 n times, in the same n zero words: the feature table starts at the language system's feature index
+    // count.
+    private static (byte[] Table, int Lookup) SharedFeatureIndexes(int n, string feature = "ccmp")
     {
         var t = new List<byte>();
         void U16(int v) { t.Add((byte)(v >> 8)); t.Add((byte)v); }
@@ -4577,7 +4596,7 @@ public class LayoutLookupFanOutTests
         U16(1); U16(0); U16(10); U16(22); U16(30); // script list at 10, feature list at 22, lookup list at 30
         U16(1); Tag("DFLT"); U16(8); // the DFLT script at 18
         U16(22); U16(0); // its default language system at 40
-        U16(1); Tag("ccmp"); U16(20); // ccmp at 42, which reads the language system's 0xFFFF and n
+        U16(1); Tag(feature); U16(20); // the feature at 42, which reads the language system's 0xFFFF and n
         U16(1); U16(4); // one lookup at 34
         U16(1); U16(0); U16(0); // single substitution with no subtables
         U16(0); U16(0xFFFF); U16(n); // the language system: no required feature and n feature indexes
