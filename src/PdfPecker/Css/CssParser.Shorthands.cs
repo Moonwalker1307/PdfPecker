@@ -142,6 +142,10 @@ internal static partial class CssParser
                 ExpandBorderSide(name, value, longhands);
                 break;
             case "background": CssBackground.ExpandShorthand(value, longhands.Add); break;
+            case "mask-border":
+            case "-webkit-mask-box-image":
+                CssBorderImage.ExpandShorthand(value, longhands.Add, mask: true);
+                break;
             case "mask":
             case "-webkit-mask":
                 CssMask.ExpandShorthand(value, longhands.Add);

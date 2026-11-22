@@ -21,7 +21,9 @@ internal static partial class BoxPainter
         Func<string, (SvgImage Image, bool Alpha)?>? svgMask)
     {
         var layers = s.MaskImages;
-        if (layers == null || w <= 0 || h <= 0) return null;
+        if (w <= 0 || h <= 0) return null;
+        var border = MaskBorderLayer(s, x, y, w, h, images);
+        if (layers == null) return border != null ? [border] : null;
         // A view of the style whose background lists are the mask lists, for the background painting code.
         var view = s.Clone();
         view.BackgroundImages = layers;
@@ -65,6 +67,32 @@ internal static partial class BoxPainter
             PaintLayer(group, view, image, i, x, y, w, h, images, basis, White, radii);
             layer.Ops.AddRange(group.Ops);
         }
+        if (border != null) return any ? [border, .. result] : [border];
         return any ? result : null;
+    }
+
+    /// <summary>
+    /// The mask border (mask-border, or -webkit-mask-box-image as Chrome takes it) as a mask layer: the nine slices of
+    /// its image laid out as a border image is, whose alpha (or luminance) masks the box. As in Chrome, the middle of the
+    /// image is always drawn, fill or not, and the layer adds to the mask-image layers rather than cutting them. Null
+    /// when there is none or its image does not load.
+    /// </summary>
+    private static MaskLayerOps? MaskBorderLayer(ComputedStyle s, float x, float y, float w, float h, ImageLoader? images)
+    {
+        if (s.MaskBorder is not { Source: { } source } border) return null;
+        // A view of the style whose border image is the mask border, for the border image painting code.
+        var view = s.Clone();
+        view.BorderImageSource = source;
+        view.BorderImageSlice = border.SliceOrInitial;
+        view.BorderImageFill = true;
+        view.BorderImageWidths = border.WidthsOrInitial;
+        view.BorderImageOutsets = border.Outsets;
+        view.BorderImageRepeatX = border.RepeatX;
+        view.BorderImageRepeatY = border.RepeatY;
+        var group = new GroupOp();
+        if (!PaintBorderImage(group, view, x, y, w, h, images)) return null;
+        var layer = new MaskLayerOps { Luminance = border.Luminance, Composite = MaskComposite.Add };
+        layer.Ops.AddRange(group.Ops);
+        return layer;
     }
 }

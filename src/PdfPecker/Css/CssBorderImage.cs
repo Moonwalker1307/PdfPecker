@@ -23,6 +23,27 @@ internal readonly struct BorderImageValue
     public bool IsAuto => !IsNumber && Length.IsAuto;
 }
 
+/// <summary>
+/// mask-border (CSS Masking 1 §7): a border image used as a mask. Null slices and widths are the initial values of
+/// mask-border, 0 and auto on every side, unlike border-image's 100% and 1. Fill is read and, as in Chrome, not used:
+/// the middle of a mask border is always drawn.
+/// </summary>
+internal sealed record MaskBorderStyle(
+    BackgroundImage? Source, BorderImageValue[]? Slice, bool Fill, BorderImageValue[]? Widths, BorderImageValue[]? Outsets,
+    BorderImageRepeat RepeatX, BorderImageRepeat RepeatY, bool Luminance)
+{
+    public static readonly MaskBorderStyle Initial = new(null, null, false, null, null, BorderImageRepeat.Stretch, BorderImageRepeat.Stretch, false);
+
+    private static readonly BorderImageValue[] ZeroSlice = [BorderImageValue.Of(0f), BorderImageValue.Of(0f), BorderImageValue.Of(0f), BorderImageValue.Of(0f)];
+    private static readonly BorderImageValue[] AutoWidths = [BorderImageValue.Of(Length.Auto), BorderImageValue.Of(Length.Auto), BorderImageValue.Of(Length.Auto), BorderImageValue.Of(Length.Auto)];
+
+    /// <summary>The slices as border-image values, where null would mean 100%.</summary>
+    public BorderImageValue[] SliceOrInitial => Slice ?? ZeroSlice;
+
+    /// <summary>The widths as border-image values, where null would mean the border widths.</summary>
+    public BorderImageValue[] WidthsOrInitial => Widths ?? AutoWidths;
+}
+
 /// <summary>Parsing of the border-image longhands and of the border-image shorthand (CSS Backgrounds 3 §6).</summary>
 internal static class CssBorderImage
 {
@@ -37,12 +58,19 @@ internal static class CssBorderImage
     /// Expands <c>border-image: source || slice [/ width | / width? / outset]? || repeat</c> into its longhands, the parts
     /// left out set to their initial values. An invalid value adds nothing, so the declaration is dropped.
     /// </summary>
-    public static void ExpandShorthand(string value, Action<string, string> add)
+    public static void ExpandShorthand(string value, Action<string, string> add) => ExpandShorthand(value, add, mask: false);
+
+    /// <summary>
+    /// Expands border-image, or with <paramref name="mask"/> mask-border (and -webkit-mask-box-image), which has the
+    /// same syntax and other initial values: a slice of 0 and widths of auto.
+    /// </summary>
+    public static void ExpandShorthand(string value, Action<string, string> add, bool mask)
     {
+        string prefix = mask ? "mask-border" : "border-image";
         var lowerAll = value.Trim().ToLowerInvariant();
         if (lowerAll is "initial" or "unset" or "inherit")
         {
-            foreach (var name in Longhands) add(name, lowerAll);
+            foreach (var name in Longhands) add(prefix + name.AsSpan("border-image".Length).ToString(), lowerAll);
             return;
         }
         string? source = null, slice = null, width = null, outset = null, repeat = null;
@@ -91,11 +119,11 @@ internal static class CssBorderImage
             }
             else return;
         }
-        add("border-image-source", source ?? "none");
-        add("border-image-slice", slice ?? "100%");
-        add("border-image-width", width ?? "1");
-        add("border-image-outset", outset ?? "0");
-        add("border-image-repeat", repeat ?? "stretch");
+        add(prefix + "-source", source ?? "none");
+        add(prefix + "-slice", slice ?? (mask ? "0" : "100%"));
+        add(prefix + "-width", width ?? (mask ? "auto" : "1"));
+        add(prefix + "-outset", outset ?? "0");
+        add(prefix + "-repeat", repeat ?? "stretch");
     }
 
     private static bool IsNumberOrPercent(string lower)

@@ -347,6 +347,7 @@ internal sealed partial class ComputedStyle
     public BorderImageValue[]? BorderImageOutsets { get => _visual.BorderImageOutsets; set { if (_visual.BorderImageOutsets != value) Visual.BorderImageOutsets = value; } }
     public BorderImageRepeat BorderImageRepeatX { get => _visual.BorderImageRepeatX; set { if (_visual.BorderImageRepeatX != value) Visual.BorderImageRepeatX = value; } }
     public BorderImageRepeat BorderImageRepeatY { get => _visual.BorderImageRepeatY; set { if (_visual.BorderImageRepeatY != value) Visual.BorderImageRepeatY = value; } }
+    public MaskBorderStyle? MaskBorder { get => _visual.MaskBorder; set { if (_visual.MaskBorder != value) Visual.MaskBorder = value; } }
     public BorderStyle OutlineStyle { get => _visual.OutlineStyle; set { if (_visual.OutlineStyle != value) Visual.OutlineStyle = value; } }
     public bool OutlineAuto { get => _visual.OutlineAuto; set { if (_visual.OutlineAuto != value) Visual.OutlineAuto = value; } }
     public float OutlineWidth { get => _visual.OutlineWidth; set => Visual.OutlineWidth = value; }
@@ -407,6 +408,7 @@ internal sealed partial class ComputedStyle
         public bool BorderImageFill;
         public BorderImageValue[]? BorderImageWidths, BorderImageOutsets;
         public BorderImageRepeat BorderImageRepeatX, BorderImageRepeatY;
+        public MaskBorderStyle? MaskBorder; // null = mask-border: none
         public BorderStyle OutlineStyle;
         /// <summary>outline-style: auto, drawn as a solid focus ring of its own width.</summary>
         public bool OutlineAuto;

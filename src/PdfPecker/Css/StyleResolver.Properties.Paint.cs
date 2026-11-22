@@ -107,6 +107,36 @@ internal sealed partial class StyleResolver
         else if (CssBorderImage.Repeat(d.Lower) is { } rep) (s.BorderImageRepeatX, s.BorderImageRepeatY) = rep;
     }
 
+    /// <summary>The mask-border longhands, which parse as the border-image ones do, kept in one shared record.</summary>
+    private void ApplyMaskBorder(ComputedStyle s, ComputedStyle parent, string prop, in DeclaredValue d)
+    {
+        var current = s.MaskBorder ?? MaskBorderStyle.Initial;
+        var from = parent.MaskBorder ?? MaskBorderStyle.Initial;
+        bool initial = d.Lower is "initial" or "unset";
+        var next = prop switch
+        {
+            "mask-border-source" => d.Inherit ? current with { Source = from.Source }
+                : initial || d.Lower == "none" ? current with { Source = null }
+                : ParseBackgroundImage(d.Value, s) is [{ } source] ? current with { Source = source } : current,
+            "mask-border-slice" => d.Inherit ? current with { Slice = from.Slice, Fill = from.Fill }
+                : initial ? current with { Slice = null, Fill = false }
+                : CssBorderImage.Slice(d.Lower) is { } slice ? current with { Slice = slice.Slice, Fill = slice.Fill } : current,
+            "mask-border-width" => d.Inherit ? current with { Widths = from.Widths }
+                : initial ? current with { Widths = null }
+                : CssBorderImage.Widths(d.Lower, false, d.Em, _rootFontSize, _vw, _vh) is { } widths ? current with { Widths = widths } : current,
+            "mask-border-outset" => d.Inherit ? current with { Outsets = from.Outsets }
+                : initial ? current with { Outsets = null }
+                : CssBorderImage.Widths(d.Lower, true, d.Em, _rootFontSize, _vw, _vh) is { } outsets ? current with { Outsets = outsets } : current,
+            "mask-border-repeat" => d.Inherit ? current with { RepeatX = from.RepeatX, RepeatY = from.RepeatY }
+                : initial ? current with { RepeatX = BorderImageRepeat.Stretch, RepeatY = BorderImageRepeat.Stretch }
+                : CssBorderImage.Repeat(d.Lower) is { } rep ? current with { RepeatX = rep.X, RepeatY = rep.Y } : current,
+            _ => d.Inherit ? current with { Luminance = from.Luminance }
+                : initial || d.Lower == "alpha" ? current with { Luminance = false }
+                : d.Lower == "luminance" ? current with { Luminance = true } : current,
+        };
+        s.MaskBorder = next == MaskBorderStyle.Initial ? null : next;
+    }
+
     private void ApplyOutlineOffset(ComputedStyle s, in DeclaredValue d)
     {
         if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var oo, _vw, _vh) && !oo.IsAuto && !oo.IsPercent) s.OutlineOffset = oo.Value;

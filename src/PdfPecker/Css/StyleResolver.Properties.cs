@@ -439,6 +439,9 @@ internal sealed partial class StyleResolver
             case "filter": ApplyFilter(s, parent, in d); break;
             case "backdrop-filter": ApplyBackdropFilter(s, parent, in d); break;
             case "mask-image": ApplyMaskImage(s, parent, in d); break;
+            case "mask-border-source" or "mask-border-slice" or "mask-border-width" or "mask-border-outset" or "mask-border-repeat" or "mask-border-mode":
+                ApplyMaskBorder(s, parent, prop, in d);
+                break;
             case "mask-repeat": s.MaskRepeats = MaskList(s.MaskRepeats, parent.MaskRepeats, in d, CssBackground.Repeat); break;
             case "mask-size": ApplyMaskSize(s, parent, in d); break;
             case "mask-position": ApplyMaskPosition(s, parent, in d); break;
