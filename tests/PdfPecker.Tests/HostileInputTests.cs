@@ -5220,10 +5220,11 @@ public class JpxLengthTests
     public void Empty_component_quantization_at_the_end_of_the_data_fails_cleanly(int index)
     {
         // An empty QCC segment takes its component index from the byte after it, which here does not exist: after the
-        // tile-parts in place of the end marker, or right after the main header.
+        // tile-parts in place of the end marker, or right after the main header. Without tile-parts there is no image.
         var cs = Codestream();
         int end = index == 0 ? cs.Length - 2 : IndexOf(cs, 0xFF, 0x90);
-        Assert.NotNull(Decode(Cat(cs[..end], Segment(0xFF5D, Array.Empty<byte>()))));
+        var image = Decode(Cat(cs[..end], Segment(0xFF5D, Array.Empty<byte>())));
+        Assert.Equal(index == 0, image != null);
     }
 
     [Fact]
@@ -5246,6 +5247,21 @@ public class JpxLengthTests
         }).WaitAsync(TimeSpan.FromSeconds(20));
         Assert.IsType<InvalidDataException>(error);
         Assert.True(allocated < 400L << 20, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Theory]
+    [InlineData(47)]
+    [InlineData(1_572_911)]
+    public void Codestream_without_tile_parts_decodes_to_nothing(int height)
+    {
+        // Fuzz run 111: a main header for an image 61 samples wide and 1,572,911 tall, within the pixel limit, and no
+        // tile-part. It decoded to a blank image of that size, which took seconds to compose and to extract as a PNG.
+        var cs = Codestream();
+        int siz = IndexOf(cs, 0xFF, 0x51);
+        BinaryPrimitives.WriteInt32BigEndian(cs.AsSpan(siz + 10), height); // Ysiz
+        int sot = IndexOf(cs, 0xFF, 0x90);
+        Assert.Null(Decode(Cat(cs[..sot], new byte[] { 0xFF, 0xD9 })));
+        Assert.Null(Decode(cs[..sot]));
     }
 
     private static PdfPecker.Rendering.Images.JpxImage? Decode(byte[] data)

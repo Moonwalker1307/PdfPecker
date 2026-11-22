@@ -81,7 +81,10 @@ internal sealed partial class JpxDecoder
     // Tile-component buffers, reused from tile to tile.
     private float[][] _buffers = Array.Empty<float[]>();
 
-    /// <summary>Decodes every tile. Returns false when there are tiles and none of them could be decoded.</summary>
+    /// <summary>
+    /// Decodes every tile. Returns false when none could be decoded, or when the codestream has no tile-parts: such an
+    /// image has nothing to show, and a blank image of the size its header claims can take seconds to compose.
+    /// </summary>
     private bool DecodeTiles()
     {
         if (_main.Style == null || _main.Quantization == null) return false;
@@ -100,7 +103,7 @@ internal sealed partial class JpxDecoder
                 SwallowedErrors.Record(ex);
             }
         }
-        return any || _tileOrder.Count == 0;
+        return any;
     }
 
     /// <summary>
