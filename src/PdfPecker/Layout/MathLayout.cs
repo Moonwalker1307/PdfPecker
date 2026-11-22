@@ -75,7 +75,7 @@ internal sealed partial class LayoutEngine
         float dx = s.Display == Display.Block ? Math.Max(0, (w - box.W) / 2) : 0;
         box.Move(x + dx, y + asc);
         _ops.AddRange(box.Ops);
-        _lastBaseline = y + asc;
+        SetBoxBaseline(y + asc);
         return y + asc + desc;
     }
 

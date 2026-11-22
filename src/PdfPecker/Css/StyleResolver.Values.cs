@@ -39,7 +39,9 @@ internal sealed partial class StyleResolver
 
     private static BoxAlign ParseAlign(string lower, BoxAlign current)
     {
-        // Drop overflow and baseline-position modifiers: "safe center", "first baseline".
+        // Drop overflow and baseline-position modifiers: "safe center", "first baseline". last baseline aligns the last
+        // lines instead.
+        if (lower is "last baseline" or "safe last baseline" or "unsafe last baseline") return BoxAlign.LastBaseline;
         var t = lower;
         foreach (var prefix in new[] { "safe ", "unsafe ", "first ", "last ", "legacy " })
             if (t.StartsWith(prefix, StringComparison.Ordinal)) t = t.Substring(prefix.Length).Trim();

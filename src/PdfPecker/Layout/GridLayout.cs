@@ -1082,9 +1082,9 @@ internal sealed partial class LayoutEngine
                     for (int k = lastRow + 1; k <= rowCount; k++) rowShift[k] = Math.Max(rowShift[k], shiftBottom + grown);
                 }
             }
-            if (float.IsNaN(firstBaseline) && it.Row == 0 && !float.IsNaN(box.Baseline)) firstBaseline = areaY + dy + box.Baseline;
+            if (float.IsNaN(firstBaseline) && it.Row == 0 && !float.IsNaN(box.FirstBaseline)) firstBaseline = areaY + dy + box.FirstBaseline;
         }
-        if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
+        if (!float.IsNaN(firstBaseline)) SetBoxBaseline(firstBaseline);
         return rowShift;
     }
 

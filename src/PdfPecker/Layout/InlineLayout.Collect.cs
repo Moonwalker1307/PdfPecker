@@ -391,16 +391,18 @@ internal sealed partial class InlineLayout
             var laid = _engine.CaptureBox(e, availW, shrinkToFit: true);
             _measuredInlineBlocks[(e, MeasuredWidthKey(e, availW))] = new Captured
             {
-                Ops = [], AnchorIds = laid.AnchorIds, Width = laid.Width, Height = laid.Height, Baseline = laid.Baseline,
+                Ops = [], AnchorIds = laid.AnchorIds, Width = laid.Width, Height = laid.Height, Baseline = laid.Baseline, FirstBaseline = laid.FirstBaseline,
                 ForcedBreaks = laid.ForcedBreaks, BoxX = laid.BoxX, BoxY = laid.BoxY, BoxW = laid.BoxW, BoxH = laid.BoxH,
                 Absolutes = laid.Absolutes,
             };
             c = laid;
         }
-        float baseline = float.IsNaN(c.Baseline) ? c.Height : c.Baseline;
+        // An inline-block sits on its last line unless baseline-source: first puts it on its first, as in Chrome.
+        float boxBaseline = e.Style.BaselineSource == BaselineSource.First ? c.FirstBaseline : c.Baseline;
+        float baseline = float.IsNaN(boxBaseline) ? c.Height : boxBaseline;
         // Chrome puts a check box's or radio button's baseline at the bottom of its border box, so its bottom margin
         // hangs below the baseline instead of raising the box and making the line taller.
-        if (e.Control is { Kind: ControlKind.CheckBox or ControlKind.Radio } && float.IsNaN(c.Baseline))
+        if (e.Control is { Kind: ControlKind.CheckBox or ControlKind.Radio } && float.IsNaN(boxBaseline))
             baseline -= AutoAsZero(e.Style.MarginBottom);
         var item = new Item { Kind = ItemKind.Box, Style = e.Style, Width = c.Width, Height = c.Height, BoxBaseline = baseline, Capture = c, Href = href };
         // A ruby pair stands in the line as its base text: the annotation above the base's em box is placed as Chrome
