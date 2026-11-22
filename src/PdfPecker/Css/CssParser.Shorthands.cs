@@ -608,12 +608,13 @@ internal static partial class CssParser
             longhands.Add("font-variant-east-asian", lower == "none" ? "normal" : lower);
             longhands.Add("font-variant-position", lower == "none" ? "normal" : lower);
             longhands.Add("font-variant-alternates", lower == "none" ? "normal" : lower);
+            longhands.Add("font-variant-emoji", lower == "none" ? "normal" : lower);
             return;
         }
         // The names in the alternates functions are case-sensitive, so they are taken from the value as written.
         var alternates = Tokens(value.Trim()).Where(t => t.Equals("historical-forms", StringComparison.OrdinalIgnoreCase)
             || t.Contains('(') && t.Substring(0, t.IndexOf('(')).ToLowerInvariant() is "stylistic" or "styleset" or "character-variant" or "swash" or "ornaments" or "annotation").ToList();
-        string caps = "normal", position = "normal";
+        string caps = "normal", position = "normal", emoji = "normal";
         var ligatures = new List<string>();
         var numeric = new List<string>();
         var eastAsian = new List<string>();
@@ -623,6 +624,7 @@ internal static partial class CssParser
             else if (token.EndsWith("ligatures", StringComparison.Ordinal) || token.EndsWith("contextual", StringComparison.Ordinal)) ligatures.Add(token);
             else if (token.EndsWith("-nums", StringComparison.Ordinal) || token.EndsWith("-fractions", StringComparison.Ordinal) || token is "ordinal" or "slashed-zero") numeric.Add(token);
             else if (token is "sub" or "super") position = token;
+            else if (token is "text" or "emoji" or "unicode") emoji = token;
             else if (token is "jis78" or "jis83" or "jis90" or "jis04" or "simplified" or "traditional" or "full-width" or "proportional-width" or "ruby") eastAsian.Add(token);
         }
         longhands.Add("font-variant-caps", caps);
@@ -631,6 +633,7 @@ internal static partial class CssParser
         longhands.Add("font-variant-east-asian", eastAsian.Count == 0 ? "normal" : string.Join(" ", eastAsian));
         longhands.Add("font-variant-position", position);
         longhands.Add("font-variant-alternates", alternates.Count == 0 ? "normal" : string.Join(" ", alternates));
+        longhands.Add("font-variant-emoji", emoji);
     }
 
     /// <summary>grid-template: none, "rows / columns", or area strings each optionally followed by a row size, then "/ columns".</summary>
@@ -809,6 +812,7 @@ internal static partial class CssParser
         longhands.Add("font-variant-east-asian", "normal");
         longhands.Add("font-variant-position", "normal");
         longhands.Add("font-variant-alternates", "normal");
+        longhands.Add("font-variant-emoji", "normal");
         longhands.Add("font-kerning", "auto");
         longhands.Add("font-size-adjust", "none");
         if (family.Length > 0 || IsCssWideKeyword(value)) longhands.Add("font-family", family);

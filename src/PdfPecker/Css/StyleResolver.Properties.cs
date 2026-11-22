@@ -212,6 +212,7 @@ internal sealed partial class StyleResolver
             case "font-size-adjust": ApplyFontSizeAdjust(s, parent, in d); break;
             case "font-variant-east-asian": ApplyFontVariantEastAsian(s, parent, in d); break;
             case "font-variant-position": ApplyFontVariantPosition(s, parent, in d); break;
+            case "font-variant-emoji": ApplyFontVariantEmoji(s, parent, in d); break;
             case "font-variant-alternates": ApplyFontVariantAlternates(s, parent, in d); break;
             case "font-palette": ApplyFontPalette(s, parent, in d); break;
             case "line-height": ApplyLineHeight(s, parent, in d); break;
