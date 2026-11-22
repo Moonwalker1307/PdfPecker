@@ -396,6 +396,7 @@ internal sealed partial class StyleResolver
             case "text-emphasis-color": s.EmphasisColor = from.EmphasisColor; break;
             case "text-emphasis-position": s.EmphasisUnder = from.EmphasisUnder; break;
             case "text-box-trim": s.TextBoxTrim = from.TextBoxTrim; break;
+            case "baseline-source": s.BaselineSource = from.BaselineSource; break;
             case "text-box-edge": s.TextEdgeOver = from.TextEdgeOver; s.TextEdgeUnder = from.TextEdgeUnder; break;
             case "text-transform": s.TextTransform = from.TextTransform; break;
             case "letter-spacing": s.LetterSpacing = from.LetterSpacing; break;

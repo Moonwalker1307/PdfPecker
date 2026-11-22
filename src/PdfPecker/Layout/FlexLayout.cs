@@ -327,9 +327,9 @@ internal sealed partial class LayoutEngine
                 // here it was laid out away from the pages.
                 if (li == 0 && _paginate && _grid is not ColumnGrid && it.El?.Style.ContinueDiscard == true)
                     h = Math.Min(h, Math.Max(0, FlowEnd(PageOf(y)) - y));
-                if (SelfAlign(it, s.AlignItems) == BoxAlign.Baseline)
+                if (SelfAlign(it, s.AlignItems) is BoxAlign.Baseline or BoxAlign.LastBaseline)
                 {
-                    float b = BaselineOf(it);
+                    float b = BaselineOf(it, s.AlignItems);
                     maxAbove = Math.Max(maxAbove, b);
                     maxBelow = Math.Max(maxBelow, h - b);
                 }
@@ -452,7 +452,7 @@ internal sealed partial class LayoutEngine
                         {
                             case BoxAlign.End: dy = cross - outerCross; break;
                             case BoxAlign.Center: dy = (cross - outerCross) / 2; break;
-                            case BoxAlign.Baseline: dy = lineBaseline[li] - BaselineOf(it); break;
+                            case BoxAlign.Baseline or BoxAlign.LastBaseline: dy = lineBaseline[li] - BaselineOf(it, s.AlignItems); break;
                         }
                     }
                     // An item that lands across a page boundary is laid out again there and may get taller, which
@@ -463,7 +463,7 @@ internal sealed partial class LayoutEngine
                     // A stretched item that was given a height is laid out again with the new one, which its content may use.
                     if (it.El != null && SelfAlign(it, s.AlignItems) == BoxAlign.Stretch)
                         stretchedBottom = Math.Min(stretchedBottom, box.Source is { BorderH: null } ? bottom : float.NegativeInfinity);
-                    if (float.IsNaN(firstBaseline) && !float.IsNaN(box.Baseline)) firstBaseline = lineTop + dy + box.Baseline;
+                    if (float.IsNaN(firstBaseline) && !float.IsNaN(box.FirstBaseline)) firstBaseline = lineTop + dy + box.FirstBaseline;
                     cx += it.Main + it.Ml + it.Mr;
                     if (it.AutoMr) cx += autoShare;
                     if (edges != null) edges[edge++] = cx;
@@ -486,15 +486,20 @@ internal sealed partial class LayoutEngine
             lineTop = lineBottom + rowGap + crossBetween;
         }
         if (rules != null) FlexRowGapRules(s, x, w, y, Math.Max(lineTop - rowGap - crossBetween, y + (definiteH ?? 0)), ruleLines!, reverse, rules);
-        if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
+        if (!float.IsNaN(firstBaseline)) SetBoxBaseline(firstBaseline);
         if (!float.IsNaN(lowestContent)) _lastContentBottom = lowestContent;
         return lineTop - rowGap - crossBetween;
     }
 
-    private static float BaselineOf(BoxItem it)
+    /// <summary>
+    /// The baseline an item aligns by: its first line's, as in Chrome, or its last line's for last baseline alignment,
+    /// and the bottom of its border box when it has no line.
+    /// </summary>
+    private static float BaselineOf(BoxItem it, BoxAlign containerValue)
     {
         var b = it.Box!;
-        return float.IsNaN(b.Baseline) ? b.Height - it.Mb : b.Baseline;
+        float baseline = SelfAlign(it, containerValue) == BoxAlign.LastBaseline ? b.Baseline : b.FirstBaseline;
+        return float.IsNaN(baseline) ? b.Height - it.Mb : baseline;
     }
 
     /// <summary>Resolves flexible lengths (§9.7): grows or shrinks the items of one line to fill the main size.</summary>
@@ -627,7 +632,7 @@ internal sealed partial class LayoutEngine
             lx += lineW[li] + colGap + between;
         }
         if (rules != null) FlexColumnGapRules(s, ruleLines!, s.FlexDirection == FlexDirection.ColumnReverse, y, y + definiteH!.Value, rules, (x, y, x + w, y + definiteH!.Value));
-        if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
+        if (!float.IsNaN(firstBaseline)) SetBoxBaseline(firstBaseline);
         return bottom;
     }
 
@@ -839,7 +844,7 @@ internal sealed partial class LayoutEngine
             {
                 // Measured content that fits where it lands: no need to lay it out again.
                 Place(m, x + offsetX[i], cy);
-                if (float.IsNaN(firstBaseline) && !float.IsNaN(m.Baseline)) firstBaseline = cy + m.Baseline;
+                if (float.IsNaN(firstBaseline) && !float.IsNaN(m.FirstBaseline)) firstBaseline = cy + m.FirstBaseline;
                 cy += m.Height;
             }
             else if (it.El != null)
@@ -859,8 +864,8 @@ internal sealed partial class LayoutEngine
                     // flex: 1 1 0 a height its children can take a percentage of.
                     if (definiteH == null && !DefiniteBasis(it.Style)) (_indefiniteOverride ??= new HashSet<Element>()).Add(it.El);
                 }
-                float savedBaseline = _lastBaseline;
-                _lastBaseline = float.NaN;
+                float savedBaseline = _lastBaseline, savedFirst = _firstBaseline;
+                _lastBaseline = _firstBaseline = float.NaN;
                 float bottom;
                 // The boxes inside measure as they did when the item was measured, as in a box laid out again by
                 // PlaceOnPages, unless the item was given a height: else each nested column laid out again on the pages
@@ -882,15 +887,19 @@ internal sealed partial class LayoutEngine
                         _indefiniteOverride?.Remove(it.El);
                     }
                 }
-                if (float.IsNaN(firstBaseline)) firstBaseline = _lastBaseline;
+                if (float.IsNaN(firstBaseline)) firstBaseline = float.IsNaN(_firstBaseline) ? _lastBaseline : _firstBaseline;
                 if (float.IsNaN(_lastBaseline)) _lastBaseline = savedBaseline;
+                if (!float.IsNaN(savedFirst)) _firstBaseline = savedFirst;
                 cy = bottom + it.Mb;
                 if (it.Style.PageBreakAfter) cy = NextPage(cy);
             }
             else
             {
+                float savedFirst = _firstBaseline;
+                _firstBaseline = float.NaN;
                 cy = _inline.FlushInline(it.Run!, e, x + offsetX[i], cy, outerW[i], true, out _);
-                if (float.IsNaN(firstBaseline)) firstBaseline = _lastBaseline;
+                if (float.IsNaN(firstBaseline)) firstBaseline = float.IsNaN(_firstBaseline) ? _lastBaseline : _firstBaseline;
+                if (!float.IsNaN(savedFirst)) _firstBaseline = savedFirst;
             }
             cy += autoAfter[i];
             if (edges != null)
@@ -901,7 +910,7 @@ internal sealed partial class LayoutEngine
             if (i < items.Count - 1) cy += gap + between;
         }
         if (rules != null) FlexColumnGapRules(s, [(x, w, edges!)], reverse, 0, 0, rules, (x, y, x + w, Math.Max(cy, y + (definiteH ?? 0))));
-        if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
+        if (!float.IsNaN(firstBaseline)) SetBoxBaseline(firstBaseline);
         return cy;
     }
 

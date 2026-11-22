@@ -634,6 +634,7 @@ internal sealed partial class InlineLayout
         _engine._deferFootnoteCalls = deferCalls;
         if (_engine._deferredFootnoteCalls is { Count: > 0 } && !deferCalls) _engine.PlaceDeferredFootnoteCalls();
         _engine._lastBaseline = baseline;
+        if (float.IsNaN(_engine._firstBaseline)) _engine._firstBaseline = baseline;
         if (_engine._marker != null) _engine.EmitMarker(baseline, y);
         if (flipBack)
         {

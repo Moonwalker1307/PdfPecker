@@ -233,7 +233,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 
 ## Features
 
-- **HTML and CSS**: flexbox, grid and subgrid, CSS tables (collapsed borders also from `col` and `colgroup`; rows and
+- **HTML and CSS**: flexbox (baseline alignment by each item's first line, or its last with `last baseline`, as in
+  Chrome), grid and subgrid, `baseline-source` for inline-blocks, CSS tables (collapsed borders also from `col` and `colgroup`; rows and
   columns with `visibility: collapse` leave), floats with `shape-outside` (and `float` and `clear` with `inline-start` and `inline-end`, on the right in
   right-to-left text, as in Chrome), `clip-path` shapes (also `rect()`,
   `xywh()` and `shape()`, whose lines, curves and arcs take percentages of the box, also in `shape-outside`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for heights and

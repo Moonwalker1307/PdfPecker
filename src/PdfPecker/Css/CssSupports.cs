@@ -19,7 +19,7 @@ internal static class CssSupports
         "text-box", "text-box-trim", "text-box-edge",
         "text-underline-offset", "text-transform", "text-indent", "letter-spacing", "word-spacing", "white-space",
         "text-wrap", "text-wrap-mode", "text-wrap-style", "white-space-collapse",
-        "overflow-wrap", "word-wrap", "word-break", "line-break", "vertical-align", "list-style", "list-style-type", "list-style-position",
+        "overflow-wrap", "word-wrap", "word-break", "line-break", "vertical-align", "baseline-source", "list-style", "list-style-type", "list-style-position",
         "list-style-image",
         "visibility", "box-shadow", "table-layout", "border-collapse", "border-spacing", "caption-side", "empty-cells", "image-orientation", "image-rendering", "accent-color", "appearance", "box-sizing", "float", "clear", "shape-outside", "shape-margin", "shape-image-threshold", "initial-letter",
         "zoom", "position", "anchor-name", "position-anchor", "position-area", "position-try-fallbacks", "position-try", "inset", "top", "right", "bottom", "left", "z-index", "overflow", "overflow-x", "overflow-y", "overflow-clip-margin", "transform",
@@ -221,6 +221,8 @@ internal static class CssSupports
                 return CssParser.ParseTextBox(lower) != null;
             case "text-autospace":
                 return StyleResolver.ParseTextAutospace(lower) != null;
+            case "baseline-source":
+                return lower is "auto" or "first" or "last";
             case "text-box-trim":
                 return CssParser.ParseTextBoxTrim(lower) != null;
             case "text-box-edge":

@@ -15,7 +15,8 @@ internal enum FlexWrap : byte { NoWrap, Wrap, WrapReverse }
 internal enum ColumnWrap : byte { Auto, NoWrap, Wrap }
 
 /// <summary>Values of justify-content, align-items, align-self, align-content, justify-items and justify-self.</summary>
-internal enum BoxAlign : byte { Normal, Start, End, Center, Stretch, Baseline, SpaceBetween, SpaceAround, SpaceEvenly, Auto }
+// Baseline is first baseline alignment; LastBaseline aligns an item's last line (align-items: last baseline).
+internal enum BoxAlign : byte { Normal, Start, End, Center, Stretch, Baseline, SpaceBetween, SpaceAround, SpaceEvenly, Auto, LastBaseline }
 
 internal enum TrackSizeKind : byte { Fixed, Percent, Fr, Auto, MinContent, MaxContent }
 
@@ -182,6 +183,8 @@ internal enum EmphasisShape : byte { None, Auto, Dot, Circle, DoubleCircle, Tria
 // text-box-trim: whether a block's first line loses the space above its over edge and its last line the space below
 // its under edge.
 [Flags] internal enum TextBoxTrim : byte { None = 0, Start = 1, End = 2, Both = Start | End }
+// baseline-source: which line an inline-block sits on; auto is its last, as first is for the other inline-level boxes.
+internal enum BaselineSource : byte { Auto, First, Last }
 // text-box-edge: the edges lines are trimmed to, over and under the text. auto trims as text does, as in Chrome.
 internal enum TextEdgeOver : byte { Text, Cap, Ex }
 internal enum TextEdgeUnder : byte { Text, Alphabetic }
