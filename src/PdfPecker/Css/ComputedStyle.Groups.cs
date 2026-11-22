@@ -550,6 +550,7 @@ internal sealed partial class ComputedStyle
     public string? TextOverflow { get => _rare.TextOverflow; set { if (_rare.TextOverflow != value) Rare.TextOverflow = value; } }
     public TextBoxTrim TextBoxTrim { get => _rare.TextBoxTrim; set { if (_rare.TextBoxTrim != value) Rare.TextBoxTrim = value; } }
     public BaselineSource BaselineSource { get => _rare.BaselineSource; set { if (_rare.BaselineSource != value) Rare.BaselineSource = value; } }
+    public MarginTrim MarginTrim { get => _rare.MarginTrim; set { if (_rare.MarginTrim != value) Rare.MarginTrim = value; } }
     public float AspectRatio { get => _rare.AspectRatio; set => Rare.AspectRatio = value; }
     public bool AspectRatioAuto { get => _rare.AspectRatioAuto; set { if (_rare.AspectRatioAuto != value) Rare.AspectRatioAuto = value; } }
     public ContainerType ContainerType { get => _rare.ContainerType; set { if (_rare.ContainerType != value) Rare.ContainerType = value; } }
@@ -625,6 +626,7 @@ internal sealed partial class ComputedStyle
         public string? TextOverflow;
         public TextBoxTrim TextBoxTrim; // text-box-trim
         public BaselineSource BaselineSource; // baseline-source
+        public MarginTrim MarginTrim;   // margin-trim
         public float AspectRatio;    // width / height; 0 = auto
         public bool AspectRatioAuto; // "auto <ratio>": a replaced element keeps its natural ratio
         public ContainerType ContainerType;

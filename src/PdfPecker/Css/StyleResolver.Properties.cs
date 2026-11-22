@@ -186,6 +186,7 @@ internal sealed partial class StyleResolver
             case "baseline-source":
                 if (d.Lower is "auto" or "first" or "last") s.BaselineSource = d.Lower switch { "first" => BaselineSource.First, "last" => BaselineSource.Last, _ => BaselineSource.Auto };
                 break;
+            case "margin-trim": if (ParseMarginTrim(d.Lower) is { } marginTrim) s.MarginTrim = marginTrim; break;
             case "field-sizing":
                 if (d.Lower is "content" or "fixed") s.FieldSizingContent = d.Lower == "content";
                 break;
