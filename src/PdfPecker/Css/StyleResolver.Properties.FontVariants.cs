@@ -74,6 +74,13 @@ internal sealed partial class StyleResolver
         else if (d.Lower is "sub" or "super") s.FontVariantPosition = d.Lower;
     }
 
+    private static void ApplyFontVariantEmoji(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit || d.Lower == "unset") s.FontVariantEmoji = parent.FontVariantEmoji;
+        else if (d.Lower switch { "normal" or "initial" => FontEmoji.Normal, "text" => FontEmoji.Text, "emoji" => FontEmoji.Emoji,
+                     "unicode" => FontEmoji.Unicode, _ => (FontEmoji?)null } is { } emoji) s.FontVariantEmoji = emoji;
+    }
+
     /// <summary>
     /// font-variant-alternates: historical-forms, and functions whose names @font-feature-values rules give numbers. The
     /// names stay case-sensitive, so the value as written is parsed, not its lowercase form.

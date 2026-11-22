@@ -422,6 +422,7 @@ internal sealed partial class ComputedStyle
         get
         {
             var f = BaseFont;
+            if (FontVariantEmoji != FontEmoji.Normal && f is FontChain chain) f = chain.WithEmoji(FontVariantEmoji);
             // font-variant-alternates goes in as feature settings before font-feature-settings, which win over it.
             var settings = FontVariantAlternates is { } alternates ? alternates.Settings(FontFamilyName, FontFeatureSettings) : FontFeatureSettings;
             if ((FontVariantNumeric != null || settings != null || FontVariantEastAsian != null || FontVariantPosition != null || SmallCaps != 0)
