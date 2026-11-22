@@ -233,7 +233,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 
 ## Features
 
-- **HTML and CSS**: flexbox, grid and subgrid, CSS tables (collapsed borders also from `col` and `colgroup`; rows and
+- **HTML and CSS**: flexbox (baseline alignment by each item's first line, or its last with `last baseline`, as in
+  Chrome), grid and subgrid, `baseline-source` for inline-blocks, CSS tables (collapsed borders also from `col` and `colgroup`; rows and
   columns with `visibility: collapse` leave), floats with `shape-outside` (and `float` and `clear` with `inline-start` and `inline-end`, on the right in
   right-to-left text, as in Chrome), `clip-path` shapes (also `rect()`,
   `xywh()` and `shape()`, whose lines, curves and arcs take percentages of the box, also in `shape-outside`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for heights and
@@ -327,6 +328,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   (as Chrome applies them, such as Fira Code's ligatures), variable fonts and OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
   versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, in the default palette or the one `font-palette` picks: `light`, `dark` or an
   `@font-palette-values` rule with `base-palette` and `override-colors`.
+  `font-variant-emoji` (`emoji`, `text`, `unicode`) and the variation selectors U+FE0F and U+FE0E pick a colour font
+  or a plain one for characters such as ❤ and © that have both forms, as Chrome does.
   `font-variant-alternates` turns on historical forms and the stylistic sets, character variants, stylistic, swash,
   ornament and annotation alternates that `@font-feature-values` names for a family.
   Variation sequences pick the glyph the font gives them (cmap format 14), such as the forms of a CJK ideograph that

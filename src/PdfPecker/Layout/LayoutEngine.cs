@@ -20,6 +20,19 @@ internal sealed partial class LayoutEngine
     internal ListMarker? _marker;
     private int _currentListIndex;
     internal float _lastBaseline = float.NaN;
+    // The baseline of the first line laid out in the box being captured, which flex items align by, where the box's own
+    // baseline (_lastBaseline) is its last line's, as an inline-block's is.
+    internal float _firstBaseline = float.NaN;
+    /// <summary>
+    /// Sets the baseline of a box that has one of its own (a flex or grid container, a form control, a formula), which
+    /// is also the first baseline of what is being captured when nothing before it gave one.
+    /// </summary>
+    private void SetBoxBaseline(float baseline)
+    {
+        _lastBaseline = baseline;
+        if (float.IsNaN(_firstBaseline)) _firstBaseline = baseline;
+    }
+
     private float _lastBoxRight; // right border edge (plus nothing else) of the last block box laid out
     private float _lastBoxX, _lastBoxTop, _lastBoxW, _lastBoxH; // border box of the last block box laid out
     // The content height, vertical padding and borders of the last block box laid out, and the containing block height
@@ -2605,6 +2618,7 @@ internal sealed partial class LayoutEngine
         public List<float>? AnchorYs; // where the anchors were in the box when it was captured
         public float Width, Height; // margin box
         public float Baseline = float.NaN;
+        public float FirstBaseline = float.NaN; // the first line's baseline; Baseline is the last line's
         public bool ForcedBreaks;
         public BoxSource? Source; // how CaptureBox laid the box out, so that it can be laid out again on the pages
         public float BoxX, BoxY, BoxW, BoxH; // border box of the outermost box laid out
@@ -2628,7 +2642,7 @@ internal sealed partial class LayoutEngine
         var savedOps = _ops;
         bool savedPaginate = _paginate;
         var savedMarker = _marker;
-        float savedBaseline = _lastBaseline;
+        float savedBaseline = _lastBaseline, savedFirstBaseline = _firstBaseline;
         var savedAnchors = _captureAnchors;
         bool savedCapturing = _capturing;
         float savedRight = _lastBoxRight;
@@ -2641,7 +2655,7 @@ internal sealed partial class LayoutEngine
         _ops = new List<DrawOp>();
         _paginate = false;
         _marker = null;
-        _lastBaseline = float.NaN;
+        _lastBaseline = _firstBaseline = float.NaN;
         _captureAnchors = null;
         _capturing = true;
         _lastBoxRight = 0;
@@ -2656,6 +2670,7 @@ internal sealed partial class LayoutEngine
             return new Captured
             {
                 Ops = _ops, AnchorIds = Once(_captureAnchors), Height = bottom, Width = _lastBoxRight, Baseline = _lastBaseline,
+                FirstBaseline = float.IsNaN(_firstBaseline) ? _lastBaseline : _firstBaseline,
                 ForcedBreaks = _forcedBreaks != breaks,
                 BoxX = _lastBoxX, BoxY = _lastBoxTop, BoxW = _lastBoxW, BoxH = _lastBoxH,
                 ContentH = _lastBoxContentH, FrameV = _lastBoxFrameV, ChildCb = _lastBoxChildCb,
@@ -2678,6 +2693,7 @@ internal sealed partial class LayoutEngine
             _paginate = savedPaginate;
             _marker = savedMarker;
             _lastBaseline = savedBaseline;
+            _firstBaseline = savedFirstBaseline;
             _captureAnchors = savedAnchors;
             _capturing = savedCapturing;
             _lastBoxRight = savedRight;
@@ -2878,7 +2894,7 @@ internal sealed partial class LayoutEngine
     /// <summary>What a captured box measured, without its content.</summary>
     private static Captured Measured(Captured c) => new()
     {
-        Ops = [], Width = c.Width, Height = c.Height, Baseline = c.Baseline, ForcedBreaks = c.ForcedBreaks, Source = c.Source,
+        Ops = [], Width = c.Width, Height = c.Height, Baseline = c.Baseline, FirstBaseline = c.FirstBaseline, ForcedBreaks = c.ForcedBreaks, Source = c.Source,
         BoxX = c.BoxX, BoxY = c.BoxY, BoxW = c.BoxW, BoxH = c.BoxH,
         ContentH = c.ContentH, FrameV = c.FrameV, ChildCb = c.ChildCb, Known = c.Known,
         ListIndexBefore = c.ListIndexBefore, ListIndexAfter = c.ListIndexAfter, Cb = c.Cb, CbKind = c.CbKind, RepeatsOnPages = c.RepeatsOnPages, DependsOnRepeats = c.DependsOnRepeats,

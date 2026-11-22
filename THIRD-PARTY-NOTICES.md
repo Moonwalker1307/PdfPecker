@@ -464,7 +464,7 @@ PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 ## Unicode Character Database
 
 Source: https://www.unicode.org/Public/16.0.0/ucd/ (DerivedBidiClass.txt, BidiMirroring.txt, BidiBrackets.txt,
-ArabicShaping.txt, UnicodeData.txt, LineBreak.txt and EastAsianWidth.txt)
+ArabicShaping.txt, UnicodeData.txt, LineBreak.txt, EastAsianWidth.txt and emoji/emoji-data.txt)
 
 ```
 UNICODE LICENSE V3

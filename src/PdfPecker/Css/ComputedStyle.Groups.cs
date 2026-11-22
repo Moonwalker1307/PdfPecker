@@ -1,3 +1,5 @@
+using PdfPecker.Fonts;
+
 namespace PdfPecker.Css;
 
 // Most boxes leave most properties at their initial values, and most children inherit their parent's values
@@ -74,6 +76,7 @@ internal sealed partial class ComputedStyle
     public FontSizeAdjust SizeAdjust { get => _typography.SizeAdjust; set => Typography.SizeAdjust = value; }
     public string? FontVariantEastAsian { get => _typography.FontVariantEastAsian; set { if (_typography.FontVariantEastAsian != value) Typography.FontVariantEastAsian = value; } }
     public string? FontVariantPosition { get => _typography.FontVariantPosition; set { if (_typography.FontVariantPosition != value) Typography.FontVariantPosition = value; } }
+    public FontEmoji FontVariantEmoji { get => _typography.FontVariantEmoji; set { if (_typography.FontVariantEmoji != value) Typography.FontVariantEmoji = value; } }
     public FontAlternates? FontVariantAlternates { get => _typography.FontVariantAlternates; set { if (_typography.FontVariantAlternates != value) Typography.FontVariantAlternates = value; } }
     public FontPalette? FontPalette { get => _typography.FontPalette; set { if (_typography.FontPalette != value) Typography.FontPalette = value; } }
     public string? FontVariantNumeric { get => _typography.FontVariantNumeric; set { if (_typography.FontVariantNumeric != value) Typography.FontVariantNumeric = value; } }
@@ -127,6 +130,7 @@ internal sealed partial class ComputedStyle
         public FontSizeAdjust SizeAdjust;    // font-size-adjust; none by default
         public string? FontVariantEastAsian; // font-variant-east-asian keywords; null = normal
         public string? FontVariantPosition;  // font-variant-position: sub or super; null = normal
+        public FontEmoji FontVariantEmoji;   // font-variant-emoji
         public FontAlternates? FontVariantAlternates; // font-variant-alternates; null = normal
         public FontPalette? FontPalette;     // font-palette: the colour font palette; null = normal
         public string? FontVariantNumeric;   // font-variant-numeric keywords; null = normal
@@ -551,6 +555,7 @@ internal sealed partial class ComputedStyle
     public bool TableLayoutFixed { get => _rare.TableLayoutFixed; set { if (_rare.TableLayoutFixed != value) Rare.TableLayoutFixed = value; } }
     public string? TextOverflow { get => _rare.TextOverflow; set { if (_rare.TextOverflow != value) Rare.TextOverflow = value; } }
     public TextBoxTrim TextBoxTrim { get => _rare.TextBoxTrim; set { if (_rare.TextBoxTrim != value) Rare.TextBoxTrim = value; } }
+    public BaselineSource BaselineSource { get => _rare.BaselineSource; set { if (_rare.BaselineSource != value) Rare.BaselineSource = value; } }
     public MarginTrim MarginTrim { get => _rare.MarginTrim; set { if (_rare.MarginTrim != value) Rare.MarginTrim = value; } }
     public float AspectRatio { get => _rare.AspectRatio; set => Rare.AspectRatio = value; }
     public bool AspectRatioAuto { get => _rare.AspectRatioAuto; set { if (_rare.AspectRatioAuto != value) Rare.AspectRatioAuto = value; } }
@@ -626,6 +631,7 @@ internal sealed partial class ComputedStyle
         /// <summary>What replaces the cut end of an overflowing line (text-overflow): "…" for ellipsis, a custom string, or null for clip.</summary>
         public string? TextOverflow;
         public TextBoxTrim TextBoxTrim; // text-box-trim
+        public BaselineSource BaselineSource; // baseline-source
         public MarginTrim MarginTrim;   // margin-trim
         public float AspectRatio;    // width / height; 0 = auto
         public bool AspectRatioAuto; // "auto <ratio>": a replaced element keeps its natural ratio

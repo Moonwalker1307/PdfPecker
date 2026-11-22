@@ -536,6 +536,9 @@ internal sealed class EmbeddedFont : TextFont
 /// The fonts of a font-family list, tried in order for every character as browsers do: a character the first font
 /// lacks is drawn with the next font that has it. The first font gives the line metrics.
 /// </summary>
+/// <summary>font-variant-emoji: whether characters that have both forms are drawn as emoji or as text.</summary>
+internal enum FontEmoji : byte { Normal, Text, Emoji, Unicode }
+
 internal sealed class FontChain : TextFont
 {
     private readonly TextFont _primary;
@@ -550,17 +553,22 @@ internal sealed class FontChain : TextFont
     private readonly Dictionary<int, TextFont> _picked = new();
     // The document's feature variants, which every chain of the document takes its fonts' variants from.
     private readonly DocumentFontVariants? _document;
+    // font-variant-emoji, and the fonts picked for characters drawn as emoji or as text against what the font order gives.
+    private readonly FontEmoji _emoji;
+    private Dictionary<int, TextFont>? _pickedEmoji, _pickedText;
 
     public FontChain(TextFont primary, Func<int, Func<TextFont, bool>?, TextFont?> fallback) : this(primary, null, fallback)
     {
     }
 
-    public FontChain(TextFont primary, TextFont? metrics, Func<int, Func<TextFont, bool>?, TextFont?> fallback, DocumentFontVariants? document = null)
+    public FontChain(TextFont primary, TextFont? metrics, Func<int, Func<TextFont, bool>?, TextFont?> fallback, DocumentFontVariants? document = null,
+        FontEmoji emoji = FontEmoji.Normal)
     {
         _primary = primary;
         _metrics = metrics;
         _fallback = fallback;
         _document = document;
+        _emoji = emoji;
         Ascent = primary.Ascent;
         Descent = primary.Descent;
         LineGap = primary.LineGap;
@@ -597,7 +605,7 @@ internal sealed class FontChain : TextFont
         if (!stays && next < end && StaysInRun(cp, CodePointAt(s, next, end)))
         {
             int clusterEnd = i + StringInfo.GetNextTextElementLength(s.AsSpan(i, Math.Min(end - i, MaxClusterLength)));
-            var first = Pick(cp);
+            var first = PickPresented(cp, s, next, end);
             if (clusterEnd > next && PickCluster(first, cp, s, i, clusterEnd) is { } font)
             {
                 previous = CodePointBefore(s, clusterEnd);
@@ -609,8 +617,55 @@ internal sealed class FontChain : TextFont
         // A default ignorable character draws nothing in any font, so it stays in the run it is in rather than start one
         // of a font that has it: that would split the text around it and embed a font for nothing.
         if (IsHidden(cp)) return current ?? _primary;
-        return stays && Covers(current!, cp) ? current! : Pick(cp);
+        return stays && Covers(current!, cp) ? current! : PickPresented(cp, s, next, end);
     }
+
+    /// <summary>
+    /// The font for a code point that may be drawn as an emoji or as text: a colour font for emoji and another for text,
+    /// as Chrome picks them. A variation selector after the character (U+FE0F emoji, U+FE0E text) decides; otherwise
+    /// font-variant-emoji does, and with normal the font order decides alone.
+    /// </summary>
+    private TextFont PickPresented(int cp, string s, int next, int end)
+    {
+        if (cp < 0x23 || !Text.UnicodeTables.IsEmoji(cp)) return Pick(cp);
+        int selector = next < end ? s[next] : 0;
+        bool? color = selector switch
+        {
+            0xFE0F => true,
+            0xFE0E => false,
+            _ => _emoji switch
+            {
+                FontEmoji.Emoji => true,
+                FontEmoji.Text => false,
+                FontEmoji.Unicode => Text.UnicodeTables.HasEmojiPresentation(cp),
+                _ => null,
+            },
+        };
+        if (color is not bool wantColor) return Pick(cp);
+        if (Covers(_primary, cp) && IsColor(_primary) == wantColor) return _primary;
+        ref var cache = ref wantColor ? ref _pickedEmoji : ref _pickedText;
+        cache ??= new();
+        if (cache.TryGetValue(cp, out var f)) return f;
+        // When no font has the form asked for, the character is drawn as the font order gives it.
+        f = _fallback(cp, wantColor ? IsColor : IsNotColor) ?? Pick(cp);
+        cache[cp] = f;
+        return f;
+    }
+
+    private static bool IsColor(TextFont f) => f is EmbeddedFont e && e.Program.Table("COLR") != null;
+
+    private static bool IsNotColor(TextFont f) => !IsColor(f);
+
+    private FontChain? _withEmojiText, _withEmojiEmoji, _withEmojiUnicode;
+
+    /// <summary>This chain with font-variant-emoji set.</summary>
+    public FontChain WithEmoji(FontEmoji emoji) => emoji switch
+    {
+        FontEmoji.Text => _withEmojiText ??= new FontChain(_primary, _metrics, _fallback, _document, emoji),
+        FontEmoji.Emoji => _withEmojiEmoji ??= new FontChain(_primary, _metrics, _fallback, _document, emoji),
+        FontEmoji.Unicode => _withEmojiUnicode ??= new FontChain(_primary, _metrics, _fallback, _document, emoji),
+        _ => this,
+    };
 
     // The most characters looked at for a cluster that one font should draw. Real clusters are a few characters long; a
     // run of thousands of combining marks is one cluster, and when no font has all of it, every character of it would
@@ -676,15 +731,15 @@ internal sealed class FontChain : TextFont
     private FontChain? _withoutLigatures, _withoutKerning, _withoutContextual;
 
     public override TextFont WithoutLigatures()
-        => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutLigatures(), _document);
+        => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutLigatures(), _document, _emoji);
 
     public override bool ShapesInContext => _primary.ShapesInContext;
 
     public override TextFont WithoutContextual()
-        => _withoutContextual ??= new FontChain(_primary.WithoutContextual(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutContextual(), _document);
+        => _withoutContextual ??= new FontChain(_primary.WithoutContextual(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutContextual(), _document, _emoji);
 
     public override TextFont WithoutKerning()
-        => _withoutKerning ??= new FontChain(_primary.WithoutKerning(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutKerning(), _document);
+        => _withoutKerning ??= new FontChain(_primary.WithoutKerning(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutKerning(), _document, _emoji);
 
     // The first available font is the one font-size-adjust holds constant.
     public override float Metric(FontMetric metric) => (_metrics ?? _primary).Metric(metric);
@@ -702,7 +757,7 @@ internal sealed class FontChain : TextFont
         // of it, as DocumentFontVariants caps the fonts' own variants. Past the cap the chain is used as it is, the same
         // way in every conversion of the document.
         if (variants.Count >= MaxVariants) return this;
-        return variants.GetOrAdd(features, k => new FontChain(Variant(_primary, k), _metrics, (cp, accept) => _fallback(cp, accept) is { } f ? Variant(f, k) : null, _document));
+        return variants.GetOrAdd(features, k => new FontChain(Variant(_primary, k), _metrics, (cp, accept) => _fallback(cp, accept) is { } f ? Variant(f, k) : null, _document, _emoji));
     }
 
     private TextFont Variant(TextFont font, string features) => _document?.WithFeatures(font, features) ?? font.WithFeatures(features);

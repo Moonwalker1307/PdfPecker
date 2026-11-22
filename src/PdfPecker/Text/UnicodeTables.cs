@@ -78,6 +78,12 @@ internal static partial class UnicodeTables
         return (LineBreakClass)(v & 0x7F);
     }
 
+    /// <summary>Whether a character can be drawn as an emoji (the Emoji property of UTS #51).</summary>
+    public static bool IsEmoji(int cp) => cp >= 0x23 && (EmojiValues[FindRange(EmojiStarts, cp)] & 1) != 0;
+
+    /// <summary>Whether a character is drawn as an emoji when nothing asks otherwise (Emoji_Presentation, UTS #51).</summary>
+    public static bool HasEmojiPresentation(int cp) => cp >= 0x231A && (EmojiValues[FindRange(EmojiStarts, cp)] & 2) != 0;
+
     /// <summary>The Vertical_Orientation of a character (UAX #50).</summary>
     public static VerticalOrientation Vertical(int cp)
         => cp < 0xA7 ? VerticalOrientation.R : (VerticalOrientation)VerticalOrientationValues[FindRange(VerticalOrientationStarts, cp)];

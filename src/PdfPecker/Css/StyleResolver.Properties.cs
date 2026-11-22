@@ -183,6 +183,9 @@ internal sealed partial class StyleResolver
                 if (d.Lower == "auto") s.AccentColor = 0;
                 else if (CssColor.TryParse(d.Value, s.Color, out var accent)) s.AccentColor = accent;
                 break;
+            case "baseline-source":
+                if (d.Lower is "auto" or "first" or "last") s.BaselineSource = d.Lower switch { "first" => BaselineSource.First, "last" => BaselineSource.Last, _ => BaselineSource.Auto };
+                break;
             case "margin-trim": if (ParseMarginTrim(d.Lower) is { } marginTrim) s.MarginTrim = marginTrim; break;
             case "field-sizing":
                 if (d.Lower is "content" or "fixed") s.FieldSizingContent = d.Lower == "content";
@@ -213,6 +216,7 @@ internal sealed partial class StyleResolver
             case "font-size-adjust": ApplyFontSizeAdjust(s, parent, in d); break;
             case "font-variant-east-asian": ApplyFontVariantEastAsian(s, parent, in d); break;
             case "font-variant-position": ApplyFontVariantPosition(s, parent, in d); break;
+            case "font-variant-emoji": ApplyFontVariantEmoji(s, parent, in d); break;
             case "font-variant-alternates": ApplyFontVariantAlternates(s, parent, in d); break;
             case "font-palette": ApplyFontPalette(s, parent, in d); break;
             case "line-height": ApplyLineHeight(s, parent, in d); break;

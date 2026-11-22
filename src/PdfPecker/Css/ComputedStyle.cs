@@ -15,7 +15,8 @@ internal enum FlexWrap : byte { NoWrap, Wrap, WrapReverse }
 internal enum ColumnWrap : byte { Auto, NoWrap, Wrap }
 
 /// <summary>Values of justify-content, align-items, align-self, align-content, justify-items and justify-self.</summary>
-internal enum BoxAlign : byte { Normal, Start, End, Center, Stretch, Baseline, SpaceBetween, SpaceAround, SpaceEvenly, Auto }
+// Baseline is first baseline alignment; LastBaseline aligns an item's last line (align-items: last baseline).
+internal enum BoxAlign : byte { Normal, Start, End, Center, Stretch, Baseline, SpaceBetween, SpaceAround, SpaceEvenly, Auto, LastBaseline }
 
 internal enum TrackSizeKind : byte { Fixed, Percent, Fr, Auto, MinContent, MaxContent }
 
@@ -182,6 +183,8 @@ internal enum EmphasisShape : byte { None, Auto, Dot, Circle, DoubleCircle, Tria
 // text-box-trim: whether a block's first line loses the space above its over edge and its last line the space below
 // its under edge.
 [Flags] internal enum TextBoxTrim : byte { None = 0, Start = 1, End = 2, Both = Start | End }
+// baseline-source: which line an inline-block sits on; auto is its last, as first is for the other inline-level boxes.
+internal enum BaselineSource : byte { Auto, First, Last }
 // margin-trim: the edges of a container at which its children's margins are trimmed. Chrome trims only the block
 // edges of block containers, so the inline values are read and have no effect, as there.
 [Flags] internal enum MarginTrim : byte { None = 0, BlockStart = 1, BlockEnd = 2, InlineStart = 4, InlineEnd = 8 }
@@ -419,6 +422,7 @@ internal sealed partial class ComputedStyle
         get
         {
             var f = BaseFont;
+            if (FontVariantEmoji != FontEmoji.Normal && f is FontChain chain) f = chain.WithEmoji(FontVariantEmoji);
             // font-variant-alternates goes in as feature settings before font-feature-settings, which win over it.
             var settings = FontVariantAlternates is { } alternates ? alternates.Settings(FontFamilyName, FontFeatureSettings) : FontFeatureSettings;
             if ((FontVariantNumeric != null || settings != null || FontVariantEastAsian != null || FontVariantPosition != null || SmallCaps != 0)
