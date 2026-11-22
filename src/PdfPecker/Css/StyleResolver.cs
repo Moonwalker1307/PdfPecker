@@ -476,6 +476,7 @@ internal sealed partial class StyleResolver
         WrapTableParts(parent);
         if (parent.Name == "ruby") WrapRubyPairs(parent);
         if (parent.Style is { IsMultiColumn: true }) LiftSpanners(parent);
+        if (parent.Style is { MarginTrim: not MarginTrim.None }) TrimMargins(parent);
         if (scope != null)
             foreach (var name in scope)
             {

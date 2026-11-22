@@ -183,6 +183,7 @@ internal sealed partial class StyleResolver
                 if (d.Lower == "auto") s.AccentColor = 0;
                 else if (CssColor.TryParse(d.Value, s.Color, out var accent)) s.AccentColor = accent;
                 break;
+            case "margin-trim": if (ParseMarginTrim(d.Lower) is { } marginTrim) s.MarginTrim = marginTrim; break;
             case "field-sizing":
                 if (d.Lower is "content" or "fixed") s.FieldSizingContent = d.Lower == "content";
                 break;
