@@ -182,6 +182,9 @@ internal enum EmphasisShape : byte { None, Auto, Dot, Circle, DoubleCircle, Tria
 // text-box-trim: whether a block's first line loses the space above its over edge and its last line the space below
 // its under edge.
 [Flags] internal enum TextBoxTrim : byte { None = 0, Start = 1, End = 2, Both = Start | End }
+// margin-trim: the edges of a container at which its children's margins are trimmed. Chrome trims only the block
+// edges of block containers, so the inline values are read and have no effect, as there.
+[Flags] internal enum MarginTrim : byte { None = 0, BlockStart = 1, BlockEnd = 2, InlineStart = 4, InlineEnd = 8 }
 // text-box-edge: the edges lines are trimmed to, over and under the text. auto trims as text does, as in Chrome.
 internal enum TextEdgeOver : byte { Text, Cap, Ex }
 internal enum TextEdgeUnder : byte { Text, Alphabetic }
