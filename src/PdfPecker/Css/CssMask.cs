@@ -25,6 +25,11 @@ internal static class CssMask
         "-webkit-mask-clip" => "mask-clip",
         "-webkit-mask-composite" => "mask-composite",
         "-webkit-mask-mode" => "mask-mode",
+        "-webkit-mask-box-image-source" => "mask-border-source",
+        "-webkit-mask-box-image-slice" => "mask-border-slice",
+        "-webkit-mask-box-image-width" => "mask-border-width",
+        "-webkit-mask-box-image-outset" => "mask-border-outset",
+        "-webkit-mask-box-image-repeat" => "mask-border-repeat",
         "-webkit-backdrop-filter" => "backdrop-filter",
         _ => null,
     };

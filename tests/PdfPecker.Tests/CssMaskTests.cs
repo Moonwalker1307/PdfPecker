@@ -284,4 +284,48 @@ public class CssMaskTests
                              + "<div style='position:absolute;left:100px;top:0;width:100px;height:100px;backdrop-filter:invert(1)'></div></div>"));
         Near(255, 0, 0, At(img, 150, 50), 16);
     }
+
+    // ---- mask-border ----
+
+    // A 30 by 30 SVG image with an opaque frame 10 wide around an empty middle: a mask border's nine slices at 10.
+    private const string Frame = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30'%3E%3Cpath fill-rule='evenodd' d='M0 0H30V30H0ZM10 10V20H20V10Z'/%3E%3C/svg%3E\")";
+
+    [Theory]
+    [InlineData("-webkit-mask-box-image")]
+    [InlineData("mask-border")]
+    public void Mask_border_shows_the_box_under_its_frame_only(string property)
+    {
+        var img = Render(Pdf($"<div style='{Box};{property}:{Frame} 10 / 20px'></div>"));
+        Near(255, 0, 0, At(img, 10, 50));
+        Near(255, 0, 0, At(img, 100, 8));
+        Near(255, 0, 0, At(img, 190, 92));
+        White(At(img, 100, 50));
+    }
+
+    [Fact]
+    public void Mask_border_longhands_and_supports()
+    {
+        Assert.True(CssSupports.Evaluate("(mask-border: none)"));
+        Assert.True(CssSupports.Evaluate("(-webkit-mask-box-image: none)"));
+        var img = Render(Pdf($"<div style='{Box};-webkit-mask-box-image-source:{Frame};-webkit-mask-box-image-slice:10;-webkit-mask-box-image-width:40px'></div>"));
+        Near(255, 0, 0, At(img, 30, 50));
+        White(At(img, 100, 50));
+    }
+
+    [Fact]
+    public void Mask_border_adds_to_the_mask_image_as_in_Chrome()
+    {
+        // The left half of the box shows through the mask image, and the frame all round through the mask border.
+        var img = Render(Pdf($"<div style='{Box};mask-image:{LeftHalf};mask-size:100% 100%;-webkit-mask-box-image:{Frame} 10 / 20px'></div>"));
+        Near(255, 0, 0, At(img, 60, 50));
+        Near(255, 0, 0, At(img, 190, 50));
+        White(At(img, 150, 50));
+    }
+
+    [Fact]
+    public void A_mask_border_whose_image_does_not_load_masks_nothing()
+    {
+        var img = Render(Pdf($"<div style='{Box};-webkit-mask-box-image:url(missing.png) 10 / 20px'></div>"));
+        Near(255, 0, 0, At(img, 100, 50));
+    }
 }

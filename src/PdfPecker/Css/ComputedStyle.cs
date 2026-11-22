@@ -652,6 +652,7 @@ internal sealed partial class ComputedStyle
 
     /// <summary>Clipped, masked, blended, isolated or filtered: painted as a layer of its own, which is a stacking context.</summary>
     public bool HasEffects => ClipShape != null || SvgClipPath != null || BlendMode != null || Isolate || Filters != null || MaskImages != null
+                              || MaskBorder is { Source: not null }
                               || BackdropFilters != null;
 
     /// <summary>

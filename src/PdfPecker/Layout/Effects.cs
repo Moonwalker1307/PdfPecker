@@ -54,7 +54,7 @@ internal sealed partial class LayoutEngine
             layer.ClipEvenOdd = false;
         }
         if (s.Filters is { } filters) ApplyFilter(layer, filters, s.Color);
-        if (s.MaskImages != null)
+        if (s.MaskImages != null || s.MaskBorder is { Source: not null })
         {
             // The mask element of a url(#id) layer; an inline SVG draws its own mask, as it draws its own clip path.
             Func<string, (SvgImage, bool)?>? svgMask = e.Name == "svg" ? null
