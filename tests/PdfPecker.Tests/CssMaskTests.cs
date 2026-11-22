@@ -288,7 +288,8 @@ public class CssMaskTests
     // ---- mask-border ----
 
     // A 30 by 30 SVG image with an opaque frame 10 wide around an empty middle: a mask border's nine slices at 10.
-    private const string Frame = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30'%3E%3Cpath fill-rule='evenodd' d='M0 0H30V30H0ZM10 10V20H20V10Z'/%3E%3C/svg%3E\")";
+    // Its quotes are escaped, since the tests put it in single-quoted style attributes.
+    private const string Frame = "url(\"data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2730%27 height=%2730%27%3E%3Cpath fill-rule=%27evenodd%27 d=%27M0 0H30V30H0ZM10 10V20H20V10Z%27/%3E%3C/svg%3E\")";
 
     [Theory]
     [InlineData("-webkit-mask-box-image")]
@@ -316,7 +317,7 @@ public class CssMaskTests
     public void Mask_border_adds_to_the_mask_image_as_in_Chrome()
     {
         // The left half of the box shows through the mask image, and the frame all round through the mask border.
-        var img = Render(Pdf($"<div style='{Box};mask-image:{LeftHalf};mask-size:100% 100%;-webkit-mask-box-image:{Frame} 10 / 20px'></div>"));
+        var img = Render(Pdf($"<div style='{Box};mask-image:{LeftHalf.Replace("'", "%27", StringComparison.Ordinal)};mask-size:100% 100%;-webkit-mask-box-image:{Frame} 10 / 20px'></div>"));
         Near(255, 0, 0, At(img, 60, 50));
         Near(255, 0, 0, At(img, 190, 50));
         White(At(img, 150, 50));
