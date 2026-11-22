@@ -239,7 +239,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   `xywh()` and `shape()`, whose lines, curves and arcs take percentages of the box, also in `shape-outside`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for heights and
   their limits), percentage heights inside flex items resolved as in Chrome (stretched items, and items flexed from a
   length basis in a column whose container has only a `min-height`, as card and label layouts use), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders, backgrounds,
-  shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
+  shadows, outlines and clips), `margin-trim` (the block margins at a block container's edges, as in Chrome, which
+  leaves flex, grid and the inline axis alone), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
   computes it, for templates that shrink a page to fit), multi-column layout (with `column-span: all` also inside
   sections and other blocks of the columns, which are split around it as in Chrome, and `column-height` with
   `column-wrap` for rows of columns down the page, each row kept whole on one page as Chrome prints it), gap decorations (`column-rule` and

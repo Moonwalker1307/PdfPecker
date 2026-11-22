@@ -25,7 +25,7 @@ internal static class CssSupports
         "zoom", "position", "anchor-name", "position-anchor", "position-area", "position-try-fallbacks", "position-try", "inset", "top", "right", "bottom", "left", "z-index", "overflow", "overflow-x", "overflow-y", "overflow-clip-margin", "transform",
         "transform-origin", "transform-box", "perspective", "perspective-origin", "transform-style", "backface-visibility", "translate", "rotate", "scale", "content", "counter-reset", "counter-set", "counter-increment",
         "break-before", "break-after", "break-inside", "page-break-before", "page-break-after", "page-break-inside",
-        "orphans", "widows", "margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "padding", "padding-top",
+        "orphans", "widows", "margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "margin-trim", "padding", "padding-top",
         "padding-right", "padding-bottom", "padding-left", "width", "height", "min-width", "min-height", "max-width",
         "max-height", "opacity", "outline", "outline-style", "outline-width", "outline-color", "outline-offset", "text-shadow", "-webkit-text-stroke", "-webkit-text-fill-color", "-webkit-text-stroke-width", "-webkit-text-stroke-color", "paint-order",
         "text-overflow", "object-fit", "object-position", "object-view-box", "aspect-ratio", "flex", "flex-flow", "flex-direction", "flex-wrap",
@@ -224,6 +224,8 @@ internal static class CssSupports
                 return StyleResolver.ParseTextAutospace(lower) != null;
             case "text-box-trim":
                 return CssParser.ParseTextBoxTrim(lower) != null;
+            case "margin-trim":
+                return StyleResolver.ParseMarginTrim(lower) != null;
             case "text-box-edge":
                 return CssParser.ParseTextBoxEdge(lower) != null;
             case "hyphenate-limit-chars":
